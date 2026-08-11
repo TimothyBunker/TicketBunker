@@ -526,6 +526,39 @@ inferences/, reports/, ledger.jsonl, tb.md) defined in one place
 knowing them all; tooling and humans can both address any piece of instance
 state by path without asking.
 
+### 3.14 Naming conventions and branch creation
+
+**Tickets and branches follow an allowed pattern.**
+
+- **Ticket IDs** match a configured pattern — by default `PROJECT-NUMBER`,
+  e.g. `TB-1267` is TicketBunker's ticket 1267. Enforced at ticket intake:
+  an ID that doesn't match the pattern is rejected.
+- **Branches** follow `username/TICKET-name` — e.g. user Tim working
+  TB-1267 gets `Tim/TB-1267-fourier-alg-impl`. The ticket ID embedded in
+  the branch name is what makes branch resolution (§3.2) deterministic
+  instead of fuzzy.
+
+**The workflow:** global config for the user, once → select a ticket →
+input just the short branch name → the system **fills in the rest and
+creates the branch in a relatively normal git fashion** (a ledgered
+`git branch`, nothing exotic). Nobody hand-types the convention, so nobody
+gets it wrong — the pattern is enforced by construction at the same place
+the branch is born.
+
+**User identity:** the one hard requirement is that **each user has an
+identifier that means something to the team**. To avoid configuration time
+we default it from git's own global config (`user.name` — required by git
+anyway, so it always exists), sanitized for branch-name use; at init the
+user is offered the chance to change it, and a TicketBunker-level config
+overrides git's when set.
+
+**This is not a new constraint — it's configuration of an existing one.**
+Large projects already tag tickets and branches like this. Making the
+pattern *configurable* (per team/admin) is the agile-program-agnostic move:
+whatever convention a Jira/GitLab/tracker shop already uses, admins encode
+it once and TicketBunker speaks it, rather than TicketBunker imposing its
+own.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -652,8 +685,10 @@ extensions and the CLI are clients of it, never owners of state:
 
 ## 10. Open questions
 
-1. How ticket keys are matched in branch names (exact prefix? `feature/PROJ-123-*`?
-   configurable regex per org?).
+1. ~~How ticket keys are matched in branch names~~ — resolved: tickets and
+   branches follow configurable allowed patterns (`PROJECT-NUMBER`,
+   `username/TICKET-name`), and branches are created *by* the system, so the
+   convention holds by construction (§3.14).
 2. Multi-directory tickets: how the bunker composes observations across dirs —
    one report with per-dir sections, or per-dir observation sets merged at the
    inference layer?

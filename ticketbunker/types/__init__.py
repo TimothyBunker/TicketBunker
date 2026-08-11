@@ -15,9 +15,15 @@ GROUNDINGS = ("grounded", "adjacent", "ungrounded")
 
 
 def _validate_ticket(payload: dict) -> list[str]:
+    from .. import config
+
     errors = []
     if not payload.get("id"):
         errors.append("ticket requires a unique 'id'")
+    elif not config.validate_ticket_id(payload["id"]):
+        errors.append(
+            f"ticket id {payload['id']!r} does not match the allowed pattern {config.ticket_pattern()!r}"
+        )
     if not payload.get("key"):
         errors.append("ticket requires a 'key' (matched against branch names)")
     if payload.get("people_of_interest") is not None and not isinstance(payload["people_of_interest"], list):

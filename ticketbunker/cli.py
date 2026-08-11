@@ -25,7 +25,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import handlers, layout
+from . import config, handlers, layout
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold
 from .handlers import IntakeRejected
@@ -222,6 +222,43 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config(args: argparse.Namespace) -> int:
+    if args.user is not None:
+        cfg = config.load()
+        cfg["user"] = config.sanitize_user(args.user)
+        config.save(cfg)
+        print(f"user set: {cfg['user']} ({config.GLOBAL_CONFIG})")
+        return 0
+    user, source = config.get_user()
+    print(f"user: {user or 'NOT SET'} (source: {source})")
+    if source == "git":
+        print("  taken from git global user.name — change with: tb config --user NAME")
+    print(f"ticket pattern: {config.ticket_pattern()}")
+    print(f"branch template: {config.branch_template()}")
+    return 0
+
+
+def cmd_branch(args: argparse.Namespace) -> int:
+    bunker = Path(args.bunker)
+    ticket = _ticket(bunker)
+    if not ticket.get("id"):
+        print("error: bunker has no ticket.json", file=sys.stderr)
+        return 1
+    user = args.user or config.get_user()[0]
+    if not user:
+        print("error: no user identifier — set one with 'tb config --user NAME'", file=sys.stderr)
+        return 1
+    full = config.build_branch(user, ticket["id"], args.name)
+    ledger = _ledger(bunker)
+    from .adapters.gitrun import git
+
+    base = args.base or ticket.get("repo_baseline") or "HEAD"
+    git(Path(args.repo).resolve(), ["branch", full, base], ledger, "branch_create")
+    handlers.intake_session_config(bunker, {"branch": full, "user": user}, ledger)
+    print(f"created branch {full} (from {base}); session config initialized")
+    return 0
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     from .adapters import syncrepo
 
@@ -341,6 +378,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("config", help="show or set global TicketBunker config (user identity, patterns)")
+    s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")
+    s.set_defaults(fn=cmd_config)
+
+    s = sub.add_parser("branch", help="create a convention-named branch for a ticket: user/TICKET-name")
+    s.add_argument("bunker")
+    s.add_argument("--name", required=True, help="short branch name, e.g. fourier-alg-impl")
+    s.add_argument("--repo", required=True, help="the source repo to create the branch in")
+    s.add_argument("--user", default=None, help="override the configured user identifier")
+    s.add_argument("--base", default=None, help="ref to branch from (default: HEAD)")
+    s.set_defaults(fn=cmd_branch)
 
     s = sub.add_parser("sync", help="sync the bunker database through git (.tbignore respected)")
     s.add_argument("root", help="the bunker database directory (contains *_bunker/)")

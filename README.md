@@ -63,16 +63,18 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ## Usage
 
 ```sh
-tb init TB-1 --key PROJ-123 --assignee ann --reporter bob     # create a bunker
-tb bootstrap TB-1_bunker --repo /path/to/repo --baseline main # run the observation pipeline
-tb session TB-1_bunker --branch feat/PROJ-123 --user ann      # per-session config (user data injection)
-tb compose TB-1_bunker --branch feat/PROJ-123                 # recompose tb.md for that session
-tb scaffold TB-1_bunker --branch feat/PROJ-123 --out form.md  # pre-filled report form
-tb infer TB-1_bunker --tag real --claim "..." --anchor src/x.py:10  # save a tagged inference
+tb config --user Tim                                          # once: team identifier (defaults from git)
+tb init TB-1267 --key TB-1267 --assignee ann --reporter bob   # create a bunker (id must match pattern)
+tb branch TB-1267_bunker --name fourier-alg-impl --repo .     # creates Tim/TB-1267-fourier-alg-impl
+tb bootstrap TB-1267_bunker --repo /path/to/repo --baseline main # run the observation pipeline
+tb session TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --user Tim  # per-session config
+tb compose TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl                 # recompose tb.md for that session
+tb scaffold TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --out form.md  # pre-filled report form
+tb infer TB-1267_bunker --tag real --claim "..." --anchor src/x.py:10  # save a tagged inference
 tb lint form.md                                               # check a report component
-tb publish TB-1_bunker --branch feat/PROJ-123 --file form.md  # gate + accept + regen master
+tb publish TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --file form.md  # gate + accept + regen master
 tb survey /path/to/repo                                       # seed or lint the project tbroot.md
-tb status TB-1_bunker                                         # state, staleness, ledger health
+tb status TB-1267_bunker                                         # state, staleness, ledger health
 tb sync . --remote git@host:team/bunkers.git                  # share through git (.tbignore respected)
 ```
 
