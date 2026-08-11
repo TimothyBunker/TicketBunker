@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .ledger import Ledger, digest
+from ..ledger import Ledger, digest
 
 FRAGMENT_GLOB = "*.md"
 BEGIN = "<!-- tb:fragment {name} {digest} provenance={provenance} -->"

@@ -11,7 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .ledger import Ledger
+from ..ledger import Ledger
 
 
 class GitError(RuntimeError):

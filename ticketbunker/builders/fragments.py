@@ -47,6 +47,24 @@ As you work, save each inference to inferences/ tagged real or
 speculation. The user will not read that raw material — the report is
 composed from it — but it is kept for processing and audit.
 
+## Information types
+
+Everything you return into the system is typed, and every intake is
+validated — an unlabeled or malformed payload is rejected at the door and
+the rejection is ledgered. The types you can submit:
+
+- **inference** — via `tb infer`: [real] needs an anchor, [speculation]
+  needs a grounding rank.
+- **report component** — via `tb publish`: your filled form, one per
+  branch; the schema/stratum/length gate validates it.
+- **tbroot** — root surveyor sessions only, via the tbroot gate:
+  observations only, anchored, no conjecture.
+
+You cannot submit ticket data, session configs, or observations — those
+are ours and the pipeline's. If information doesn't fit any type you can
+submit, it does not enter the system; put it in your report as tagged
+prose or leave it out.
+
 ## The master that came before you
 
 Your ticket may already have report components from other branches, and a

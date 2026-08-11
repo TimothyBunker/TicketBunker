@@ -77,7 +77,24 @@ tb status TB-1_bunker                                         # state, staleness
 
 Every git command any of these run is written to the ledger automatically —
 by the executing wrapper, never by the agent — so an unlogged command is
-impossible by construction.
+impossible by construction. Likewise, all information enters through typed,
+validated intake handlers: an unlabeled or malformed payload is rejected at
+the door, and the rejection is ledgered.
+
+## Architecture
+
+```
+ticketbunker/
+├── layout.py      # the bunker layout, defined once — navigable like .git
+├── types/         # information type registry + validation rules
+├── handlers/      # typed intake: validate → write → ledger (the only write paths)
+├── builders/      # artifact construction: tb.md, report form, master, fragments
+├── processors/    # derivation: bootstrap stages, lint gates
+├── adapters/      # external boundaries: git (harness + backend next)
+├── contracts.py   # stage contracts and the marker-bracketing runner
+├── ledger.py      # append-only execution ledger
+└── cli.py         # thin orchestration over the above
+```
 
 ## Status
 

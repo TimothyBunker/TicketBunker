@@ -1,13 +1,19 @@
 """tb — the TicketBunker CLI.
 
-Commands map to stage-level operations; every git command they cause is
-ledgered automatically (§3.8). Usage:
+Thin orchestration only: information enters through handlers/ (typed,
+validated, ledgered), artifacts are produced by builders/, facts by
+processors/, external systems live behind adapters/. The bunker layout is
+defined once in layout.py.
 
-  tb init <ticket_id> --key KEY [--title T] [--priority P] [--description D] [--root DIR]
+  tb init <ticket_id> --key KEY [--title T] [--priority P] [--description D]
+          [--assignee A] [--reporter R] [--poi NAME ...] [--root DIR]
   tb bootstrap <bunker> --repo PATH [--baseline main]
-  tb compose <bunker>
-  tb publish <bunker> --branch NAME --file REPORT.md   (lint gate + master regen)
-  tb lint FILE
+  tb session <bunker> --branch NAME [--user U] [--baseline B] [--note N] [--data K=V]
+  tb compose <bunker> [--branch NAME]
+  tb scaffold <bunker> --branch NAME [--out FILE]
+  tb infer <bunker> --tag real|speculation --claim TEXT [--grounding G] [--anchor P]
+  tb lint FILE | tb lint-root FILE | tb survey REPO
+  tb publish <bunker> --branch NAME --file REPORT.md
   tb regen-master <bunker>
   tb status <bunker>
 """
@@ -19,38 +25,33 @@ import json
 import sys
 from pathlib import Path
 
-from . import compose as compose_mod
-from . import fragments, master, reportlint, scaffold, stages, store
+from . import handlers, layout
+from .builders import compose as compose_mod
+from .builders import fragments, master, scaffold
+from .handlers import IntakeRejected
 from .ledger import Ledger
+from .processors import reportlint, stages
 
 
-def _bunker_paths(bunker: Path) -> dict[str, Path]:
-    return {
-        "context": bunker / "context",
-        "sessions": bunker / "sessions",
-        "observations": bunker / "observations",
-        "inferences": bunker / "inferences",
-        "ledger": bunker / "ledger.jsonl",
-        "ticket": bunker / "ticket.json",
-        "tb_md": bunker / "tb.md",
-        "reports": bunker / "reports" / "branches",
-    }
+def _ledger(bunker: Path) -> Ledger:
+    return Ledger(layout.paths(bunker)["ledger"])
 
 
-def _session_cfg_path(bunker: Path, branch: str) -> Path:
-    return _bunker_paths(bunker)["sessions"] / f"{stages.branch_slug(branch)}.json"
+def _ticket(bunker: Path) -> dict:
+    path = layout.paths(bunker)["ticket"]
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
-    p = _bunker_paths(bunker)
-    ticket = json.loads(p["ticket"].read_text(encoding="utf-8")) if p["ticket"].exists() else {}
+    p = layout.paths(bunker)
+    ticket = _ticket(bunker)
     if ticket.get("repo"):
         fragments.mirror_tbroot(Path(ticket["repo"]), p["context"])
     obs = fragments.load_observations(p["observations"])
     fragments.write_ticket(p["context"], ticket)
     session_cfg = None
     if branch is not None:
-        cfg_path = _session_cfg_path(bunker, branch)
+        cfg_path = layout.session_config(bunker, branch)
         if cfg_path.exists():
             session_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     fragments.write_session(p["context"], session_cfg)
@@ -59,16 +60,14 @@ def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    root = Path(args.root)
-    bunker = root / f"{args.ticket_id}_bunker"
+    bunker = Path(args.root) / f"{args.ticket_id}_bunker"
     if bunker.exists():
         print(f"error: {bunker} already exists — ticket IDs must be unique", file=sys.stderr)
         return 1
-    p = _bunker_paths(bunker)
-    p["reports"].mkdir(parents=True)
-    p["observations"].mkdir(parents=True)
-    p["inferences"].mkdir(parents=True)
-    ticket = {
+    layout.init_dirs(bunker)
+    ledger = _ledger(bunker)
+    ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=args.key)
+    payload = {
         "id": args.ticket_id,
         "key": args.key,
         "title": args.title,
@@ -78,10 +77,12 @@ def cmd_init(args: argparse.Namespace) -> int:
         "reporter": args.reporter,
         "people_of_interest": args.poi or [],
     }
-    p["ticket"].write_text(json.dumps(ticket, indent=2) + "\n", encoding="utf-8")
-    fragments.seed_static(p["context"])
-    ledger = Ledger(p["ledger"])
-    ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=args.key)
+    try:
+        handlers.intake_ticket(bunker, payload, ledger)
+    except IntakeRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    fragments.seed_static(layout.paths(bunker)["context"])
     _recompose(bunker, ledger)
     print(f"initialized {bunker}")
     return 0
@@ -89,37 +90,25 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    p = _bunker_paths(bunker)
-    ticket = json.loads(p["ticket"].read_text(encoding="utf-8"))
+    ticket = _ticket(bunker)
     ticket["repo"] = str(Path(args.repo).resolve())
-    p["ticket"].write_text(json.dumps(ticket, indent=2) + "\n", encoding="utf-8")
-    ledger = Ledger(p["ledger"])
+    ledger = _ledger(bunker)
+    handlers.intake_ticket(bunker, ticket, ledger)
     obs = stages.run_bootstrap(
         repo=Path(args.repo).resolve(),
         ticket_key=args.ticket_key or ticket["key"],
         baseline=args.baseline,
-        obs_dir=p["observations"],
+        obs_dir=layout.paths(bunker)["observations"],
         ledger=ledger,
     )
     _recompose(bunker, ledger)
-    n = len(obs.get("branches", []))
-    print(f"bootstrap complete: {n} branch(es) observed; tb.md recomposed")
-    return 0
-
-
-def cmd_compose(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
-    ledger = Ledger(_bunker_paths(bunker)["ledger"])
-    _recompose(bunker, ledger, branch=args.branch)
-    scope = f" for session {args.branch}" if args.branch else ""
-    print(f"composed {bunker / 'tb.md'}{scope}")
+    print(f"bootstrap complete: {len(obs.get('branches', []))} branch(es) observed; tb.md recomposed")
     return 0
 
 
 def cmd_session(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    p = _bunker_paths(bunker)
-    cfg_path = _session_cfg_path(bunker, args.branch)
+    cfg_path = layout.session_config(bunker, args.branch)
     cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {"branch": args.branch}
     changed = False
     if args.user is not None:
@@ -138,74 +127,56 @@ def cmd_session(args: argparse.Namespace) -> int:
             return 1
         cfg.setdefault("data", {})[k] = v
         changed = True
-    if changed:
-        cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-        Ledger(p["ledger"]).event("session_config_updated", branch=args.branch,
-                                  keys=sorted(k for k in cfg if k != "branch"))
-        print(f"session config written: {cfg_path}")
-    else:
+    if not changed:
         print(json.dumps(cfg, indent=2))
+        return 0
+    try:
+        dest = handlers.intake_session_config(bunker, cfg, _ledger(bunker))
+    except IntakeRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"session config written: {dest}")
     return 0
 
 
-def cmd_lint(args: argparse.Namespace) -> int:
-    text = Path(args.file).read_text(encoding="utf-8")
-    ok, findings = reportlint.gate(text)
-    for f in findings:
-        print(f)
-    print("PASS" if ok else "FAIL")
-    return 0 if ok else 1
-
-
-def cmd_publish(args: argparse.Namespace) -> int:
+def cmd_compose(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    p = _bunker_paths(bunker)
-    ledger = Ledger(p["ledger"])
-    text = Path(args.file).read_text(encoding="utf-8")
-    ok, findings = reportlint.gate(text)
-    for f in findings:
-        print(f)
-    slug = stages.branch_slug(args.branch)
-    if not ok:
-        ledger.event("publish_rejected", branch=args.branch, findings=[str(f) for f in findings])
-        print(f"FAIL — component for '{args.branch}' not published")
-        return 1
-    dest = p["reports"] / f"{slug}.md"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(text, encoding="utf-8")
-    ledger.event("publish_accepted", branch=args.branch, component=str(dest))
-    out = master.regenerate(bunker, ledger)
-    print(f"published {dest}; master regenerated at {out}")
+    _recompose(bunker, _ledger(bunker), branch=args.branch)
+    scope = f" for session {args.branch}" if args.branch else ""
+    print(f"composed {layout.paths(bunker)['tb_md']}{scope}")
     return 0
 
 
 def cmd_scaffold(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    p = _bunker_paths(bunker)
-    ticket = json.loads(p["ticket"].read_text(encoding="utf-8"))
-    obs = fragments.load_observations(p["observations"])
+    obs = fragments.load_observations(layout.paths(bunker)["observations"])
     if not obs:
         print("error: bootstrap has not run — nothing to pre-fill", file=sys.stderr)
         return 1
-    form = scaffold.build(ticket, obs, args.branch)
+    form = scaffold.build(_ticket(bunker), obs, args.branch)
     if args.out:
         Path(args.out).write_text(form, encoding="utf-8")
-        Ledger(p["ledger"]).event("form_scaffolded", branch=args.branch, out=args.out)
+        _ledger(bunker).event("form_scaffolded", branch=args.branch, out=args.out)
         print(f"pre-filled form written to {args.out}")
     else:
         print(form)
     return 0
 
 
-def cmd_survey(args: argparse.Namespace) -> int:
-    repo = Path(args.repo)
-    tbroot = repo / "tbroot.md"
-    if not tbroot.exists():
-        tbroot.write_text(fragments.TBROOT_TEMPLATE, encoding="utf-8")
-        print(f"seeded {tbroot} — the root surveyor fills it in (observations only)")
-        return 0
-    ok, findings = reportlint.gate_root(tbroot.read_text(encoding="utf-8"))
+def cmd_infer(args: argparse.Namespace) -> int:
+    bunker = Path(args.bunker)
+    payload = {"tag": args.tag, "claim": args.claim, "grounding": args.grounding, "anchors": args.anchor}
+    try:
+        entry = handlers.intake_inference(bunker, payload, _ledger(bunker))
+    except IntakeRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"saved [{entry['tag']}] inference ({len(handlers.load_inferences(bunker))} total)")
+    return 0
+
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    ok, findings = reportlint.gate(Path(args.file).read_text(encoding="utf-8"))
     for f in findings:
         print(f)
     print("PASS" if ok else "FAIL")
@@ -220,58 +191,70 @@ def cmd_lint_root(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def cmd_infer(args: argparse.Namespace) -> int:
+def cmd_survey(args: argparse.Namespace) -> int:
+    tbroot = Path(args.repo) / "tbroot.md"
+    if not tbroot.exists():
+        tbroot.write_text(fragments.TBROOT_TEMPLATE, encoding="utf-8")
+        print(f"seeded {tbroot} — the root surveyor fills it in (observations only)")
+        return 0
+    ok, findings = reportlint.gate_root(tbroot.read_text(encoding="utf-8"))
+    for f in findings:
+        print(f)
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    ledger = Ledger(_bunker_paths(bunker)["ledger"])
+    ledger = _ledger(bunker)
+    text = Path(args.file).read_text(encoding="utf-8")
+    # Show all findings (including warnings) regardless of outcome.
+    _, findings = reportlint.gate(text)
+    for f in findings:
+        print(f)
     try:
-        entry = store.save(
-            bunker,
-            tag=args.tag,
-            claim=args.claim,
-            ledger=ledger,
-            grounding=args.grounding,
-            anchors=args.anchor,
-        )
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        dest = handlers.intake_report_component(bunker, args.branch, text, ledger)
+    except IntakeRejected:
+        print(f"FAIL — component for '{args.branch}' not published")
         return 1
-    print(f"saved [{entry['tag']}] inference ({len(store.load(bunker))} total)")
+    out = master.regenerate(bunker, ledger)
+    print(f"published {dest}; master regenerated at {out}")
     return 0
 
 
 def cmd_regen_master(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    ledger = Ledger(_bunker_paths(bunker)["ledger"])
-    out = master.regenerate(bunker, ledger)
+    out = master.regenerate(bunker, _ledger(bunker))
     print(f"master regenerated at {out}")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
-    p = _bunker_paths(bunker)
-    ticket = json.loads(p["ticket"].read_text(encoding="utf-8")) if p["ticket"].exists() else {}
-    print(f"bunker: {bunker.name}")
+    p = layout.paths(bunker)
+    ticket = _ticket(bunker)
+    print(f"bunker: {p['root'].name}")
     print(f"ticket: {ticket.get('id')} (key: {ticket.get('key')}, priority: {ticket.get('priority')})")
     obs = fragments.load_observations(p["observations"])
     if obs:
         print(f"branches observed: {', '.join(obs['branches']) or 'none'}")
     else:
         print("bootstrap: not yet run")
-    children = sorted(p["reports"].glob("*.md")) if p["reports"].exists() else []
+    children = sorted(p["children"].glob("*.md")) if p["children"].exists() else []
     print(f"report components: {len(children)}")
+    print(f"inferences: {len(handlers.load_inferences(bunker))}")
     stale = master.stale_children(bunker)
     if stale:
         print(f"MASTER STALE — changed since regeneration: {', '.join(stale)}")
-    ledger = Ledger(p["ledger"])
-    entries = ledger.entries()
+    entries = Ledger(p["ledger"]).entries()
     open_stages = []
     for e in entries:
         if e.get("type") == "stage_start":
             open_stages.append(e["stage"])
         elif e.get("type") == "stage_end" and e["stage"] in open_stages:
             open_stages.remove(e["stage"])
-    print(f"ledger entries: {len(entries)}; unclosed stages: {', '.join(open_stages) or 'none'}")
+    rejected = sum(1 for e in entries if e.get("type") == "intake_rejected")
+    print(f"ledger entries: {len(entries)}; unclosed stages: {', '.join(open_stages) or 'none'}; intake rejections: {rejected}")
     return 0
 
 
@@ -287,8 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--description", default=None)
     s.add_argument("--assignee", default=None, help="ticket assignee (manual for now; tracker API later)")
     s.add_argument("--reporter", default=None, help="ticket reporter — the tag-up target when nothing concrete is found")
-    s.add_argument("--poi", action="append", default=None, metavar="NAME",
-                   help="person of interest; repeatable")
+    s.add_argument("--poi", action="append", default=None, metavar="NAME", help="person of interest; repeatable")
     s.add_argument("--root", default=".", help="directory to create the bunker in")
     s.set_defaults(fn=cmd_init)
 
@@ -298,12 +280,6 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--baseline", default="main")
     s.add_argument("--ticket-key", default=None, help="override the stored ticket key")
     s.set_defaults(fn=cmd_bootstrap)
-
-    s = sub.add_parser("compose", help="recompose tb.md from context fragments")
-    s.add_argument("bunker")
-    s.add_argument("--branch", default=None,
-                   help="compose for a specific session: include its per-session config")
-    s.set_defaults(fn=cmd_compose)
 
     s = sub.add_parser("session", help="set or show a per-session (per-branch) config")
     s.add_argument("bunker")
@@ -315,15 +291,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="arbitrary user data to inject; repeatable")
     s.set_defaults(fn=cmd_session)
 
-    s = sub.add_parser("lint", help="lint a report component")
-    s.add_argument("file")
-    s.set_defaults(fn=cmd_lint)
-
-    s = sub.add_parser("publish", help="lint-gate a component and regenerate the master")
+    s = sub.add_parser("compose", help="recompose tb.md from context fragments")
     s.add_argument("bunker")
-    s.add_argument("--branch", required=True)
-    s.add_argument("--file", required=True)
-    s.set_defaults(fn=cmd_publish)
+    s.add_argument("--branch", default=None, help="compose for a specific session: include its per-session config")
+    s.set_defaults(fn=cmd_compose)
 
     s = sub.add_parser("scaffold", help="emit a pre-filled report form for a branch")
     s.add_argument("bunker")
@@ -331,23 +302,33 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--out", default=None, help="write to a file instead of stdout")
     s.set_defaults(fn=cmd_scaffold)
 
-    s = sub.add_parser("survey", help="seed a project tbroot.md, or lint an existing one")
-    s.add_argument("repo")
-    s.set_defaults(fn=cmd_survey)
+    s = sub.add_parser("infer", help="save a tagged inference through the typed intake")
+    s.add_argument("bunker")
+    s.add_argument("--tag", required=True, choices=["real", "speculation"])
+    s.add_argument("--claim", required=True)
+    s.add_argument("--grounding", default=None, choices=["grounded", "adjacent", "ungrounded"],
+                   help="required for speculation")
+    s.add_argument("--anchor", action="append", default=None, metavar="PATH[:LINE]",
+                   help="checkable anchor; required for real, repeatable")
+    s.set_defaults(fn=cmd_infer)
+
+    s = sub.add_parser("lint", help="lint a report component")
+    s.add_argument("file")
+    s.set_defaults(fn=cmd_lint)
 
     s = sub.add_parser("lint-root", help="lint a tbroot.md (observations only, anchored, concise)")
     s.add_argument("file")
     s.set_defaults(fn=cmd_lint_root)
 
-    s = sub.add_parser("infer", help="save a tagged inference to the bunker's inference store")
+    s = sub.add_parser("survey", help="seed a project tbroot.md, or lint an existing one")
+    s.add_argument("repo")
+    s.set_defaults(fn=cmd_survey)
+
+    s = sub.add_parser("publish", help="submit a component through the typed intake; regenerate the master")
     s.add_argument("bunker")
-    s.add_argument("--tag", required=True, choices=list(store.TAGS))
-    s.add_argument("--claim", required=True)
-    s.add_argument("--grounding", default=None, choices=list(store.GROUNDINGS),
-                   help="required for speculation")
-    s.add_argument("--anchor", action="append", default=None, metavar="PATH[:LINE]",
-                   help="checkable anchor; required for real, repeatable")
-    s.set_defaults(fn=cmd_infer)
+    s.add_argument("--branch", required=True)
+    s.add_argument("--file", required=True)
+    s.set_defaults(fn=cmd_publish)
 
     s = sub.add_parser("regen-master", help="rebuild the master report from children")
     s.add_argument("bunker")

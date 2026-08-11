@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .contracts import StageContract, run_stage
-from .gitrun import git, git_status
-from .ledger import Ledger
+from ..contracts import StageContract, run_stage
+from ..adapters.gitrun import git, git_status
+from ..layout import branch_slug
+from ..ledger import Ledger
 
 CONTRACTS: dict[str, StageContract] = {
     "branch_resolution": StageContract(
@@ -64,10 +65,6 @@ def _write_observation(obs_dir: Path, stage: str, payload: dict) -> None:
     obs_dir.mkdir(parents=True, exist_ok=True)
     path = obs_dir / f"{stage}.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def branch_slug(branch: str) -> str:
-    return branch.replace("/", "__")
 
 
 def run_bootstrap(

@@ -472,6 +472,47 @@ components, their digests. Giving the master its own config would create a
 second source of truth to drift; deriving from children keeps regeneration a
 pure function of the child set.
 
+### 3.12 Typed information intake
+
+Agents (and users) don't hand the system free-form data: **every piece of
+information returned into the system carries a specific type**, from a fixed
+registry — ticket, session config, inference, report component, tbroot,
+observation — and the agent is taught the types and how to use each one (the
+type list and its commands are part of the preamble).
+
+**Nothing enters unlabeled, nothing enters unvalidated.** Every intake path
+runs through a handler that (a) requires a declared type and (b) validates
+the payload against that type's rules before anything is written — locally
+today, via our backend as the authority when it exists. A payload that fails
+validation is rejected at the door and the rejection is ledgered; there is no
+side channel that writes without the type check. This is the same
+by-construction philosophy as the ledger: validation is structural, not a
+convention the agent is asked to follow.
+
+### 3.13 Code architecture
+
+The repo separates cleanly by role, **per information type**:
+
+- **types/** — the registry: each information type's definition and
+  validation rules. The single authority on what may enter.
+- **handlers/** — intake: receive a typed payload, validate it against the
+  registry, write it to its storage location, ledger the acceptance or
+  rejection. One intake path per type; no writes from anywhere else.
+- **builders/** — construct artifacts from stored information: tb.md
+  composition, the pre-filled report form, the master report, fragments.
+- **processors/** — transform and derive: the bootstrap stages (git facts →
+  observations), the lint gates.
+- **adapters/** — boundaries with the outside: git today; the harness (pi)
+  and the backend API next. Nothing outside adapters/ touches an external
+  system.
+
+**The bunker is the instance directory** — easily navigable the way `.git`
+is: a fixed, well-known layout (context/, sessions/, observations/,
+inferences/, reports/, ledger.jsonl, tb.md) defined in one place
+(`layout.py`) and stable across every bunker. Knowing one bunker means
+knowing them all; tooling and humans can both address any piece of instance
+state by path without asking.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by

@@ -1,0 +1,47 @@
+"""The bunker layout (DESIGN.md §3.13).
+
+The bunker is the instance directory — easily navigable the way .git is:
+a fixed, well-known layout defined here and nowhere else. Knowing one bunker
+means knowing them all; every piece of instance state is addressable by path.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def branch_slug(branch: str) -> str:
+    return branch.replace("/", "__")
+
+
+def paths(bunker: Path) -> dict[str, Path]:
+    bunker = Path(bunker)
+    return {
+        "root": bunker,
+        "tb_md": bunker / "tb.md",
+        "ticket": bunker / "ticket.json",
+        "context": bunker / "context",
+        "sessions": bunker / "sessions",
+        "observations": bunker / "observations",
+        "patches": bunker / "observations" / "patches",
+        "inferences": bunker / "inferences",
+        "inference_log": bunker / "inferences" / "inferences.jsonl",
+        "ledger": bunker / "ledger.jsonl",
+        "reports": bunker / "reports",
+        "children": bunker / "reports" / "branches",
+        "master": bunker / "reports" / "master.md",
+    }
+
+
+def session_config(bunker: Path, branch: str) -> Path:
+    return paths(bunker)["sessions"] / f"{branch_slug(branch)}.json"
+
+
+def child_report(bunker: Path, branch: str) -> Path:
+    return paths(bunker)["children"] / f"{branch_slug(branch)}.md"
+
+
+def init_dirs(bunker: Path) -> None:
+    p = paths(bunker)
+    for key in ("context", "sessions", "observations", "inferences", "children"):
+        p[key].mkdir(parents=True, exist_ok=True)
