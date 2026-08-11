@@ -65,7 +65,8 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ```sh
 tb init TB-1 --key PROJ-123 --assignee ann --reporter bob     # create a bunker
 tb bootstrap TB-1_bunker --repo /path/to/repo --baseline main # run the observation pipeline
-tb compose TB-1_bunker                                        # recompose tb.md from fragments
+tb session TB-1_bunker --branch feat/PROJ-123 --user ann      # per-session config (user data injection)
+tb compose TB-1_bunker --branch feat/PROJ-123                 # recompose tb.md for that session
 tb scaffold TB-1_bunker --branch feat/PROJ-123 --out form.md  # pre-filled report form
 tb infer TB-1_bunker --tag real --claim "..." --anchor src/x.py:10  # save a tagged inference
 tb lint form.md                                               # check a report component

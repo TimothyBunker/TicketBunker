@@ -24,6 +24,7 @@ PROVENANCE = {
     "10_workflow.md": "ours",
     "15_tbroot.md": "agent-gated",
     "20_ticket.md": "ours",
+    "25_session.md": "user",
     "30_observations.md": "pipeline",
 }
 

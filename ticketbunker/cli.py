@@ -27,6 +27,7 @@ from .ledger import Ledger
 def _bunker_paths(bunker: Path) -> dict[str, Path]:
     return {
         "context": bunker / "context",
+        "sessions": bunker / "sessions",
         "observations": bunker / "observations",
         "inferences": bunker / "inferences",
         "ledger": bunker / "ledger.jsonl",
@@ -36,13 +37,23 @@ def _bunker_paths(bunker: Path) -> dict[str, Path]:
     }
 
 
-def _recompose(bunker: Path, ledger: Ledger) -> None:
+def _session_cfg_path(bunker: Path, branch: str) -> Path:
+    return _bunker_paths(bunker)["sessions"] / f"{stages.branch_slug(branch)}.json"
+
+
+def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
     p = _bunker_paths(bunker)
     ticket = json.loads(p["ticket"].read_text(encoding="utf-8")) if p["ticket"].exists() else {}
     if ticket.get("repo"):
         fragments.mirror_tbroot(Path(ticket["repo"]), p["context"])
     obs = fragments.load_observations(p["observations"])
     fragments.write_ticket(p["context"], ticket)
+    session_cfg = None
+    if branch is not None:
+        cfg_path = _session_cfg_path(bunker, branch)
+        if cfg_path.exists():
+            session_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    fragments.write_session(p["context"], session_cfg)
     fragments.write_observations(p["context"], obs)
     compose_mod.compose(p["context"], p["tb_md"], ledger)
 
@@ -99,8 +110,42 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 def cmd_compose(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
     ledger = Ledger(_bunker_paths(bunker)["ledger"])
-    _recompose(bunker, ledger)
-    print(f"composed {bunker / 'tb.md'}")
+    _recompose(bunker, ledger, branch=args.branch)
+    scope = f" for session {args.branch}" if args.branch else ""
+    print(f"composed {bunker / 'tb.md'}{scope}")
+    return 0
+
+
+def cmd_session(args: argparse.Namespace) -> int:
+    bunker = Path(args.bunker)
+    p = _bunker_paths(bunker)
+    cfg_path = _session_cfg_path(bunker, args.branch)
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {"branch": args.branch}
+    changed = False
+    if args.user is not None:
+        cfg["user"] = args.user
+        changed = True
+    if args.baseline is not None:
+        cfg["baseline"] = args.baseline
+        changed = True
+    if args.note:
+        cfg.setdefault("notes", []).extend(args.note)
+        changed = True
+    for kv in args.data or []:
+        k, sep, v = kv.partition("=")
+        if not sep:
+            print(f"error: --data expects key=value, got {kv!r}", file=sys.stderr)
+            return 1
+        cfg.setdefault("data", {})[k] = v
+        changed = True
+    if changed:
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        Ledger(p["ledger"]).event("session_config_updated", branch=args.branch,
+                                  keys=sorted(k for k in cfg if k != "branch"))
+        print(f"session config written: {cfg_path}")
+    else:
+        print(json.dumps(cfg, indent=2))
     return 0
 
 
@@ -256,7 +301,19 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("compose", help="recompose tb.md from context fragments")
     s.add_argument("bunker")
+    s.add_argument("--branch", default=None,
+                   help="compose for a specific session: include its per-session config")
     s.set_defaults(fn=cmd_compose)
+
+    s = sub.add_parser("session", help="set or show a per-session (per-branch) config")
+    s.add_argument("bunker")
+    s.add_argument("--branch", required=True)
+    s.add_argument("--user", default=None, help="the branch's user")
+    s.add_argument("--baseline", default=None, help="session-specific baseline override")
+    s.add_argument("--note", action="append", default=None, help="free-form note; repeatable")
+    s.add_argument("--data", action="append", default=None, metavar="KEY=VALUE",
+                   help="arbitrary user data to inject; repeatable")
+    s.set_defaults(fn=cmd_session)
 
     s = sub.add_parser("lint", help="lint a report component")
     s.add_argument("file")

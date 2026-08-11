@@ -79,6 +79,9 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 │   │                          #     priority, description (XML optional for
 │   │                          #     easy injection)
 │   └── 30_observations.md     #   [pipeline] latest bootstrap observations
+├── sessions/                  # per-session configs, one per branch session:
+│   └── <branch_slug>.json     #   user data injected into setup, for the
+│                              #   agent and the backend (§3.11)
 ├── observations/              # bootstrap stage outputs — atomic, JSON
 ├── inferences/                # agent's saved working inferences, tagged
 │                              #   real vs speculation — agent-facing, not
@@ -444,6 +447,30 @@ language ("probably", "seems", "likely", ...), which is rejected. The lint
 cannot prove a claim true, but it can refuse the *form* that conjecture
 takes.
 
+### 3.11 Per-session configuration
+
+Each ticket has a **config for each specific session** — one per branch
+session, under `sessions/<branch_slug>.json`. Its job is **injecting user
+data into setup**, for two consumers:
+
+- **the agent**: the config becomes a fragment in that session's tb.md
+  composition (provenance: user), so session-specific facts — the branch's
+  user, a baseline override, extra people, free-form notes — reach the agent
+  through the same audited composition path as everything else;
+- **our backend**: the same config is what the backend stores/receives for
+  that session, keeping session-scoped user data addressable per session
+  rather than smeared across the ticket.
+
+Ticket-wide data stays in the ticket configuration; session config carries
+only what is specific to that session. Both are *information we add* (§4) —
+they never mix with observations or agent output at rest.
+
+**The master (global) report has no config, by design.** Everything the
+master needs it can grab readily from its children — their configs, their
+components, their digests. Giving the master its own config would create a
+second source of truth to drift; deriving from children keeps regeneration a
+pure function of the child set.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -544,6 +571,9 @@ clients of it, never owners of state:
   local-universe preamble composed into every session. Observations only, no
   conjecture however certain; concise but proportional to project size;
   updated as information (e.g. build processes) becomes available (§3.10).
+- **Per-session config:** one config per branch session for injecting user
+  data into setup (agent + backend). The master report has no config —
+  it derives everything from its children (§3.11).
 - **Harness fit:** pi's extension model + single-file sessions + headless modes
   (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
   documented/visualized on pi.dev.

@@ -186,6 +186,28 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
     return path
 
 
+def write_session(context_dir: Path, session_cfg: dict | None) -> None:
+    """Generate 25_session.md from a per-session config. Provenance: user.
+
+    Removed when composing without session context, so a ticket-wide tb.md
+    never carries another session's user data.
+    """
+    path = context_dir / "25_session.md"
+    if not session_cfg:
+        if path.exists():
+            path.unlink()
+        return
+    lines = ["# This session", ""]
+    for key in ("branch", "user", "baseline"):
+        if session_cfg.get(key):
+            lines.append(f"- **{key}**: {session_cfg[key]}")
+    for note in session_cfg.get("notes") or []:
+        lines.append(f"- **note**: {note}")
+    for k, v in (session_cfg.get("data") or {}).items():
+        lines.append(f"- **{k}**: {v}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def write_observations(context_dir: Path, observations: dict | None) -> Path:
     """Generate 30_observations.md — bootstrap output. Provenance: pipeline."""
     lines: list[str] = []
