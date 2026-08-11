@@ -99,16 +99,38 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 
 Report state is queryable by **authorized users only** (see §6).
 
-**Harness: pi (pi.dev).** Pi is a minimal agent harness with an extension model
-(TypeScript extensions, skills, prompt templates) rather than baked-in behavior,
-which is exactly what we need: we build the bootstrap ordering ourselves and the
-harness enforces it, *irrespective of the agent* (see §3.2). Pi's ordering
-semantics are visualized on pi.dev. Two other properties matter:
+**Harness: pi (pi.dev).** Pi's role is deliberately narrow — it is *just the
+harness that owns the session*. Concretely, three jobs:
 
-- Sessions are stored as **single files** → the `literal_pi_session.json` layout
-  above is native, not something we bolt on.
-- Pi runs **headless** (`pi -p`, RPC over stdio, or SDK embedding) → the agent
-  can run with no TUI and no human in the loop, which §3.5 depends on.
+1. **Communicating information to the agent** — injecting ticket context,
+   bootstrap observations, and backend updates into the session.
+2. **Managing sessions** — creation, persistence (single-file sessions make the
+   `literal_pi_session.json` layout native), branching, resumption.
+3. **Letting the agent explore the repo** — for what a git diff alone can't
+   surface: context needed for a new ticket, explaining a commit, code the
+   changes interact with.
+
+Everything else — pipeline logic, stage contracts, ledger, reports, state —
+belongs to the TicketBunker backend (§2). The two meet in both directions:
+
+- **Backend → session:** events can push new information into a session. E.g. a
+  git command (via a hook) triggers the backend, which updates the session with
+  the new state — a fresh push on a ticket branch flows into the bunker without
+  anyone re-entering it.
+- **Session → backend:** the executing hooks write ledger entries and publish
+  reports through the API (§3.8).
+
+**Harness portability:** we implement the integration as pi extensions, but
+structured so that most of the added functionality and pipeline works with
+other harnesses where possible. The stage contracts, bootstrap pipeline,
+lint gates, master regeneration, and backend API are all harness-neutral —
+plain processes speaking to an API. The pi extensions are a **thin adapter**:
+they wire stages into pi's session lifecycle and command execution, and that
+adapter layer is the only thing another harness would need reimplemented.
+Pi remains the reference harness because its extension model and ordering
+semantics fit the stage discipline best (§3.2, §3.7), and it runs **headless**
+(`pi -p`, RPC over stdio, SDK embedding) — no TUI, no human in the loop, which
+§3.5 depends on.
 
 ### 3.2 Deterministic bootstrap pipeline (the "observation" phase)
 
@@ -359,6 +381,10 @@ clients of it, never owners of state:
   hooks — never by the agent's own volition (§3.8).
 - **Stage contracts:** every stage declares purpose / input / process / desired
   outcome, explicitly and modularly, one pi extension per stage (§3.7).
+- **Harness portability:** pi's scope is session ownership only (feed the
+  agent, manage sessions, allow repo exploration). All pipeline functionality
+  is harness-neutral; pi extensions are a thin adapter layer, the only part
+  another harness would need reimplemented.
 
 ## 10. Open questions
 
