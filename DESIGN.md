@@ -657,9 +657,10 @@ extensions and the CLI are clients of it, never owners of state:
 2. Multi-directory tickets: how the bunker composes observations across dirs —
    one report with per-dir sections, or per-dir observation sets merged at the
    inference layer?
-3. Report sync transport: what "handled remotely" concretely is (shared git repo
-   of reports? object store? the tracker itself as attachment?). Needs to work
-   inside the classified enclave's constraints.
+3. ~~Report sync transport~~ — resolved: the backend is a git repo; `tb sync`
+   moves the bunker database through ordinary git with `.tbignore` filtering
+   (§2, §5). Works anywhere git works, including bundle transfer across
+   air gaps.
 4. File format of components: markdown-only vs. markdown + machine-readable JSON
    side by side (§5 currently implies both; the lint gate is easier against
    JSON, the reader wants markdown).
