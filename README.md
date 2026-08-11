@@ -109,8 +109,30 @@ ticketbunker/
 └── cli.py         # thin orchestration over the above
 ```
 
+## Running the agent
+
+`tb run` drives the whole session: compose tb.md for the branch, scaffold
+the pre-filled form, invoke the harness headless, publish the filled form
+through the gate, regenerate the master.
+
+```sh
+# reference harness: pi (https://pi.dev) — npm i -g @earendil-works/pi-coding-agent; pi /login once
+tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
+    --harness pi --provider anthropic --model "claude-*"
+
+# any other CLI (or a test stub) via the command profile:
+tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
+    --harness command --cmd "python3 tools/stub_agent.py {form}"
+```
+
+The pi adapter (harness/pi/tb.ts) mirrors every agent tool call into the
+bunker ledger and marks harness session start/end — structurally, via pi's
+tool_call hook, never by the agent's own volition.
+
 ## Status
 
-Harness-neutral core implemented (bootstrap pipeline, context composition,
-ledger, report lint gate, master regeneration). Not yet built: the backend
-API service, git-hook triggers, and the pi extension adapter.
+Full loop implemented and verified end-to-end with a stub harness: init →
+branch → bootstrap → run (compose, scaffold, agent session, gated publish,
+master regen) → sync. The pi profile is wired and verified up to provider
+login; a real-model run needs only credentials (`pi /login`). Not yet
+built: git-hook triggers, the root-surveyor session runner.

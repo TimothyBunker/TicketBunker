@@ -228,6 +228,51 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    from .adapters import harness as harness_mod
+
+    # The harness runs with cwd inside the source repo — every bunker path
+    # it receives must be absolute.
+    bunker = Path(args.bunker).resolve()
+    p = layout.paths(bunker)
+    obs = fragments.load_observations(p["observations"])
+    if not obs:
+        print("error: bootstrap has not run — run 'tb bootstrap' first", file=sys.stderr)
+        return 1
+    ledger = _ledger(bunker)
+
+    # 1. Session-scoped context and pre-filled form.
+    _recompose(bunker, ledger, branch=args.branch)
+    form = layout.session_form(bunker, args.branch)
+    form.write_text(scaffold.build(_ticket(bunker), obs, args.branch), encoding="utf-8")
+
+    # 2. The agent session (ledgered stage; agent tool calls mirrored by the
+    #    harness extension).
+    output, code = harness_mod.run_session(
+        bunker, args.branch, Path(args.repo).resolve(), ledger,
+        harness=args.harness, command_template=args.cmd,
+        pi_bin=args.pi_bin, provider=args.provider, model=args.model,
+    )
+    if code != 0:
+        print(output)
+        print(f"error: harness exited {code}; form left at {form}", file=sys.stderr)
+        return 1
+
+    # 3. Publish what came back, through typed intake.
+    text = form.read_text(encoding="utf-8")
+    _, findings = reportlint.gate(text)
+    for f in findings:
+        print(f)
+    try:
+        dest = handlers.intake_report_component(bunker, args.branch, text, ledger)
+    except IntakeRejected:
+        print(f"FAIL — agent's form did not pass the gate; left at {form} for repair", file=sys.stderr)
+        return 1
+    out = master.regenerate(bunker, ledger)
+    print(f"session complete: published {dest}; master regenerated at {out}")
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     if args.user is not None:
         cfg = config.load()
@@ -386,6 +431,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("run", help="run the agent session: compose, scaffold, harness, publish")
+    s.add_argument("bunker")
+    s.add_argument("--branch", required=True)
+    s.add_argument("--repo", required=True)
+    s.add_argument("--harness", default="pi", choices=["pi", "command"])
+    s.add_argument("--cmd", default=None,
+                   help="harness 'command' template; placeholders: {form} {tb_md} {repo} {prompt}")
+    s.add_argument("--pi-bin", default="pi", help="pi executable (default: pi on PATH)")
+    s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
+    s.add_argument("--model", default=None, help="pi model pattern")
+    s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("config", help="show or set global TicketBunker config (user identity, patterns)")
     s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")

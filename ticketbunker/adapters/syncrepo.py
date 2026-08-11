@@ -25,6 +25,10 @@ literal_pi_session.json
 # Diff patches are regenerable from the source repo and may be bulky.
 *_bunker/observations/patches/
 
+# Form drafts are session-local working copies; the published component
+# is the shared artifact.
+*_bunker/sessions/*.form.md
+
 # Local scratch.
 scratch/
 """

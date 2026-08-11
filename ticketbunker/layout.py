@@ -37,6 +37,12 @@ def session_config(bunker: Path, branch: str) -> Path:
     return paths(bunker)["sessions"] / f"{branch_slug(branch)}.json"
 
 
+def session_form(bunker: Path, branch: str) -> Path:
+    """The working copy of the report form an agent session fills in.
+    A local draft — the shared artifact is the published component."""
+    return paths(bunker)["sessions"] / f"{branch_slug(branch)}.form.md"
+
+
 def child_report(bunker: Path, branch: str) -> Path:
     return paths(bunker)["children"] / f"{branch_slug(branch)}.md"
 
