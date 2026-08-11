@@ -222,6 +222,18 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    from .adapters import syncrepo
+
+    try:
+        summary = syncrepo.sync(Path(args.root), remote=args.remote, message=args.message)
+    except Exception as exc:
+        print(f"sync failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"sync complete — {summary}")
+    return 0
+
+
 def cmd_regen_master(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
     out = master.regenerate(bunker, _ledger(bunker))
@@ -329,6 +341,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("sync", help="sync the bunker database through git (.tbignore respected)")
+    s.add_argument("root", help="the bunker database directory (contains *_bunker/)")
+    s.add_argument("--remote", default=None, help="set/replace the origin remote URL")
+    s.add_argument("--message", default=None, help="commit message (default: 'tb sync')")
+    s.set_defaults(fn=cmd_sync)
 
     s = sub.add_parser("regen-master", help="rebuild the master report from children")
     s.add_argument("bunker")

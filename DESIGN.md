@@ -39,11 +39,24 @@ changing the project itself. Diagnosability is not a feature bolted on later;
 it is the design driver for §3.7–3.8.
 
 **Ownership principle:** **Pi does not own this system.** TicketBunker has its
-own backend with its own API; pi is a *client harness* that talks to that API.
-Sessions run in pi because its extension model fits our stage discipline
-(§3.7), but the source of truth — ticket registry, bunker index, report
-storage, execution ledger — lives in the TicketBunker backend. If pi were
-replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
+own backend; pi is a *client harness* that talks to it. Sessions run in pi
+because its extension model fits our stage discipline (§3.7), but the source
+of truth — ticket registry, bunker index, report storage, execution ledger —
+lives in the TicketBunker backend. If pi were replaced tomorrow, the bunkers,
+reports, and ledgers would be untouched.
+
+**Backend principle: the backend is a git repo.** The team's database — every
+bunker, with the information another user would need: tickets and their
+corresponding reports, configs, even session data where cheap — **lives in a
+remote git repository and is transferred regularly through git**. TicketBunker
+functionally mirrors git rather than standing up a whole new service:
+clone/pull/push are the sync protocol, history is the audit trail, remotes are
+the access model, and a customizable **`.tbignore`** controls what enters the
+shared history (harness session files and other local-only material stay
+local). Anywhere git already works — including air-gapped enclaves that move
+git bundles across boundaries — the TicketBunker backend already works. A
+thin API service can be layered on top later if a team wants one; it is an
+optimization, never the foundation.
 
 ## 3. Architecture
 
@@ -541,16 +554,21 @@ state by path without asking.
 
 ## 5. Interfaces
 
-The TicketBunker **backend API** is the system's spine — pi extensions are
-clients of it, never owners of state:
+The TicketBunker backend is **a git repository of bunkers** (§2) — pi
+extensions and the CLI are clients of it, never owners of state:
 
 - **Ingest:** ticket context (manual paste or future tracker webhook), remote
   branch events.
 - **Ledger:** stage markers and per-command log entries, written automatically
-  by the executing hooks (§3.8).
-- **Publish:** child report components (through the lint gate) and regenerated
-  masters.
-- **Query:** by ticket ID — latest report, raw observations, ledger.
+  by the executing hooks (§3.8). JSONL ledgers are merged with git's union
+  strategy so concurrent appenders don't conflict.
+- **Publish:** child report components (through the typed intake) and
+  regenerated masters.
+- **Sync:** `tb sync` mirrors git — pull, add what `.tbignore` admits,
+  commit, push. The `.tbignore` is customizable per team; the default keeps
+  harness session files and regenerable bulk (diff patches) local.
+- **Query:** by ticket ID — clone/pull, then read the bunker by its fixed
+  layout. Latest report, raw observations, ledger — all addressable by path.
 - **Emit:** structured report (markdown + machine-readable JSON alongside).
 
 ## 6. Authorization

@@ -73,7 +73,18 @@ tb lint form.md                                               # check a report c
 tb publish TB-1_bunker --branch feat/PROJ-123 --file form.md  # gate + accept + regen master
 tb survey /path/to/repo                                       # seed or lint the project tbroot.md
 tb status TB-1_bunker                                         # state, staleness, ledger health
+tb sync . --remote git@host:team/bunkers.git                  # share through git (.tbignore respected)
 ```
+
+## The backend is a git repo
+
+The team's bunker database lives in a remote git repository and moves
+through ordinary git — no service to stand up. `tb sync` mirrors git:
+init if needed, add what `.tbignore` admits, commit, pull --rebase, push.
+Teammates clone and read any bunker by its fixed layout. The default
+`.tbignore` keeps harness session files and regenerable diff patches
+local; customize it per team. JSONL ledgers are union-merged so
+concurrent appenders never conflict.
 
 Every git command any of these run is written to the ledger automatically —
 by the executing wrapper, never by the agent — so an unlogged command is
