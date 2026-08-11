@@ -47,6 +47,29 @@ As you work, save each inference to inferences/ tagged real or
 speculation. The user will not read that raw material — the report is
 composed from it — but it is kept for processing and audit.
 
+## The master that came before you
+
+Your ticket may already have report components from other branches, and a
+master report aggregating them. The master is regenerated mechanically
+from the components — it inherits their claims, it never rewrites them.
+Your job is one component for your branch; the master's job is to give a
+reader the whole ticket at once, ordered by recency of development. Treat
+existing components as prior work to stay consistent with, not to
+duplicate: shared facts belong once, in the oldest component that
+established them.
+
+## Tool order
+
+Work in this order, no skipping ahead:
+
+1. Read your pre-filled report form and the observations given to you.
+2. Search the baseline for ticket-related symbols (targeted grep, not
+   exploration for its own sake).
+3. Save each find as it happens: `tb infer` — [real] with an anchor,
+   [speculation] with a grounding rank.
+4. Fill in the agent areas of the report form from the inference store.
+5. Publish through the gate. If the gate rejects, fix and resubmit.
+
 Relevant-locations categories for the Where section (a ranked impact
 list, best-grounded first):
 
@@ -142,9 +165,13 @@ def seed_static(context_dir: Path) -> None:
     (context_dir / "10_workflow.md").write_text(WORKFLOW, encoding="utf-8")
 
 
-def write_current(context_dir: Path, ticket: dict, observations: dict | None) -> Path:
-    """Generate 20_current.md from ticket state + latest observations."""
-    lines = ["# Current information", "", "## Ticket", ""]
+def write_ticket(context_dir: Path, ticket: dict) -> Path:
+    """Generate 20_ticket.md — the ticket information. Provenance: ours.
+
+    Kept as its own fragment, never blended with generated observation
+    content, so storage stays partitioned by data type.
+    """
+    lines = ["# Ticket information", ""]
     for key in ("id", "key", "title", "priority", "description"):
         if ticket.get(key):
             lines.append(f"- **{key}**: {ticket[key]}")
@@ -154,10 +181,16 @@ def write_current(context_dir: Path, ticket: dict, observations: dict | None) ->
     lines.append(f"- **reporter**: {ticket.get('reporter') or 'not configured'}")
     poi = ticket.get("people_of_interest") or []
     lines.append(f"- **people of interest**: {', '.join(poi) if poi else 'none configured'}")
-    lines.append("")
+    path = context_dir / "20_ticket.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
+
+def write_observations(context_dir: Path, observations: dict | None) -> Path:
+    """Generate 30_observations.md — bootstrap output. Provenance: pipeline."""
+    lines: list[str] = []
     if observations:
-        lines += ["## Observations (bootstrap)", ""]
+        lines += ["# Observations (bootstrap)", ""]
         branches = observations.get("branches", [])
         lines.append(f"- **baseline**: {observations.get('baseline')}")
         lines.append(f"- **branches** ({len(branches)}): {', '.join(branches) if branches else 'none found'}")
@@ -182,10 +215,14 @@ def write_current(context_dir: Path, ticket: dict, observations: dict | None) ->
             lines.append("")
         lines.append("Full atomic observations: observations/*.json")
     else:
-        lines += ["## Observations", "", "Bootstrap has not run yet."]
+        lines += ["# Observations (bootstrap)", "", "Bootstrap has not run yet."]
 
-    path = context_dir / "20_current.md"
+    path = context_dir / "30_observations.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Retire the pre-split combined fragment if this bunker predates it.
+    legacy = context_dir / "20_current.md"
+    if legacy.exists():
+        legacy.unlink()
     return path
 
 

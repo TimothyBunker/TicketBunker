@@ -69,11 +69,16 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 ├── tb.md                      # composed session-context document (§3.9) —
 │                              #   exactly what gets prepended to a session
 ├── context/                   # the separate fragments tb.md is composed from
-│   ├── 00_explanation.md      #   what TicketBunker is + the baseline ontology
-│   ├── 10_workflow.md         #   process workflow / stage expectations
-│   ├── 15_tbroot.md           #   the project's tbroot.md, mirrored in at
-│   │                          #   bootstrap — the local universe (§3.10)
-│   └── 20_current.md          #   current relevant information (generated)
+│   ├── 00_explanation.md      #   [ours] purpose, rules, ontology, how to
+│   │                          #     write reports, tool order, and the
+│   │                          #     purpose of the master (§3.9)
+│   ├── 10_workflow.md         #   [ours] process workflow / stage expectations
+│   ├── 15_tbroot.md           #   [agent, gated] the project's tbroot.md,
+│   │                          #     mirrored in at bootstrap (§3.10)
+│   ├── 20_ticket.md           #   [ours] the ticket information — people,
+│   │                          #     priority, description (XML optional for
+│   │                          #     easy injection)
+│   └── 30_observations.md     #   [pipeline] latest bootstrap observations
 ├── observations/              # bootstrap stage outputs — atomic, JSON
 ├── inferences/                # agent's saved working inferences, tagged
 │                              #   real vs speculation — agent-facing, not
@@ -356,13 +361,34 @@ and every stage is bracketed by markers** — and neither is the agent's job.
 The bootstrap context handed to a session is a **composite markdown document,
 `tb.md`**, assembled from separate parts:
 
-1. **Explanation** — what TicketBunker is and the baseline ontology (§3.3):
-   observation vs. inference, the report schema, the relevant-locations
-   categories.
+1. **Explanation** — the traditional harness preamble: the agent's purpose,
+   its rules, the ontology (§3.3), how it is to write reports, the order to
+   use tools in, and **the purpose of the master report that came before
+   it** — what the aggregate is for and how this session's component feeds
+   it. (This doc is deliberately placed before any master content the
+   session might see.)
 2. **Process workflow** — the stage discipline: what stages will run/have run,
    what the agent is expected to produce, in what order.
-3. **Current relevant information** — the generated part: ticket context from
-   backend state, branch list, and the latest bootstrap observations.
+3. **The local universe** — the project's tbroot.md, mirrored in (§3.10).
+4. **Ticket information** — essentially all of the ticket: title, priority,
+   description, people. Markdown by default; can be carried as XML where
+   that makes injection easier. This is *information we add* — kept as its
+   own fragment, never blended into generated content.
+5. **Observations** — the latest bootstrap output, as its own fragment.
+
+Fragments 1–2 and 4 are *ours*; 3 is agent-written but gated (§3.10); 5 is
+pipeline output. The composition manifest records each fragment's provenance
+(§4) — the agent reads one document, the storage stays partitioned.
+
+**The report is a form.** A report component doesn't start empty: the
+pipeline **pre-fills** it — Who from ticket config and authorship, What from
+the diffs, State from merge history, all as `[observation]` lines — and the
+agent **fills in the agent-specific areas**: the `[real]` finds, the ranked
+`[speculation]`, the Why synthesis. The form's structure is ours; the
+observations are the pipeline's; only the fill is the agent's. This keeps the
+provenance separation intact inside the report itself, and it shrinks the
+surface where an agent can wander: filling a labeled form beats authoring a
+document from scratch.
 
 **Each part is a separate file** under `context/`, and the composed `tb.md`
 sits at the **root of the output dir**, so a user can open one file and see
@@ -431,6 +457,18 @@ takes.
   → `speculation` (interpretation, ranked by grounding). A claim's tag can only
   be upgraded by verification — never by confidence, repetition, or promotion
   of the agent's effort level.
+- **Data provenance separation.** Three data types, by origin:
+  1. **information we add** — ticket data, people, configuration, the static
+     preamble fragments;
+  2. **observations** — pipeline-produced mechanical facts;
+  3. **information the agent adds** — inferences, report prose, tbroot
+     updates.
+  The agent sees all three composed together; **our storage never
+  intermingles them**. Each type lives in its own location (`ticket.json` +
+  static fragments / `observations/` / `inferences/` + `reports/`), each
+  fragment and store entry carries its provenance, and composition happens
+  only at read time (tb.md, the report). The backend database keeps the same
+  partition. Mixing is a presentation step, never a storage step.
 
 ## 5. Interfaces
 

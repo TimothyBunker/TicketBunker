@@ -13,8 +13,23 @@ from pathlib import Path
 from .ledger import Ledger, digest
 
 FRAGMENT_GLOB = "*.md"
-BEGIN = "<!-- tb:fragment {name} {digest} -->"
+BEGIN = "<!-- tb:fragment {name} {digest} provenance={provenance} -->"
 END = "<!-- tb:end {name} -->"
+
+# Data provenance separation (DESIGN.md §4): the agent reads one composed
+# document, but every fragment carries its origin, and storage never
+# intermingles the types.
+PROVENANCE = {
+    "00_explanation.md": "ours",
+    "10_workflow.md": "ours",
+    "15_tbroot.md": "agent-gated",
+    "20_ticket.md": "ours",
+    "30_observations.md": "pipeline",
+}
+
+
+def provenance_of(name: str) -> str:
+    return PROVENANCE.get(name, "unknown")
 
 
 def compose(context_dir: Path, out_path: Path, ledger: Ledger | None = None) -> list[dict]:
@@ -28,8 +43,9 @@ def compose(context_dir: Path, out_path: Path, ledger: Ledger | None = None) -> 
     for frag in fragments:
         content = frag.read_text(encoding="utf-8").rstrip()
         d = digest(content)
-        manifest.append({"fragment": frag.name, "digest": d, "bytes": len(content.encode())})
-        parts.append(BEGIN.format(name=frag.name, digest=d))
+        prov = provenance_of(frag.name)
+        manifest.append({"fragment": frag.name, "digest": d, "bytes": len(content.encode()), "provenance": prov})
+        parts.append(BEGIN.format(name=frag.name, digest=d, provenance=prov))
         parts.append(content)
         parts.append(END.format(name=frag.name))
         parts.append("")

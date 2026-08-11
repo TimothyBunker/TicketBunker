@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from . import compose as compose_mod
-from . import fragments, master, reportlint, stages, store
+from . import fragments, master, reportlint, scaffold, stages, store
 from .ledger import Ledger
 
 
@@ -42,7 +42,8 @@ def _recompose(bunker: Path, ledger: Ledger) -> None:
     if ticket.get("repo"):
         fragments.mirror_tbroot(Path(ticket["repo"]), p["context"])
     obs = fragments.load_observations(p["observations"])
-    fragments.write_current(p["context"], ticket, obs)
+    fragments.write_ticket(p["context"], ticket)
+    fragments.write_observations(p["context"], obs)
     compose_mod.compose(p["context"], p["tb_md"], ledger)
 
 
@@ -131,6 +132,24 @@ def cmd_publish(args: argparse.Namespace) -> int:
     ledger.event("publish_accepted", branch=args.branch, component=str(dest))
     out = master.regenerate(bunker, ledger)
     print(f"published {dest}; master regenerated at {out}")
+    return 0
+
+
+def cmd_scaffold(args: argparse.Namespace) -> int:
+    bunker = Path(args.bunker)
+    p = _bunker_paths(bunker)
+    ticket = json.loads(p["ticket"].read_text(encoding="utf-8"))
+    obs = fragments.load_observations(p["observations"])
+    if not obs:
+        print("error: bootstrap has not run — nothing to pre-fill", file=sys.stderr)
+        return 1
+    form = scaffold.build(ticket, obs, args.branch)
+    if args.out:
+        Path(args.out).write_text(form, encoding="utf-8")
+        Ledger(p["ledger"]).event("form_scaffolded", branch=args.branch, out=args.out)
+        print(f"pre-filled form written to {args.out}")
+    else:
+        print(form)
     return 0
 
 
@@ -248,6 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("scaffold", help="emit a pre-filled report form for a branch")
+    s.add_argument("bunker")
+    s.add_argument("--branch", required=True)
+    s.add_argument("--out", default=None, help="write to a file instead of stdout")
+    s.set_defaults(fn=cmd_scaffold)
 
     s = sub.add_parser("survey", help="seed a project tbroot.md, or lint an existing one")
     s.add_argument("repo")
