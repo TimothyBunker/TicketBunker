@@ -30,6 +30,44 @@ able to tell which is which.
 
 See [DESIGN.md](DESIGN.md) for the architecture.
 
+## Layout of a bunker
+
+One bunker per ticket, named by its unique ticket ID:
+
+```
+<ticket_id>_bunker/
+├── tb.md            # composed session context — exactly what a session is fed
+├── context/         # the fragments tb.md is composed from (modular, auditable)
+├── observations/    # atomic git facts from the bootstrap pipeline (JSON)
+├── ledger.jsonl     # every command + stage marker, logged structurally
+└── reports/
+    ├── master.md    # mechanically regenerated from children, digest-pinned
+    └── branches/    # one agent-written component per branch
+```
+
+The harness (pi) persists its own session data separately; the bunker holds
+only what TicketBunker owns.
+
+## Usage
+
+The core is a stdlib-only Python package (`python3 -m ticketbunker.cli`, or
+`tb` once installed):
+
+```sh
+tb init TB-1 --key PROJ-123 --title "..." --priority high    # create a bunker
+tb bootstrap TB-1_bunker --repo /path/to/repo --baseline main # run the observation pipeline
+tb compose TB-1_bunker                                        # recompose tb.md from fragments
+tb lint report.md                                             # check a report component
+tb publish TB-1_bunker --branch feat/PROJ-123 --file report.md # gate + accept + regen master
+tb status TB-1_bunker                                         # state, staleness, ledger health
+```
+
+Every git command any of these run is written to the ledger automatically —
+by the executing wrapper, never by the agent — so an unlogged command is
+impossible by construction.
+
 ## Status
 
-Design phase. No code yet.
+Harness-neutral core implemented (bootstrap pipeline, context composition,
+ledger, report lint gate, master regeneration). Not yet built: the backend
+API service, git-hook triggers, and the pi extension adapter.

@@ -66,9 +66,14 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 
 ```
 <ticket_id>_bunker/
-├── literal_pi_session.json    # the pi session file (pi stores a session as a
-│                              #   single self-contained file, all branches of
-│                              #   the conversation included)
+├── tb.md                      # composed session-context document (§3.9) —
+│                              #   exactly what gets prepended to a session
+├── context/                   # the separate fragments tb.md is composed from
+│   ├── 00_explanation.md      #   what TicketBunker is + the baseline ontology
+│   ├── 10_workflow.md         #   process workflow / stage expectations
+│   └── 20_current.md          #   current relevant information (generated)
+├── observations/              # bootstrap stage outputs — atomic, JSON
+├── ledger.jsonl               # execution ledger (mirrored to the backend)
 └── reports/                   # the deliverable artifacts — OUTSIDE the session
     ├── master                 # aggregate view; auto-regenerated when any
     │                          #   child component changes
@@ -76,6 +81,11 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
         └── <branch_slug>      # one report component per branch, owned by
                                #   the session (see §3.4)
 ```
+
+Note what is *not* here: the session file. **The harness persists its own
+session data** in its own storage (pi keeps its single-file sessions wherever
+pi keeps them). The bunker holds what TicketBunker owns — context, facts,
+ledger, reports — and nothing the harness owns.
 
 **Local vs. remote:**
 
@@ -307,6 +317,35 @@ and every stage is bracketed by markers** — and neither is the agent's job.
   This also means audit does not depend on collecting session files off
   individual machines.
 
+### 3.9 Session context composition (tb.md)
+
+The bootstrap context handed to a session is a **composite markdown document,
+`tb.md`**, assembled from separate parts:
+
+1. **Explanation** — what TicketBunker is and the baseline ontology (§3.3):
+   observation vs. inference, the report schema, the relevant-locations
+   categories.
+2. **Process workflow** — the stage discipline: what stages will run/have run,
+   what the agent is expected to produce, in what order.
+3. **Current relevant information** — the generated part: ticket context from
+   backend state, branch list, and the latest bootstrap observations.
+
+**Each part is a separate file** under `context/`, and the composed `tb.md`
+sits at the **root of the output dir**, so a user can open one file and see
+exactly what is being prepended or appended to a session — no hidden prompt.
+Composition rules:
+
+- **Deterministic and mechanical:** fragments are concatenated in filename
+  order (numeric prefixes); each fragment is bracketed in `tb.md` by markers
+  carrying its filename and content digest, so the composed document is
+  auditable back to its parts.
+- **Modular:** adding, removing, or modifying context = editing fragment files
+  and recomposing. Static fragments (explanation, workflow) are edited by
+  humans; generated fragments (current information) are rewritten by the
+  pipeline and never hand-edited.
+- The harness adapter's only context job is "prepend `tb.md` to the session" —
+  which keeps context assembly harness-neutral and out of the agent's control.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -360,8 +399,13 @@ clients of it, never owners of state:
 - **Report storage:** the report is the remote artifact; the pi session stays
   local (remote session storage is an optional optimization if cheap). A report
   never requires waking a session to read.
-- **Session/report layout:** `<ticket_id>_bunker/` containing
-  `literal_pi_session.json` + `reports/`; bunker name = unique ticket ID.
+- **Session/report layout:** `<ticket_id>_bunker/` containing `tb.md` +
+  `context/` + `observations/` + `ledger.jsonl` + `reports/`; bunker name =
+  unique ticket ID. The harness persists its own session data in its own
+  storage — the bunker stores only what TicketBunker owns.
+- **Session context:** delivered as `tb.md`, composed deterministically from
+  separate fragments (explanation / workflow / current information) so context
+  is modular and a user can see exactly what a session is fed (§3.9).
 - **Report structure:** the report is agent-authored and lives *outside* the
   session file. One component per branch, owned by the session; a master is
   fully regenerated (never patched) whenever a child changes, recording child
