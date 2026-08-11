@@ -113,10 +113,13 @@ harness that owns the session*. Concretely, three jobs:
 Everything else — pipeline logic, stage contracts, ledger, reports, state —
 belongs to the TicketBunker backend (§2). The two meet in both directions:
 
-- **Backend → session:** events can push new information into a session. E.g. a
-  git command (via a hook) triggers the backend, which updates the session with
-  the new state — a fresh push on a ticket branch flows into the bunker without
-  anyone re-entering it.
+- **Backend → session:** the backend manages the stateful information — ticket
+  registry, branch state, prior observations, report status — and **passes it
+  to the pi session to populate it** with the relevant context. This happens at
+  instantiation (the session starts pre-loaded from backend state, not empty)
+  and on events afterward: e.g. a git command (via a hook) triggers the
+  backend, which updates the session with the new state — a fresh push on a
+  ticket branch flows into the bunker without anyone re-entering it.
 - **Session → backend:** the executing hooks write ledger entries and publish
   reports through the API (§3.8).
 
