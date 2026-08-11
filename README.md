@@ -48,10 +48,19 @@ One bunker per ticket, named by its unique ticket ID:
 The harness (pi) persists its own session data separately; the bunker holds
 only what TicketBunker owns.
 
-## Usage
+## Installing
 
-The core is a stdlib-only Python package (`python3 -m ticketbunker.cli`, or
-`tb` once installed):
+The core is a stdlib-only Python package. Two ways to get a plain `tb`
+command on your PATH — no `python something.py` calls in daily use:
+
+```sh
+pip install .                 # installs the `tb` entry point
+# — or, where pip isn't an option —
+python3 tools/build_tb.py     # builds dist/tb, a single self-contained file
+cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.10+
+```
+
+## Usage
 
 ```sh
 tb init TB-1 --key PROJ-123 --title "..." --priority high    # create a bunker
