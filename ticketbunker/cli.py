@@ -229,7 +229,50 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    import subprocess
+
     from .adapters import harness as harness_mod
+
+    repo = Path(args.repo).resolve()
+
+    # Default the branch to the repo's current branch.
+    branch = args.branch
+    if branch is None:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            print(f"error: {repo} is not a git repository (or has no HEAD)", file=sys.stderr)
+            return 1
+        branch = proc.stdout.strip()
+    args.branch = branch
+
+    # Default the bunker from the ticket ID embedded in the branch name.
+    if args.bunker is None:
+        tid = config.extract_ticket_id(branch)
+        if not tid:
+            print(
+                f"error: branch {branch!r} carries no ticket ID matching {config.ticket_pattern()!r} — "
+                "name branches with 'tb branch', or pass the bunker explicitly",
+                file=sys.stderr,
+            )
+            return 1
+        candidates = [Path.cwd() / f"{tid}_bunker"]
+        root = config.bunker_root()
+        if root:
+            candidates.append(root / f"{tid}_bunker")
+        found = next((c for c in candidates if c.is_dir()), None)
+        if not found:
+            looked = ", ".join(str(c) for c in candidates)
+            print(
+                f"error: no bunker for {tid} (looked in: {looked}) — "
+                "set the database location with 'tb config --bunker-root DIR'",
+                file=sys.stderr,
+            )
+            return 1
+        args.bunker = str(found)
+        print(f"resolved: branch {branch} → ticket {tid} → {found}")
 
     # The harness runs with cwd inside the source repo — every bunker path
     # it receives must be absolute.
@@ -274,16 +317,26 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
+    changed = False
+    cfg = config.load()
     if args.user is not None:
-        cfg = config.load()
         cfg["user"] = config.sanitize_user(args.user)
+        changed = True
+    if args.bunker_root is not None:
+        cfg["bunker_root"] = str(Path(args.bunker_root).expanduser().resolve())
+        changed = True
+    if changed:
         config.save(cfg)
-        print(f"user set: {cfg['user']} ({config.GLOBAL_CONFIG})")
+        for key in ("user", "bunker_root"):
+            if cfg.get(key):
+                print(f"{key}: {cfg[key]}")
+        print(f"({config.GLOBAL_CONFIG})")
         return 0
     user, source = config.get_user()
     print(f"user: {user or 'NOT SET'} (source: {source})")
     if source == "git":
         print("  taken from git global user.name — change with: tb config --user NAME")
+    print(f"bunker root: {config.bunker_root() or 'not set (tb run looks in the current directory)'}")
     print(f"ticket pattern: {config.ticket_pattern()}")
     print(f"branch template: {config.branch_template()}")
     return 0
@@ -433,9 +486,10 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_publish)
 
     s = sub.add_parser("run", help="run the agent session: compose, scaffold, harness, publish")
-    s.add_argument("bunker")
-    s.add_argument("--branch", required=True)
-    s.add_argument("--repo", required=True)
+    s.add_argument("bunker", nargs="?", default=None,
+                   help="defaults to the bunker of the ticket in the current branch's name")
+    s.add_argument("--branch", default=None, help="defaults to the repo's current branch")
+    s.add_argument("--repo", default=".", help="source repo (default: current directory)")
     s.add_argument("--harness", default="pi", choices=["pi", "command"])
     s.add_argument("--cmd", default=None,
                    help="harness 'command' template; placeholders: {form} {tb_md} {repo} {prompt}")
@@ -446,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("config", help="show or set global TicketBunker config (user identity, patterns)")
     s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")
+    s.add_argument("--bunker-root", default=None, metavar="DIR",
+                   help="set where the bunker database lives, so tb run resolves bunkers from any repo")
     s.set_defaults(fn=cmd_config)
 
     s = sub.add_parser("branch", help="create a convention-named branch for a ticket: user/TICKET-name")

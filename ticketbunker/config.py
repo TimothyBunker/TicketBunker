@@ -54,6 +54,21 @@ def ticket_pattern() -> str:
     return os.environ.get("TB_TICKET_PATTERN") or load().get("ticket_pattern") or DEFAULT_TICKET_PATTERN
 
 
+def bunker_root() -> Path | None:
+    """Where the bunker database lives, if configured (TB_BUNKER_ROOT or
+    ~/.tbconfig 'bunker_root'). Lets `tb run` find bunkers from inside a
+    source repo."""
+    raw = os.environ.get("TB_BUNKER_ROOT") or load().get("bunker_root")
+    return Path(raw).expanduser() if raw else None
+
+
+def extract_ticket_id(branch: str) -> str | None:
+    """Pull the ticket ID out of a convention-named branch (user/TICKET-name)."""
+    pattern = ticket_pattern().strip("^$")
+    m = re.search(pattern, branch)
+    return m.group(0) if m else None
+
+
 def branch_template() -> str:
     return os.environ.get("TB_BRANCH_TEMPLATE") or load().get("branch_template") or DEFAULT_BRANCH_TEMPLATE
 

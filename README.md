@@ -115,8 +115,14 @@ ticketbunker/
 the pre-filled form, invoke the harness headless, publish the filled form
 through the gate, regenerate the master.
 
+From inside your repo on a convention-named branch, `tb run` needs no
+arguments: it reads the current branch, extracts the ticket ID, and finds
+the bunker (in the current directory, or under `tb config --bunker-root`).
+
 ```sh
 # reference harness: pi (https://pi.dev) — npm i -g @earendil-works/pi-coding-agent; pi /login once
+tb run --harness pi --provider anthropic --model "claude-*"   # on branch Tim/TB-1267-...
+# or fully explicit:
 tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
     --harness pi --provider anthropic --model "claude-*"
 
