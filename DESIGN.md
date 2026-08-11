@@ -33,25 +33,59 @@ summary back to the requesting user.
 
 ## 3. Architecture
 
-### 3.1 Session model
+### 3.1 Ticket bunkers, sessions, and storage
 
-- **One session per ticket.** Sessions are keyed and named by ticket ID
-  (e.g. `PROJ-1234`).
-- Each session stores: session name, the ticket information supplied to it, the
-  accumulated observations and inferences, and the report history.
-- Ticket information enters the session either:
-  - **manually** (a user pastes / uploads the ticket context — the known drawback,
-    see §7), or
-  - **automatically**, when new branches matching the ticket key appear on the
-    remote but are not yet known to the service — the session ingests them and
-    refreshes its observations.
-- Session state is queryable by **authorized users only** (see §6).
+**Cardinality model:**
 
-Hosting/harness: **pi.dev** for session management. The specific reason for pi:
-its harness supports **automated extension execution at session start**, which
-lets us guarantee that a fixed sequence of actions runs *discretely and in order,
-irrespective of the agent* (see §3.2). The agent cannot skip, reorder, or
-reinterpret the bootstrap.
+- Each **branch** has a **user** (the owner/author of that work).
+- Each **ticket** gets a **branch**, but a ticket may span **multiple
+  directories**.
+- Each ticket has a **unique ID**, and that ID names its **ticket bunker**.
+  Uniqueness is a hard requirement — the bunker directory *is* the ticket's
+  identity in the system, so collisions are unacceptable.
+
+**On-disk layout — one bunker per ticket:**
+
+```
+<ticket_id>_bunker/
+├── literal_pi_session.json    # the pi session file (pi stores a session as a
+│                              #   single self-contained file, all branches of
+│                              #   the conversation included)
+└── report                     # the deliverable artifact
+```
+
+**Local vs. remote:**
+
+- The **pi session is local-first**: it comes into existence when someone makes a
+  new branch for the ticket, on that user's machine. It is the working substrate,
+  not the product.
+- The **report is the remotely-handled artifact** — it's what gets synced,
+  stored, and served to other users.
+- If session storage turns out to be cheap (pi sessions are single JSON files,
+  so plausibly yes), sessions can be stored remotely too — useful for
+  resuming/refreshing a bunker from a different machine. But this is an
+  optimization, not a requirement: the report must stand alone.
+
+**Ticket context enters the session either:**
+
+- **manually** (a user pastes / uploads the ticket context — the known drawback,
+  see §7), or
+- **automatically**, when new branches matching the ticket key appear on the
+  remote but are not yet known to the service — the session ingests them and
+  refreshes its observations.
+
+Report state is queryable by **authorized users only** (see §6).
+
+**Harness: pi (pi.dev).** Pi is a minimal agent harness with an extension model
+(TypeScript extensions, skills, prompt templates) rather than baked-in behavior,
+which is exactly what we need: we build the bootstrap ordering ourselves and the
+harness enforces it, *irrespective of the agent* (see §3.2). Pi's ordering
+semantics are visualized on pi.dev. Two other properties matter:
+
+- Sessions are stored as **single files** → the `literal_pi_session.json` layout
+  above is native, not something we bolt on.
+- Pi runs **headless** (`pi -p`, RPC over stdio, or SDK embedding) → the agent
+  can run with no TUI and no human in the loop, which §3.5 depends on.
 
 ### 3.2 Deterministic bootstrap pipeline (the "observation" phase)
 
@@ -76,6 +110,13 @@ Every output of this phase is an **atomic observation**: a mechanical git fact,
 reproducible from the same repo state, with no interpretation attached.
 
 ### 3.3 Agent enrichment (the "inference" phase)
+
+The agent starts from **minimal prior context**: the ticket's input information, a
+**baseline ontology** (the fixed vocabulary of §4 — observation vs. inference,
+the who/what/where/why report schema, the relevant-locations categories), and
+nothing else. All further context is **fed to it through commands** — the
+bootstrap pipeline's outputs plus a constrained command set it can invoke itself.
+The agent does not free-form its way around the repo; it composes commands.
 
 After bootstrap, the agent runs with the observations as ground truth. It may:
 
@@ -104,6 +145,21 @@ Delivered back to the requesting user (and optionally attachable to the ticket):
 | Where | Relevant-locations list (changed / new / old / candidate sites) | observation + inference |
 | Why | Goal of the work as inferred from ticket text + code | inference |
 | State | Branch freshness vs main, merged-back or not, apparent progress | observation + inference |
+
+### 3.5 Report-first UX
+
+**Users consume the report, not the session.** Ideally a user never interacts
+with the agent at all:
+
+- The session is created and driven headlessly (branch creation triggers it; the
+  bootstrap extensions and command-fed agent do the rest).
+- The report is the sole user-facing artifact — it must be complete enough that
+  reading it answers who/what/where/why without a follow-up conversation.
+- The pi session file is retained as **provenance**: if a report claim needs
+  auditing, the session shows exactly which commands produced which observations
+  and how each inference was derived. It is an audit log, not a chat to resume.
+- If interactive follow-up is ever needed, that's a signal the report schema is
+  missing a section — fix the schema, don't normalize talking to the agent.
 
 ## 4. Ordering & atomicity principles
 
@@ -146,12 +202,27 @@ Delivered back to the requesting user (and optionally attachable to the ticket):
 - No write-back to git.
 - No cross-repo inference beyond the repos explicitly attached to a session.
 
-## 9. Open questions
+## 9. Resolved decisions
 
-1. pi.dev extension API specifics — confirm the session-start hook can enforce
-   strict ordering and that its outputs are injectable as immutable context.
-2. Report storage: inside the pi session vs. an external store keyed by ticket ID
-   (matters for querying without waking a session).
-3. How ticket keys are matched in branch names (exact prefix? `feature/PROJ-123-*`?
+- **Report storage:** the report is the remote artifact; the pi session stays
+  local (remote session storage is an optional optimization if cheap). A report
+  never requires waking a session to read.
+- **Session/report layout:** `<ticket_id>_bunker/` containing
+  `literal_pi_session.json` + `report`; bunker name = unique ticket ID.
+- **UX:** report-first, agent-invisible (§3.5).
+- **Harness fit:** pi's extension model + single-file sessions + headless modes
+  (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
+  documented/visualized on pi.dev.
+
+## 10. Open questions
+
+1. How ticket keys are matched in branch names (exact prefix? `feature/PROJ-123-*`?
    configurable regex per org?).
-4. Multi-branch tickets: one merged report or one report per branch?
+2. Multi-directory tickets: how the bunker composes observations across dirs —
+   one report with per-dir sections, or per-dir observation sets merged at the
+   inference layer?
+3. Report sync transport: what "handled remotely" concretely is (shared git repo
+   of reports? object store? the tracker itself as attachment?). Needs to work
+   inside the classified enclave's constraints.
+4. The report format: single human-readable file vs. `report/` dir with
+   markdown + machine-readable JSON side by side (§5 currently implies both).
