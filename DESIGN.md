@@ -38,8 +38,12 @@ summary back to the requesting user.
 **Cardinality model:**
 
 - Each **branch** has a **user** (the owner/author of that work).
-- Each **ticket** gets a **branch**, but a ticket may span **multiple
-  directories**.
+- Each **logged ticket requires at least one branch** — no branch, nothing to
+  bunker — and may have **multiple branches** over its life. Branches within a
+  ticket are **ordered by recency of development**, or by **priority when one
+  is assigned**; this ordering is also the section order of the master report
+  (§3.4).
+- A ticket may span **multiple directories**.
 - Each ticket has a **unique ID**, and that ID names its **ticket bunker**.
   Uniqueness is a hard requirement — the bunker directory *is* the ticket's
   identity in the system, so collisions are unacceptable.
@@ -153,10 +157,11 @@ consequences:
    is **full, not incremental** — the master is always rebuilt from the current
    set of children, so it can never drift from them — and it records the digest
    of each child it was built from, so master-vs-child staleness is mechanically
-   detectable. Master assembly should be as mechanical as possible (ordering,
-   deduplicating, and stitching child sections); agent writing happens in the
-   children, not the master, so the master inherits — never re-invents — the
-   children's claims.
+   detectable. Master assembly is mechanical (ordering, deduplicating, and
+   stitching child sections); child sections appear in the ticket's branch
+   order — recency of development, or priority when assigned (§3.1). Agent
+   writing happens in the children, not the master, so the master inherits —
+   never re-invents — the children's claims.
 3. **The report cannot live inside the session.** The session file is an
    append-only conversation record; the report is a living document with its own
    update lifecycle (children rewritten as branches move, master regenerated on
@@ -269,6 +274,9 @@ else is deterministic, which keeps the audit itself trustworthy.
   session file. One component per branch, owned by the session; a master is
   fully regenerated (never patched) whenever a child changes, recording child
   digests for staleness detection. Only `reports/` syncs remotely.
+- **Cardinality:** a logged ticket requires ≥1 branch and may have many;
+  branches (and master sections) are ordered by recency of development, or by
+  priority when assigned.
 - **Report hygiene:** a mechanical lint gate (schema, stratum labels, length)
   before a child publishes, plus regeneration-time audits (staleness, dead
   references, duplication, contradiction) — §3.6.
@@ -296,7 +304,3 @@ else is deterministic, which keeps the audit itself trustworthy.
    last-writer-wins is safe *as long as* the regenerator always pulls the
    current children first — worth stating as an invariant when the sync
    transport is chosen.
-6. Cardinality tension to resolve: §3.1 says "each ticket gets a branch"
-   (singular) while the report system assumes multiple branches per ticket over
-   its life. Likely resolution: one *primary* branch per ticket, but the bunker
-   tracks every branch matching the ticket key, each with its own component.
