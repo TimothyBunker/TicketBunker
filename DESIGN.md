@@ -31,6 +31,20 @@ It receives ticket context, resolves related branches, mechanically extracts the
 git facts, lets an agent enrich them with repo search, and reports a structured
 summary back to the requesting user.
 
+**Deployment principle:** TicketBunker is a **layer on top of an existing git
+project** — any company, any security level. That constrains everything: the
+core processes must be **exceedingly simple and diagnosable**, self-hostable
+inside whatever boundary the repo already lives in, and adoptable without
+changing the project itself. Diagnosability is not a feature bolted on later;
+it is the design driver for §3.7–3.8.
+
+**Ownership principle:** **Pi does not own this system.** TicketBunker has its
+own backend with its own API; pi is a *client harness* that talks to that API.
+Sessions run in pi because its extension model fits our stage discipline
+(§3.7), but the source of truth — ticket registry, bunker index, report
+storage, execution ledger — lives in the TicketBunker backend. If pi were
+replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
+
 ## 3. Architecture
 
 ### 3.1 Ticket bunkers, sessions, and storage
@@ -222,6 +236,52 @@ which is every time a child changes — so the whole tree is re-audited at the
 same cadence it mutates. Only the contradiction check needs an agent; everything
 else is deterministic, which keeps the audit itself trustworthy.
 
+### 3.7 Stage contracts
+
+Every stage or process the agent goes through — bootstrap steps, enrichment
+steps, report writing, lint gates, master regeneration — is defined by an
+explicit, modular **stage contract**:
+
+| Field | Meaning |
+|---|---|
+| **Purpose** | why this stage exists — the question it answers |
+| **Input** | exactly what it consumes (prior stage outputs, ticket context, repo state) |
+| **Process** | the commands/operations it performs |
+| **Desired outcome** | what a successful run produces, in checkable terms |
+
+All four fields are explicit and written down per stage; no stage's behavior is
+implied by prompting alone. This is a large part of why pi extensions fit: each
+stage maps to one extension (or one command a stage exposes), so the contract
+boundary and the code boundary are the same boundary. Stages are modular —
+addable, removable, and reorderable at the contract level — and §3.2's pipeline
+is simply the ordered list of bootstrap stage contracts.
+
+### 3.8 Execution ledger & stage markers
+
+The diagnosability requirement, concretely: **every executed command is logged,
+and every stage is bracketed by markers** — and neither is the agent's job.
+
+- **Every command is logged**: the automated bootstrap commands, every command
+  the agent invokes during enrichment, the lint gates, master regeneration —
+  all of it. A ledger entry records: stage, command, arguments, initiator
+  (harness-automatic vs. agent-invoked), repo state (commit SHAs), timestamp,
+  exit status, and an output digest.
+- **Every stage emits markers**: a stage-start and stage-end marker referencing
+  its contract (§3.7), so the ledger reads as bracketed, ordered stages rather
+  than a flat command stream. A failed or skipped stage is visible as an
+  unclosed or absent bracket — diagnosis is reading the ledger, not reproducing
+  the run.
+- **Instrumentation is structural, not behavioral.** The agent does not call
+  the logging flags and cannot be trusted to — markers and ledger entries are
+  emitted **automatically by each function/hook**: the pi extension wrappers
+  that execute commands do the logging as a side effect of execution. An
+  unlogged command is impossible by construction, not discouraged by prompt.
+- **The ledger lives in the TicketBunker backend**, written through its API —
+  not in the pi session. The session file remains useful color (the agent's
+  reasoning), but the ledger is the authoritative record of what actually ran.
+  This also means audit does not depend on collecting session files off
+  individual machines.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -233,9 +293,16 @@ else is deterministic, which keeps the audit itself trustworthy.
 
 ## 5. Interfaces
 
+The TicketBunker **backend API** is the system's spine — pi extensions are
+clients of it, never owners of state:
+
 - **Ingest:** ticket context (manual paste or future tracker webhook), remote
   branch events.
-- **Query:** by ticket ID — return session info, latest report, raw observations.
+- **Ledger:** stage markers and per-command log entries, written automatically
+  by the executing hooks (§3.8).
+- **Publish:** child report components (through the lint gate) and regenerated
+  masters.
+- **Query:** by ticket ID — latest report, raw observations, ledger.
 - **Emit:** structured report (markdown + machine-readable JSON alongside).
 
 ## 6. Authorization
@@ -284,6 +351,14 @@ else is deterministic, which keeps the audit itself trustworthy.
 - **Harness fit:** pi's extension model + single-file sessions + headless modes
   (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
   documented/visualized on pi.dev.
+- **Ownership:** pi does not own the system — it is a client harness of the
+  TicketBunker backend API, which holds all durable state (ticket registry,
+  reports, execution ledger). Pi is replaceable without data loss.
+- **Diagnosability:** every command (automated or agent-invoked) is ledgered
+  and every stage bracketed by markers, emitted structurally by the executing
+  hooks — never by the agent's own volition (§3.8).
+- **Stage contracts:** every stage declares purpose / input / process / desired
+  outcome, explicitly and modularly, one pi extension per stage (§3.7).
 
 ## 10. Open questions
 
