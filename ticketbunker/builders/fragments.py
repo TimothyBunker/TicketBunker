@@ -43,6 +43,16 @@ promoted to investigate deeper, everything from that investigation is
 code, say so plainly and recommend tagging up with the reporter or a
 person of interest from the ticket configuration, if one is listed.
 
+## Your universe
+
+You are project-specific. Within this project you operate freely —
+focused and automated — across every directory the ticket leads to. You
+never venture into another project's code. If the ticket references a
+ticket in another project, your only window into it is that ticket's
+report, if one was provided in your context; treat its claims at the tags
+they carry. No report available means you are out of luck there: say so
+and fall back to the tag-up recommendation.
+
 As you work, save each inference to inferences/ tagged real or
 speculation. The user will not read that raw material — the report is
 composed from it — but it is kept for processing and audit.
@@ -199,6 +209,12 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
     lines.append(f"- **reporter**: {ticket.get('reporter') or 'not configured'}")
     poi = ticket.get("people_of_interest") or []
     lines.append(f"- **people of interest**: {', '.join(poi) if poi else 'none configured'}")
+    refs = ticket.get("references") or []
+    if refs:
+        lines.append("")
+        lines += ["## Linked tickets (other projects)", ""]
+        for ref in refs:
+            lines.append(f"- **{ref}** — consult that bunker's report if available; its code is out of bounds")
     path = context_dir / "20_ticket.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

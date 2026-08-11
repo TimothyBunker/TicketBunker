@@ -559,6 +559,50 @@ whatever convention a Jira/GitLab/tracker shop already uses, admins encode
 it once and TicketBunker speaks it, rather than TicketBunker imposing its
 own.
 
+### 3.15 The project universe boundary
+
+**A ticket is restricted to the global project** — but more often than not
+it impacts multiple parts of that project, and that's fine: within the
+project universe the agent operates **focused and automated**, following
+the ticket wherever it leads across the project's directories.
+
+**An agent and its session are project-specific.** An agent working one
+project cannot venture out into another project's code. If a ticket's
+trail leads outside the universe, the agent's only recourse is **another
+agent's report** — if one is available for the referenced ticket/project,
+it may be consumed (as tagged, provenance-carrying input); if not, the
+agent is out of luck, and says so (the tag-up recommendation applies: name
+the person, not the guess). Reports are thus the interface *between*
+project universes for agents, exactly as they are the interface between
+the system and humans — nothing crosses a project boundary except a
+report.
+
+**Cross-project tickets link by reference.** When work genuinely spans
+projects, the tickets are linked via references — a ticket carries the IDs
+of its counterparts in other projects (validated against the ticket
+pattern). The reference is a pointer to another bunker's reports, never a
+license to read another project's code.
+
+### 3.16 Format doctrine: JSON and markdown
+
+Both formats, with defined jobs — neither is a fallback for the other:
+
+- **JSON is for certainty**: export and import of information within and
+  between our own systems — observations, configs, the ledger, the
+  inference store, anything the framework must retrieve, validate, or
+  transfer mechanically. If a machine consumes it, it's JSON, and it goes
+  through typed intake.
+- **Markdown is for agnosticism**: everything meant to interface with
+  agents and humans in a general, convenient way, and to stay useful
+  outside our framework — reports, tb.md, tbroot.md, the fragments. A
+  TicketBunker report should be directly readable and relevant to any
+  project or use case with no TicketBunker tooling in sight.
+
+The split already matches the layout: everything under `observations/`,
+`sessions/`, `inferences/`, `ticket.json`, `ledger.jsonl` is JSON;
+everything a person or agent reads whole — `tb.md`, `reports/`,
+`tbroot.md`, `context/` — is markdown.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -689,16 +733,18 @@ extensions and the CLI are clients of it, never owners of state:
    branches follow configurable allowed patterns (`PROJECT-NUMBER`,
    `username/TICKET-name`), and branches are created *by* the system, so the
    convention holds by construction (§3.14).
-2. Multi-directory tickets: how the bunker composes observations across dirs —
-   one report with per-dir sections, or per-dir observation sets merged at the
-   inference layer?
+2. ~~Multi-directory tickets~~ — resolved: a ticket operates freely across
+   directories *within* its project universe; projects are the hard boundary,
+   crossed only by reports, with cross-project tickets linked by reference
+   (§3.15).
 3. ~~Report sync transport~~ — resolved: the backend is a git repo; `tb sync`
    moves the bunker database through ordinary git with `.tbignore` filtering
    (§2, §5). Works anywhere git works, including bundle transfer across
    air gaps.
-4. File format of components: markdown-only vs. markdown + machine-readable JSON
-   side by side (§5 currently implies both; the lint gate is easier against
-   JSON, the reader wants markdown).
+4. ~~File format of components~~ — resolved by the format doctrine: JSON for
+   certain machine export/import, markdown for framework-agnostic agent- and
+   human-facing content; reports are markdown, their machine interchange (when
+   needed) is a JSON export, not a second source of truth (§3.16).
 5. Concurrency on the master: if two users' sessions publish child updates for
    different branches at nearly the same time, who regenerates the master?
    Simplest answer: regeneration is idempotent from the child set, so

@@ -76,10 +76,16 @@ def cmd_init(args: argparse.Namespace) -> int:
         "assignee": args.assignee,
         "reporter": args.reporter,
         "people_of_interest": args.poi or [],
+        "references": args.ref or [],
     }
     try:
         handlers.intake_ticket(bunker, payload, ledger)
     except IntakeRejected as exc:
+        # We created this directory moments ago; a rejected ticket must not
+        # leave a half-initialized bunker squatting on the unique ID.
+        import shutil
+
+        shutil.rmtree(bunker)
         print(f"error: {exc}", file=sys.stderr)
         return 1
     fragments.seed_static(layout.paths(bunker)["context"])
@@ -320,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--assignee", default=None, help="ticket assignee (manual for now; tracker API later)")
     s.add_argument("--reporter", default=None, help="ticket reporter — the tag-up target when nothing concrete is found")
     s.add_argument("--poi", action="append", default=None, metavar="NAME", help="person of interest; repeatable")
+    s.add_argument("--ref", action="append", default=None, metavar="TICKET_ID",
+                   help="linked ticket in another project (pattern-validated); repeatable")
     s.add_argument("--root", default=".", help="directory to create the bunker in")
     s.set_defaults(fn=cmd_init)
 

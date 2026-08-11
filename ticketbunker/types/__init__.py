@@ -28,6 +28,14 @@ def _validate_ticket(payload: dict) -> list[str]:
         errors.append("ticket requires a 'key' (matched against branch names)")
     if payload.get("people_of_interest") is not None and not isinstance(payload["people_of_interest"], list):
         errors.append("'people_of_interest' must be a list")
+    refs = payload.get("references")
+    if refs is not None:
+        if not isinstance(refs, list):
+            errors.append("'references' must be a list of ticket ids")
+        else:
+            for ref in refs:
+                if not config.validate_ticket_id(ref):
+                    errors.append(f"reference {ref!r} does not match the allowed ticket pattern")
     return errors
 
 
