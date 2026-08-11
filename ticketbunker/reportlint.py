@@ -89,3 +89,46 @@ def gate(text: str) -> tuple[bool, list[Finding]]:
     findings = lint(text)
     ok = not any(f.severity == "error" for f in findings)
     return ok, findings
+
+
+# --- tbroot.md lint (DESIGN.md §3.10) -------------------------------------
+# tbroot.md is consumed as ground truth by every agent in the project, so
+# only real observations are allowed — no conjecture, however certain. The
+# lint can't prove claims true, but it refuses the form conjecture takes.
+
+CONJECTURE_RE = re.compile(
+    r"\b(probably|likely|seems?|appears?|presumably|maybe|perhaps|"
+    r"might|could be|i think|i believe|possibly|should be|expect(?:ed)?s? to)\b",
+    re.IGNORECASE,
+)
+ROOT_MAX_LINES = 200
+
+
+def lint_root(text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "<!--")):
+            continue
+        m = CONJECTURE_RE.search(stripped)
+        if m:
+            findings.append(
+                Finding("conjecture", "error", f"line {i}: conjecture language ('{m.group(0)}') — tbroot.md is observations only: {stripped[:70]}")
+            )
+        if stripped.startswith(("-", "*")) and not PATHLIKE_RE.search(stripped):
+            findings.append(
+                Finding("anchor", "warn", f"line {i}: claim has no checkable anchor (path/file/command): {stripped[:70]}")
+            )
+    body = [l for l in lines if l.strip()]
+    if len(body) > ROOT_MAX_LINES:
+        findings.append(
+            Finding("length", "error", f"tbroot.md is {len(body)} lines (max {ROOT_MAX_LINES}) — concise, proportional to project size")
+        )
+    return findings
+
+
+def gate_root(text: str) -> tuple[bool, list[Finding]]:
+    findings = lint_root(text)
+    ok = not any(f.severity == "error" for f in findings)
+    return ok, findings

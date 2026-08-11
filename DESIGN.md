@@ -71,6 +71,8 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 ├── context/                   # the separate fragments tb.md is composed from
 │   ├── 00_explanation.md      #   what TicketBunker is + the baseline ontology
 │   ├── 10_workflow.md         #   process workflow / stage expectations
+│   ├── 15_tbroot.md           #   the project's tbroot.md, mirrored in at
+│   │                          #   bootstrap — the local universe (§3.10)
 │   └── 20_current.md          #   current relevant information (generated)
 ├── observations/              # bootstrap stage outputs — atomic, JSON
 ├── inferences/                # agent's saved working inferences, tagged
@@ -378,6 +380,44 @@ Composition rules:
 - The harness adapter's only context job is "prepend `tb.md` to the session" —
   which keeps context assembly harness-neutral and out of the agent's control.
 
+### 3.10 The root surveyor and tbroot.md
+
+Ticket agents know their ticket; something has to teach them the **project**.
+That is the job of a **special agent that lives at the root folder level** —
+per project, above all ticket bunkers.
+
+**tbroot.md** sits in the project of interest and is one of the preamble
+files composed into every spawned agent's context (§3.9) — the part of the
+composition that explains their local universe. The surveyor:
+
+- looks for an existing `tbroot.md` first; if present, it updates rather than
+  rewrites;
+- peruses the project and records what a newcomer must know: "mainly C++,
+  built with Maven, N components — here's a one-liner on each; adapters live
+  here, builders here"; architecture, layout, coding standards *as observed*;
+- keeps it **concise but proportional to project size** — not a huge doc.
+  Concise reasoning about grounded features of the codebase is fine as long
+  as it doesn't compromise capacity;
+- **updates it as more information becomes available** — e.g. when a build
+  process is learned, it gets recorded. tbroot.md is living, not
+  write-once.
+
+**The hard rule: real observations only.** Information may not be clear, and
+that is acceptable — a gap stays a gap. Agent conjecture is not allowed in
+this file *even when it is seemingly certain conjecture*. tbroot.md is
+consumed as ground truth by every future agent in the project; a speculation
+written here would be laundered into an observation the moment the next
+session reads it. Anything the surveyor cannot anchor to something checkable
+(a path, a build file, a command that was run) does not go in. The
+speculative version of project knowledge belongs in ticket-level reports,
+tagged, not here.
+
+Mechanical enforcement (same spirit as the report gate): tbroot.md is linted
+for anchors — claims must reference checkable things — and for conjecture
+language ("probably", "seems", "likely", ...), which is rejected. The lint
+cannot prove a claim true, but it can refuse the *form* that conjecture
+takes.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
@@ -462,6 +502,10 @@ clients of it, never owners of state:
 - **Who:** assignee, reporter, and user-added people of interest are manual
   ticket configuration for now; tracker API compatibility comes after the
   manual flow is solid.
+- **Root surveyor:** a per-project agent maintains `tbroot.md` — the
+  local-universe preamble composed into every session. Observations only, no
+  conjecture however certain; concise but proportional to project size;
+  updated as information (e.g. build processes) becomes available (§3.10).
 - **Harness fit:** pi's extension model + single-file sessions + headless modes
   (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
   documented/visualized on pi.dev.

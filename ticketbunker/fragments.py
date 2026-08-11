@@ -96,6 +96,46 @@ their record is not your job.
 """
 
 
+TBROOT_TEMPLATE = """\
+<!-- tbroot.md — the project's local universe, maintained by the root
+     surveyor agent. RULES: real observations only, each anchored to a
+     checkable path/file/command. No conjecture, however certain — the
+     speculative version of project knowledge belongs in ticket reports,
+     tagged. Concise, proportional to project size. Update as information
+     (e.g. build processes) becomes available. Gate: tb lint-root tbroot.md
+-->
+
+# Project
+
+<!-- languages, entry points, what this project is — anchored -->
+
+# Build & test
+
+<!-- build system, how to build, how tests run — record when learned -->
+
+# Components
+
+<!-- one line per component: name, path, what it does -->
+
+# Conventions
+
+<!-- coding standards and patterns as observed, with example paths -->
+"""
+
+
+def mirror_tbroot(repo: Path, context_dir: Path) -> bool:
+    """Mirror the project's tbroot.md into the bunker's composition as
+    15_tbroot.md. Returns True if one was found."""
+    src = Path(repo) / "tbroot.md"
+    dest = context_dir / "15_tbroot.md"
+    if src.exists():
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        return True
+    if dest.exists():
+        dest.unlink()
+    return False
+
+
 def seed_static(context_dir: Path) -> None:
     context_dir.mkdir(parents=True, exist_ok=True)
     (context_dir / "00_explanation.md").write_text(EXPLANATION, encoding="utf-8")

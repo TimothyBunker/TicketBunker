@@ -39,6 +39,8 @@ def _bunker_paths(bunker: Path) -> dict[str, Path]:
 def _recompose(bunker: Path, ledger: Ledger) -> None:
     p = _bunker_paths(bunker)
     ticket = json.loads(p["ticket"].read_text(encoding="utf-8")) if p["ticket"].exists() else {}
+    if ticket.get("repo"):
+        fragments.mirror_tbroot(Path(ticket["repo"]), p["context"])
     obs = fragments.load_observations(p["observations"])
     fragments.write_current(p["context"], ticket, obs)
     compose_mod.compose(p["context"], p["tb_md"], ledger)
@@ -77,6 +79,8 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
     p = _bunker_paths(bunker)
     ticket = json.loads(p["ticket"].read_text(encoding="utf-8"))
+    ticket["repo"] = str(Path(args.repo).resolve())
+    p["ticket"].write_text(json.dumps(ticket, indent=2) + "\n", encoding="utf-8")
     ledger = Ledger(p["ledger"])
     obs = stages.run_bootstrap(
         repo=Path(args.repo).resolve(),
@@ -128,6 +132,28 @@ def cmd_publish(args: argparse.Namespace) -> int:
     out = master.regenerate(bunker, ledger)
     print(f"published {dest}; master regenerated at {out}")
     return 0
+
+
+def cmd_survey(args: argparse.Namespace) -> int:
+    repo = Path(args.repo)
+    tbroot = repo / "tbroot.md"
+    if not tbroot.exists():
+        tbroot.write_text(fragments.TBROOT_TEMPLATE, encoding="utf-8")
+        print(f"seeded {tbroot} — the root surveyor fills it in (observations only)")
+        return 0
+    ok, findings = reportlint.gate_root(tbroot.read_text(encoding="utf-8"))
+    for f in findings:
+        print(f)
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+def cmd_lint_root(args: argparse.Namespace) -> int:
+    ok, findings = reportlint.gate_root(Path(args.file).read_text(encoding="utf-8"))
+    for f in findings:
+        print(f)
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
@@ -222,6 +248,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("survey", help="seed a project tbroot.md, or lint an existing one")
+    s.add_argument("repo")
+    s.set_defaults(fn=cmd_survey)
+
+    s = sub.add_parser("lint-root", help="lint a tbroot.md (observations only, anchored, concise)")
+    s.add_argument("file")
+    s.set_defaults(fn=cmd_lint_root)
 
     s = sub.add_parser("infer", help="save a tagged inference to the bunker's inference store")
     s.add_argument("bunker")
