@@ -51,7 +51,12 @@ summary back to the requesting user.
 ├── literal_pi_session.json    # the pi session file (pi stores a session as a
 │                              #   single self-contained file, all branches of
 │                              #   the conversation included)
-└── report                     # the deliverable artifact
+└── reports/                   # the deliverable artifacts — OUTSIDE the session
+    ├── master                 # aggregate view; auto-regenerated when any
+    │                          #   child component changes
+    └── branches/
+        └── <branch_slug>      # one report component per branch, owned by
+                               #   the session (see §3.4)
 ```
 
 **Local vs. remote:**
@@ -134,9 +139,33 @@ Inference outputs are labeled as such. The report format keeps the two strata
 visually and structurally separate, so a reader can trust the observations
 absolutely and weigh the inferences appropriately.
 
-### 3.4 Report
+### 3.4 Report system
 
-Delivered back to the requesting user (and optionally attachable to the ticket):
+**The report is a writing of the agent itself** — it is the inference layer's
+output, authored over the bootstrap observations. That has three structural
+consequences:
+
+1. **One report component per branch.** Each session owns exactly one report
+   component for each branch it covers (`reports/branches/<branch_slug>`). The
+   session is the sole writer of its components; nothing else touches them.
+2. **A master report aggregates the children.** `reports/master` is
+   automatically updated whenever any child component is modified. Regeneration
+   is **full, not incremental** — the master is always rebuilt from the current
+   set of children, so it can never drift from them — and it records the digest
+   of each child it was built from, so master-vs-child staleness is mechanically
+   detectable. Master assembly should be as mechanical as possible (ordering,
+   deduplicating, and stitching child sections); agent writing happens in the
+   children, not the master, so the master inherits — never re-invents — the
+   children's claims.
+3. **The report cannot live inside the session.** The session file is an
+   append-only conversation record; the report is a living document with its own
+   update lifecycle (children rewritten as branches move, master regenerated on
+   every child change) and its own audience (remote, authorized users). So
+   reports sit beside the session in the bunker, and only `reports/` syncs
+   remotely.
+
+**Report component schema** — each child (and the master, per-branch-sectioned)
+delivers who / what / where / why:
 
 | Section | Content | Stratum |
 |---|---|---|
@@ -160,6 +189,33 @@ with the agent at all:
   and how each inference was derived. It is an audit log, not a chat to resume.
 - If interactive follow-up is ever needed, that's a signal the report schema is
   missing a section — fix the schema, don't normalize talking to the agent.
+
+### 3.6 Report analysis toolset
+
+Because reports are agent-written and long-lived, they will decay without
+mechanical pressure: sections bloat, children duplicate each other, the master
+drifts from reality. We therefore need a **procedure/toolset for analyzing
+existing reports and keeping them as straightforward as possible** — a report
+linter + auditor, mechanical wherever possible, in the same spirit as the
+bootstrap pipeline.
+
+v1 checks, in rough priority order:
+
+| Check | Mechanical? | When | On failure |
+|---|---|---|---|
+| **Schema** — required who/what/where/why/state sections present; every claim carries a stratum label; every inference cites ≥1 observation | yes | gate: before a child is accepted into `reports/branches/` | block the write; agent must rewrite |
+| **Staleness** — child's recorded commit SHA vs branch head; master's recorded child digests vs actual children | yes | on branch push events and on read | mark stale prominently; trigger refresh |
+| **Dead references** — paths/symbols named in the report that no longer exist on the branch or baseline | yes | on master regeneration | strike through + warn |
+| **Duplication** — same observation restated across children (e.g. shared merge-base facts); child content re-narrated in the master | yes (digest/similarity) | on master regeneration | hoist shared facts to the master; children keep references |
+| **Length budget** — per-section size ceilings; a report that outgrows them is summarizing badly | yes | gate, same as schema | block; agent must compress |
+| **Contradiction** — master claims vs child claims, or two children disagreeing about shared state | agent-assisted | on master regeneration | flag for the owning session's next refresh |
+
+The gate checks (schema, length) run *before* a child is published, so a
+malformed report never reaches remote storage. The regeneration checks
+(dead refs, duplication, contradiction) run every time the master rebuilds,
+which is every time a child changes — so the whole tree is re-audited at the
+same cadence it mutates. Only the contradiction check needs an agent; everything
+else is deterministic, which keeps the audit itself trustworthy.
 
 ## 4. Ordering & atomicity principles
 
@@ -208,7 +264,14 @@ with the agent at all:
   local (remote session storage is an optional optimization if cheap). A report
   never requires waking a session to read.
 - **Session/report layout:** `<ticket_id>_bunker/` containing
-  `literal_pi_session.json` + `report`; bunker name = unique ticket ID.
+  `literal_pi_session.json` + `reports/`; bunker name = unique ticket ID.
+- **Report structure:** the report is agent-authored and lives *outside* the
+  session file. One component per branch, owned by the session; a master is
+  fully regenerated (never patched) whenever a child changes, recording child
+  digests for staleness detection. Only `reports/` syncs remotely.
+- **Report hygiene:** a mechanical lint gate (schema, stratum labels, length)
+  before a child publishes, plus regeneration-time audits (staleness, dead
+  references, duplication, contradiction) — §3.6.
 - **UX:** report-first, agent-invisible (§3.5).
 - **Harness fit:** pi's extension model + single-file sessions + headless modes
   (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
@@ -224,5 +287,16 @@ with the agent at all:
 3. Report sync transport: what "handled remotely" concretely is (shared git repo
    of reports? object store? the tracker itself as attachment?). Needs to work
    inside the classified enclave's constraints.
-4. The report format: single human-readable file vs. `report/` dir with
-   markdown + machine-readable JSON side by side (§5 currently implies both).
+4. File format of components: markdown-only vs. markdown + machine-readable JSON
+   side by side (§5 currently implies both; the lint gate is easier against
+   JSON, the reader wants markdown).
+5. Concurrency on the master: if two users' sessions publish child updates for
+   different branches at nearly the same time, who regenerates the master?
+   Simplest answer: regeneration is idempotent from the child set, so
+   last-writer-wins is safe *as long as* the regenerator always pulls the
+   current children first — worth stating as an invariant when the sync
+   transport is chosen.
+6. Cardinality tension to resolve: §3.1 says "each ticket gets a branch"
+   (singular) while the report system assumes multiple branches per ticket over
+   its life. Likely resolution: one *primary* branch per ticket, but the bunker
+   tracks every branch matching the ticket key, each with its own component.
