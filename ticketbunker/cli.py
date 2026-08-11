@@ -294,7 +294,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     output, code = harness_mod.run_session(
         bunker, args.branch, Path(args.repo).resolve(), ledger,
         harness=args.harness, command_template=args.cmd,
-        pi_bin=args.pi_bin, provider=args.provider, model=args.model,
+        pi_bin=args.pi_bin, codex_bin=args.codex_bin,
+        provider=args.provider, model=args.model,
     )
     if code != 0:
         print(output)
@@ -490,10 +491,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="defaults to the bunker of the ticket in the current branch's name")
     s.add_argument("--branch", default=None, help="defaults to the repo's current branch")
     s.add_argument("--repo", default=".", help="source repo (default: current directory)")
-    s.add_argument("--harness", default="pi", choices=["pi", "command"])
+    s.add_argument("--harness", default="pi", choices=["pi", "codex", "command"])
     s.add_argument("--cmd", default=None,
                    help="harness 'command' template; placeholders: {form} {tb_md} {repo} {prompt}")
     s.add_argument("--pi-bin", default="pi", help="pi executable (default: pi on PATH)")
+    s.add_argument("--codex-bin", default="codex", help="codex executable (default: codex on PATH)")
     s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
     s.add_argument("--model", default=None, help="pi model pattern")
     s.set_defaults(fn=cmd_run)

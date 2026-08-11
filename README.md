@@ -126,6 +126,9 @@ tb run --harness pi --provider anthropic --model "claude-*"   # on branch Tim/TB
 tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
     --harness pi --provider anthropic --model "claude-*"
 
+# codex (OpenAI Codex CLI) — tb.md rides at the top of the prompt:
+tb run --harness codex --codex-bin codex
+
 # any other CLI (or a test stub) via the command profile:
 tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
     --harness command --cmd "python3 tools/stub_agent.py {form}"

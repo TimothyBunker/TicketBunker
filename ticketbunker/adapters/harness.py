@@ -77,6 +77,7 @@ def run_session(
     harness: str = "pi",
     command_template: str | None = None,
     pi_bin: str = "pi",
+    codex_bin: str = "codex",
     provider: str | None = None,
     model: str | None = None,
 ) -> tuple[str, int]:
@@ -91,6 +92,20 @@ def run_session(
             p["tb_md"], p["sessions"], f"{ticket_id}:{layout.branch_slug(branch)}",
             prompt, pi_bin=pi_bin, provider=provider, model=model,
         )
+    elif harness == "codex":
+        # Codex CLI has no system-prompt-file injection, so tb.md rides at
+        # the top of the prompt itself — same content, same audit trail
+        # (the full prompt is in the ledgered argv).
+        full_prompt = (
+            "Your context document follows; it is authoritative.\n\n"
+            + p["tb_md"].read_text(encoding="utf-8")
+            + "\n\n---\n\n"
+            + prompt
+        )
+        argv = [codex_bin, "exec", "--cd", str(repo)]
+        if model:
+            argv += ["--model", model]
+        argv.append(full_prompt)
     elif harness == "command":
         if not command_template:
             raise ValueError("harness 'command' requires a command template")
@@ -99,7 +114,7 @@ def run_session(
             for part in shlex.split(command_template)
         ]
     else:
-        raise ValueError(f"unknown harness {harness!r} (known: pi, command)")
+        raise ValueError(f"unknown harness {harness!r} (known: pi, codex, command)")
 
     env = dict(os.environ)
     env["TB_BUNKER"] = str(Path(bunker).resolve())
