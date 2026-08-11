@@ -63,20 +63,25 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ## Usage
 
 ```sh
-tb config --user Tim                                          # once: team identifier (defaults from git)
-tb init TB-1267 --key TB-1267 --assignee ann --reporter bob   # create a bunker (id must match pattern)
-tb branch TB-1267_bunker --name fourier-alg-impl --repo .     # creates Tim/TB-1267-fourier-alg-impl
-tb bootstrap TB-1267_bunker --repo /path/to/repo --baseline main # run the observation pipeline
-tb session TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --user Tim  # per-session config
-tb compose TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl                 # recompose tb.md for that session
-tb scaffold TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --out form.md  # pre-filled report form
-tb infer TB-1267_bunker --tag real --claim "..." --anchor src/x.py:10  # save a tagged inference
-tb lint form.md                                               # check a report component
-tb publish TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --file form.md  # gate + accept + regen master
-tb survey /path/to/repo                                       # seed or lint the project tbroot.md
-tb status TB-1267_bunker                                         # state, staleness, ledger health
-tb sync . --remote git@host:team/bunkers.git                  # share through git (.tbignore respected)
+cd your-repo && tb init            # once per repo: creates .tb/ at the git root (fails outside a repo)
+tb config --user Tim               # once per machine: team identifier (defaults from git user.name)
+
+tb ticket TB-1267 --key TB-1267 --assignee ann --reporter bob  # create the ticket's bunker in .tb/
+tb branch TB-1267 --name fourier-alg-impl --repo .             # creates Tim/TB-1267-fourier-alg-impl
+tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
+tb run                             # on the ticket branch: everything else is inferred
+
+# the pieces tb run drives, individually addressable by ticket ID:
+tb session TB-1267 --branch Tim/TB-1267-fourier-alg-impl --data enclave=high
+tb scaffold TB-1267 --branch Tim/TB-1267-fourier-alg-impl --out form.md
+tb infer TB-1267 --tag real --claim "..." --anchor src/x.py:10
+tb lint form.md && tb publish TB-1267 --branch Tim/TB-1267-fourier-alg-impl --file form.md
+tb survey . && tb status TB-1267
 ```
+
+`.tb/` is committed with your repo — the bunker database shares the code's
+remote and access boundary. A separate standalone database (`tb ticket
+--root`, `tb sync`) is still supported.
 
 ## The backend is a git repo
 

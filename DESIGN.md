@@ -526,6 +526,18 @@ inferences/, reports/, ledger.jsonl, tb.md) defined in one place
 knowing them all; tooling and humans can both address any piece of instance
 state by path without asking.
 
+**The root is git-relative.** `tb init` runs inside a git repository — and
+fails outside one, exactly like git itself — creating `.tb/` at the repo
+root. Ticket bunkers live under `.tb/`, every command resolves bare ticket
+IDs by walking up to the nearest `.tb/` (git's own discovery rule), and the
+bunker database travels with the repo: committed alongside the code, same
+remote, same access boundary — which is precisely the §6 auth model
+(report access requires repo access) enforced by location. A nested
+`.tb/.gitignore` keeps session-local material (form drafts, harness session
+files, patches) out of the shared history. A standalone external database
+(tb ticket --root, tb sync) remains supported for teams that want bunkers
+in a separate repo.
+
 ### 3.14 Naming conventions and branch creation
 
 **Tickets and branches follow an allowed pattern.**

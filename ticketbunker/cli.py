@@ -59,8 +59,52 @@ def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
     compose_mod.compose(p["context"], p["tb_md"], ledger)
 
 
+def _resolve_bunker(arg: str) -> Path | None:
+    """A bunker argument may be a path or a bare ticket ID resolved against
+    the enclosing project's .tb/ (found by walking up, like git)."""
+    cand = Path(arg)
+    if cand.is_dir():
+        return cand
+    root = layout.find_root()
+    if root:
+        by_id = layout.bunker_path(root, arg)
+        if by_id.is_dir():
+            return by_id
+    return None
+
+
 def cmd_init(args: argparse.Namespace) -> int:
-    bunker = Path(args.root) / f"{args.ticket_id}_bunker"
+    import subprocess
+
+    proc = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("error: not inside a git repository — tb init roots itself in a git repo, like git does",
+              file=sys.stderr)
+        return 1
+    project = Path(proc.stdout.strip())
+    tb_dir = layout.bunkers_dir(project)
+    if tb_dir.exists():
+        print(f"already initialized: {tb_dir}")
+        return 0
+    tb_dir.mkdir()
+    (tb_dir / ".gitignore").write_text(layout.TB_GITIGNORE, encoding="utf-8")
+    (tb_dir / "config.json").write_text(json.dumps({"project": project.name}, indent=2) + "\n", encoding="utf-8")
+    print(f"initialized {tb_dir} — ticket bunkers live here and travel with the repo")
+    print("next: tb ticket <TICKET-ID> --key <KEY> ...")
+    return 0
+
+
+def cmd_ticket(args: argparse.Namespace) -> int:
+    if args.root:
+        root_dir = Path(args.root)
+    else:
+        project = layout.find_root()
+        if not project:
+            print("error: no .tb/ found here or above — run 'tb init' inside your git repo first",
+                  file=sys.stderr)
+            return 1
+        root_dir = layout.bunkers_dir(project)
+    bunker = root_dir / f"{args.ticket_id}_bunker"
     if bunker.exists():
         print(f"error: {bunker} already exists — ticket IDs must be unique", file=sys.stderr)
         return 1
@@ -95,7 +139,10 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     ticket = _ticket(bunker)
     ticket["repo"] = str(Path(args.repo).resolve())
     ledger = _ledger(bunker)
@@ -113,7 +160,10 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 
 
 def cmd_session(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     cfg_path = layout.session_config(bunker, args.branch)
     cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {"branch": args.branch}
     changed = False
@@ -146,7 +196,10 @@ def cmd_session(args: argparse.Namespace) -> int:
 
 
 def cmd_compose(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     _recompose(bunker, _ledger(bunker), branch=args.branch)
     scope = f" for session {args.branch}" if args.branch else ""
     print(f"composed {layout.paths(bunker)['tb_md']}{scope}")
@@ -154,7 +207,10 @@ def cmd_compose(args: argparse.Namespace) -> int:
 
 
 def cmd_scaffold(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     obs = fragments.load_observations(layout.paths(bunker)["observations"])
     if not obs:
         print("error: bootstrap has not run — nothing to pre-fill", file=sys.stderr)
@@ -170,7 +226,10 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     payload = {"tag": args.tag, "claim": args.claim, "grounding": args.grounding, "anchors": args.anchor}
     try:
         entry = handlers.intake_inference(bunker, payload, _ledger(bunker))
@@ -211,7 +270,10 @@ def cmd_survey(args: argparse.Namespace) -> int:
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     ledger = _ledger(bunker)
     text = Path(args.file).read_text(encoding="utf-8")
     # Show all findings (including warnings) regardless of outcome.
@@ -258,7 +320,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        candidates = [Path.cwd() / f"{tid}_bunker"]
+        candidates = []
+        project = layout.find_root(repo) or layout.find_root()
+        if project:
+            candidates.append(layout.bunker_path(project, tid))
+        candidates.append(Path.cwd() / f"{tid}_bunker")
         root = config.bunker_root()
         if root:
             candidates.append(root / f"{tid}_bunker")
@@ -267,7 +333,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             looked = ", ".join(str(c) for c in candidates)
             print(
                 f"error: no bunker for {tid} (looked in: {looked}) — "
-                "set the database location with 'tb config --bunker-root DIR'",
+                "run 'tb init' then 'tb ticket', or set 'tb config --bunker-root DIR'",
                 file=sys.stderr,
             )
             return 1
@@ -344,7 +410,10 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 
 def cmd_branch(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     ticket = _ticket(bunker)
     if not ticket.get("id"):
         print("error: bunker has no ticket.json", file=sys.stderr)
@@ -377,14 +446,20 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_regen_master(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     out = master.regenerate(bunker, _ledger(bunker))
     print(f"master regenerated at {out}")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    bunker = Path(args.bunker)
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     p = layout.paths(bunker)
     ticket = _ticket(bunker)
     print(f"bunker: {p['root'].name}")
@@ -416,7 +491,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tb", description="TicketBunker — git context layer for tickets")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", help="create a new ticket bunker")
+    s = sub.add_parser("init", help="initialize .tb/ at the root of the current git repo (fails outside one)")
+    s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/")
     s.add_argument("ticket_id")
     s.add_argument("--key", required=True, help="ticket key matched against branch names")
     s.add_argument("--title", default=None)
@@ -427,18 +505,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--poi", action="append", default=None, metavar="NAME", help="person of interest; repeatable")
     s.add_argument("--ref", action="append", default=None, metavar="TICKET_ID",
                    help="linked ticket in another project (pattern-validated); repeatable")
-    s.add_argument("--root", default=".", help="directory to create the bunker in")
-    s.set_defaults(fn=cmd_init)
+    s.add_argument("--root", default=None, help="create the bunker in this directory instead of the project .tb/")
+    s.set_defaults(fn=cmd_ticket)
 
     s = sub.add_parser("bootstrap", help="run the deterministic observation pipeline")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--repo", required=True)
     s.add_argument("--baseline", default="main")
     s.add_argument("--ticket-key", default=None, help="override the stored ticket key")
     s.set_defaults(fn=cmd_bootstrap)
 
     s = sub.add_parser("session", help="set or show a per-session (per-branch) config")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--branch", required=True)
     s.add_argument("--user", default=None, help="the branch's user")
     s.add_argument("--baseline", default=None, help="session-specific baseline override")
@@ -448,18 +526,18 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_session)
 
     s = sub.add_parser("compose", help="recompose tb.md from context fragments")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--branch", default=None, help="compose for a specific session: include its per-session config")
     s.set_defaults(fn=cmd_compose)
 
     s = sub.add_parser("scaffold", help="emit a pre-filled report form for a branch")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--branch", required=True)
     s.add_argument("--out", default=None, help="write to a file instead of stdout")
     s.set_defaults(fn=cmd_scaffold)
 
     s = sub.add_parser("infer", help="save a tagged inference through the typed intake")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--tag", required=True, choices=["real", "speculation"])
     s.add_argument("--claim", required=True)
     s.add_argument("--grounding", default=None, choices=["grounded", "adjacent", "ungrounded"],
@@ -481,7 +559,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_survey)
 
     s = sub.add_parser("publish", help="submit a component through the typed intake; regenerate the master")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
@@ -507,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_config)
 
     s = sub.add_parser("branch", help="create a convention-named branch for a ticket: user/TICKET-name")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--name", required=True, help="short branch name, e.g. fourier-alg-impl")
     s.add_argument("--repo", required=True, help="the source repo to create the branch in")
     s.add_argument("--user", default=None, help="override the configured user identifier")
@@ -521,11 +599,11 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_sync)
 
     s = sub.add_parser("regen-master", help="rebuild the master report from children")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.set_defaults(fn=cmd_regen_master)
 
     s = sub.add_parser("status", help="show bunker state, staleness, and ledger health")
-    s.add_argument("bunker")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.set_defaults(fn=cmd_status)
 
     args = parser.parse_args(argv)
