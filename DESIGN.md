@@ -73,6 +73,9 @@ replaced tomorrow, the bunkers, reports, and ledgers would be untouched.
 │   ├── 10_workflow.md         #   process workflow / stage expectations
 │   └── 20_current.md          #   current relevant information (generated)
 ├── observations/              # bootstrap stage outputs — atomic, JSON
+├── inferences/                # agent's saved working inferences, tagged
+│                              #   real vs speculation — agent-facing, not
+│                              #   user-facing (§3.3)
 ├── ledger.jsonl               # execution ledger (mirrored to the backend)
 └── reports/                   # the deliverable artifacts — OUTSIDE the session
     ├── master                 # aggregate view; auto-regenerated when any
@@ -188,9 +191,38 @@ After bootstrap, the agent runs with the observations as ground truth. It may:
   - *candidate implementation sites* — where remaining/future work plausibly goes.
 - Synthesize the **who / what / where / why** narrative.
 
-Inference outputs are labeled as such. The report format keeps the two strata
-visually and structurally separate, so a reader can trust the observations
-absolutely and weigh the inferences appropriately.
+**The inference stratum splits in two.** Not all agent output carries the same
+epistemic weight, and the report must say which is which:
+
+- **Real** — a concrete fact the agent *located and verified*: an actual path,
+  a specific code line of interest, a variable named in the ticket found in
+  the baseline. Real findings are checkable by the reader (the thing is there
+  or it isn't) and by the lint tooling (dead-reference check).
+- **Speculation** — the agent's interpretation: what that code impacts, what
+  it accomplishes, where the ticket's work plausibly lands. Speculation is
+  explicitly tagged and always **ranked by grounding**:
+  1. *grounded* — anchored to a real finding (e.g. the ticket names a variable,
+     the agent found it, and traced what ties into it);
+  2. *adjacent* — anchored to the neighborhood (right files/areas, no specific
+     symbol match);
+  3. *ungrounded* — nothing concrete found.
+
+**Finding nothing is a first-class result.** If the agent can't ground the
+ticket in the code, the report must say so and recommend the human move: tag
+up with the **reporter** or a configured **person of interest**, when one is
+available. An honest "talk to X" beats a confident guess.
+
+**Investigation promotion.** The agent may be promoted to investigate further
+(deeper tracing beyond the standard enrichment); everything submitted from
+such investigation carries the speculation tag — promotion raises effort,
+never epistemic rank. Only verification can turn speculation into real.
+
+**The inference store.** As the agent works it saves its inferences, tagged
+real vs. speculation, under `inferences/` in the bunker. This is working
+data: the user doesn't need the raw material, but it is kept so the agent can
+process its final output from it (and so an audit can trace a report claim
+back through the store to the ledger). The report is composed *from* the
+store; the store is not the report.
 
 ### 3.4 Report system
 
@@ -223,11 +255,11 @@ delivers who / what / where / why:
 
 | Section | Content | Stratum |
 |---|---|---|
-| Who | Authors, committers, reviewers touched the ticket's branches | observation |
+| Who | Direct ticket people first: **assignee, reporter, and any names/users the user adds** (people of interest). Manually configured for now; tracker API compatibility comes after manual is solid. Then git authors from the branches | ticket config + observation |
 | What | Summarized diff: files, hunks, additions/deletions, work vs. merge churn | observation |
-| Where | Relevant-locations list (changed / new / old / candidate sites) | observation + inference |
-| Why | Goal of the work as inferred from ticket text + code | inference |
-| State | Branch freshness vs main, merged-back or not, apparent progress | observation + inference |
+| Where | **Ranked impact list**: where the ticket may impact, ordered by grounding — specific ticket symbols found and traced first, adjacent areas next, and an honest "nothing concrete found → tag up with reporter/person of interest" last | real + speculation |
+| Why | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
+| State | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
 
 ### 3.5 Report-first UX
 
@@ -354,6 +386,11 @@ Composition rules:
   merge-base, one authorship entry). They can be cached, replayed, and audited.
 - **Inferences are less atomic by nature** — they aggregate observations — but
   each inference should cite the observations it rests on.
+- **Three tags, one ladder:** `observation` (pipeline-produced mechanical fact)
+  → `real` (agent-located, verifiable concrete fact: a path, a line, a symbol)
+  → `speculation` (interpretation, ranked by grounding). A claim's tag can only
+  be upgraded by verification — never by confidence, repetition, or promotion
+  of the agent's effort level.
 
 ## 5. Interfaces
 
@@ -417,6 +454,14 @@ clients of it, never owners of state:
   before a child publishes, plus regeneration-time audits (staleness, dead
   references, duplication, contradiction) — §3.6.
 - **UX:** report-first, agent-invisible (§3.5).
+- **Ontology:** three tags — observation / real / speculation — with
+  speculation ranked by grounding (grounded / adjacent / ungrounded); finding
+  nothing is a reportable result that recommends tagging up with the reporter
+  or a person of interest. Agent working inferences persist in `inferences/`,
+  tagged, as agent-facing raw material for the final report.
+- **Who:** assignee, reporter, and user-added people of interest are manual
+  ticket configuration for now; tracker API compatibility comes after the
+  manual flow is solid.
 - **Harness fit:** pi's extension model + single-file sessions + headless modes
   (`pi -p` / RPC / SDK) confirm the architecture; ordering semantics are
   documented/visualized on pi.dev.

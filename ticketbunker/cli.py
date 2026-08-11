@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from . import compose as compose_mod
-from . import fragments, master, reportlint, stages
+from . import fragments, master, reportlint, stages, store
 from .ledger import Ledger
 
 
@@ -28,6 +28,7 @@ def _bunker_paths(bunker: Path) -> dict[str, Path]:
     return {
         "context": bunker / "context",
         "observations": bunker / "observations",
+        "inferences": bunker / "inferences",
         "ledger": bunker / "ledger.jsonl",
         "ticket": bunker / "ticket.json",
         "tb_md": bunker / "tb.md",
@@ -52,12 +53,16 @@ def cmd_init(args: argparse.Namespace) -> int:
     p = _bunker_paths(bunker)
     p["reports"].mkdir(parents=True)
     p["observations"].mkdir(parents=True)
+    p["inferences"].mkdir(parents=True)
     ticket = {
         "id": args.ticket_id,
         "key": args.key,
         "title": args.title,
         "priority": args.priority,
         "description": args.description,
+        "assignee": args.assignee,
+        "reporter": args.reporter,
+        "people_of_interest": args.poi or [],
     }
     p["ticket"].write_text(json.dumps(ticket, indent=2) + "\n", encoding="utf-8")
     fragments.seed_static(p["context"])
@@ -125,6 +130,25 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_infer(args: argparse.Namespace) -> int:
+    bunker = Path(args.bunker)
+    ledger = Ledger(_bunker_paths(bunker)["ledger"])
+    try:
+        entry = store.save(
+            bunker,
+            tag=args.tag,
+            claim=args.claim,
+            ledger=ledger,
+            grounding=args.grounding,
+            anchors=args.anchor,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"saved [{entry['tag']}] inference ({len(store.load(bunker))} total)")
+    return 0
+
+
 def cmd_regen_master(args: argparse.Namespace) -> int:
     bunker = Path(args.bunker)
     ledger = Ledger(_bunker_paths(bunker)["ledger"])
@@ -171,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--title", default=None)
     s.add_argument("--priority", default=None)
     s.add_argument("--description", default=None)
+    s.add_argument("--assignee", default=None, help="ticket assignee (manual for now; tracker API later)")
+    s.add_argument("--reporter", default=None, help="ticket reporter — the tag-up target when nothing concrete is found")
+    s.add_argument("--poi", action="append", default=None, metavar="NAME",
+                   help="person of interest; repeatable")
     s.add_argument("--root", default=".", help="directory to create the bunker in")
     s.set_defaults(fn=cmd_init)
 
@@ -194,6 +222,16 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
     s.set_defaults(fn=cmd_publish)
+
+    s = sub.add_parser("infer", help="save a tagged inference to the bunker's inference store")
+    s.add_argument("bunker")
+    s.add_argument("--tag", required=True, choices=list(store.TAGS))
+    s.add_argument("--claim", required=True)
+    s.add_argument("--grounding", default=None, choices=list(store.GROUNDINGS),
+                   help="required for speculation")
+    s.add_argument("--anchor", action="append", default=None, metavar="PATH[:LINE]",
+                   help="checkable anchor; required for real, repeatable")
+    s.set_defaults(fn=cmd_infer)
 
     s = sub.add_parser("regen-master", help="rebuild the master report from children")
     s.add_argument("bunker")

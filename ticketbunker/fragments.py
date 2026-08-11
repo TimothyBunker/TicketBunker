@@ -19,16 +19,36 @@ ticket, so a reader never has to reconstruct the history by hand.
 
 ## Ontology
 
-Two strata, kept strictly separate in everything you write:
+Three tags, one ladder. Every claim you write carries exactly one:
 
-- **Observation** — a mechanical git fact from the bootstrap pipeline
+- **[observation]** — a mechanical git fact from the bootstrap pipeline
   (a diff, a merge-base, an authorship entry). Atomic, reproducible,
   no interpretation. You do not create observations; you receive them.
-- **Inference** — your conclusion built on observations. Every inference
-  must cite the observation(s) it rests on. Label every claim with its
-  stratum.
+- **[real]** — a concrete fact you located and verified: an actual path,
+  a specific code line of interest, a variable from the ticket found in
+  the baseline. Real claims must name the path (and line where possible)
+  so a reader can check them.
+- **[speculation]** — your interpretation: what code impacts or
+  accomplishes, where the ticket's work lands. Rank every speculation by
+  grounding: *grounded* (anchored to a [real] finding — you found the
+  ticket's symbol and traced what ties into it), *adjacent* (right
+  files/areas, no specific symbol match), or *ungrounded* (nothing
+  concrete found).
 
-Relevant-locations categories for the Where section:
+A tag is only upgraded by verification — never by confidence. If you are
+promoted to investigate deeper, everything from that investigation is
+[speculation] until verified.
+
+**Finding nothing is a result.** If you cannot ground the ticket in the
+code, say so plainly and recommend tagging up with the reporter or a
+person of interest from the ticket configuration, if one is listed.
+
+As you work, save each inference to inferences/ tagged real or
+speculation. The user will not read that raw material — the report is
+composed from it — but it is kept for processing and audit.
+
+Relevant-locations categories for the Where section (a ranked impact
+list, best-grounded first):
 
 - *changed* — paths modified on the ticket branch(es)
 - *new work* — additions with no counterpart in the baseline
@@ -51,9 +71,18 @@ Your stages, in order:
    functions). Compile the relevant-locations list.
 2. **Write.** One report component per branch with sections:
    `## Who`, `## What`, `## Where`, `## Why`, `## State`.
-   Prefix each claim line with `[observation]` or `[inference]`; every
-   `[inference]` cites observations. Keep it straightforward: the report
-   is read by people who cannot ask you follow-ups.
+   Prefix each claim line with `[observation]`, `[real]`, or
+   `[speculation]`. Section rules:
+   - **Who**: the ticket's assignee, reporter, and people of interest
+     first (from ticket configuration), then git authors.
+   - **Where**: a ranked impact list — grounded speculation first,
+     adjacent next, ungrounded last; if nothing concrete was found, say
+     so and name who to tag up with.
+   - **Why**: primary sources at the top (the ticket's own text), your
+     speculation at the bottom, composed from [real] findings and
+     clearly tagged.
+   Keep it straightforward: the report is read by people who cannot ask
+   you follow-ups.
 3. **Publish.** Components are lint-gated (schema, stratum labels, length)
    before acceptance; the master report regenerates mechanically from them.
 
@@ -74,6 +103,12 @@ def write_current(context_dir: Path, ticket: dict, observations: dict | None) ->
     for key in ("id", "key", "title", "priority", "description"):
         if ticket.get(key):
             lines.append(f"- **{key}**: {ticket[key]}")
+    lines.append("")
+    lines += ["## People", ""]
+    lines.append(f"- **assignee**: {ticket.get('assignee') or 'not configured'}")
+    lines.append(f"- **reporter**: {ticket.get('reporter') or 'not configured'}")
+    poi = ticket.get("people_of_interest") or []
+    lines.append(f"- **people of interest**: {', '.join(poi) if poi else 'none configured'}")
     lines.append("")
 
     if observations:

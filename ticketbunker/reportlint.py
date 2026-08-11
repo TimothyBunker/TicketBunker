@@ -12,8 +12,13 @@ from dataclasses import dataclass
 
 REQUIRED_SECTIONS = ["Who", "What", "Where", "Why", "State"]
 SECTION_BUDGET_LINES = 60
-STRATUM_RE = re.compile(r"^\s*[-*]?\s*\[(observation|inference)\]", re.IGNORECASE)
+# Tags: observation (pipeline fact) / real (agent-located, checkable) /
+# speculation (interpretation, ranked by grounding). [inference] is accepted
+# as a deprecated alias of [speculation].
+STRATUM_RE = re.compile(r"^\s*[-*]?\s*\[(observation|real|speculation|inference)\]", re.IGNORECASE)
 CITATION_RE = re.compile(r"\(obs:|observations?/|merge[-_]base|diff|authorship|merge[-_]history|work[-_]separation|branch[- _]resolution", re.IGNORECASE)
+PATHLIKE_RE = re.compile(r"[\w.-]+/[\w./-]+|[\w-]+\.\w{1,8}(:\d+)?")
+GROUNDING_RE = re.compile(r"\b(grounded|adjacent|ungrounded)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -57,14 +62,26 @@ def lint(text: str) -> list[Finding]:
         unlabeled = [l for l in claims if not STRATUM_RE.match(l)]
         if claims and unlabeled:
             findings.append(
-                Finding("stratum", "error", f"section '{name}': {len(unlabeled)} claim(s) without an [observation]/[inference] label")
+                Finding("stratum", "error", f"section '{name}': {len(unlabeled)} claim(s) without an [observation]/[real]/[speculation] label")
             )
         for l in claims:
             m = STRATUM_RE.match(l)
-            if m and m.group(1).lower() == "inference" and not CITATION_RE.search(l):
+            if not m:
+                continue
+            tag = m.group(1).lower()
+            if tag == "real" and not PATHLIKE_RE.search(l):
                 findings.append(
-                    Finding("citation", "warn", f"section '{name}': inference cites no observation: {l.strip()[:80]}")
+                    Finding("real-anchor", "error", f"section '{name}': [real] claim names no path/line to check: {l.strip()[:80]}")
                 )
+            if tag in ("speculation", "inference"):
+                if not GROUNDING_RE.search(l):
+                    findings.append(
+                        Finding("grounding", "error", f"section '{name}': speculation without a grounding rank (grounded/adjacent/ungrounded): {l.strip()[:80]}")
+                    )
+                elif not (CITATION_RE.search(l) or PATHLIKE_RE.search(l)) and "ungrounded" not in l.lower():
+                    findings.append(
+                        Finding("citation", "warn", f"section '{name}': grounded/adjacent speculation cites nothing checkable: {l.strip()[:80]}")
+                    )
     return findings
 
 
