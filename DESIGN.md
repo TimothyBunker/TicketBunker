@@ -257,7 +257,7 @@ delivers who / what / where / why:
 |---|---|---|
 | Who | Direct ticket people first: **assignee, reporter, and any names/users the user adds** (people of interest). Manually configured for now; tracker API compatibility comes after manual is solid. Then git authors from the branches | ticket config + observation |
 | What | Summarized diff: files, hunks, additions/deletions, work vs. merge churn | observation |
-| Where | **Ranked impact list**: where the ticket may impact, ordered by grounding — specific ticket symbols found and traced first, adjacent areas next, and an honest "nothing concrete found → tag up with reporter/person of interest" last | real + speculation |
+| Where | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs, with emphasis: this is the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
 | Why | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
 | State | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
 

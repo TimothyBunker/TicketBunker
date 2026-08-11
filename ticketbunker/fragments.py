@@ -75,9 +75,14 @@ Your stages, in order:
    `[speculation]`. Section rules:
    - **Who**: the ticket's assignee, reporter, and people of interest
      first (from ticket configuration), then git authors.
-   - **Where**: a ranked impact list — grounded speculation first,
-     adjacent next, ungrounded last; if nothing concrete was found, say
-     so and name who to tag up with.
+   - **Where**: three blocks, in this order. (1) Edits that already
+     happened — [observation], from the git diffs; emphasize these, they
+     are the ground truth of where the ticket already lives. (2) Located
+     information directly relating to the ticket — [real] finds in the
+     baseline and what ties into them. (3) Your informed speculation on
+     where the user may need to make changes to solve the ticket —
+     [speculation], ranked by grounding; if nothing concrete was found,
+     say so and name who to tag up with.
    - **Why**: primary sources at the top (the ticket's own text), your
      speculation at the bottom, composed from [real] findings and
      clearly tagged.
