@@ -31,10 +31,10 @@ CONTRACTS: dict[str, StageContract] = {
     ),
     "diff": StageContract(
         name="diff",
-        purpose="Capture the actual work on each branch, free of fork-point noise.",
+        purpose="Capture the actual work on each branch — the changed code itself, not just which regions changed.",
         inputs="Per-branch merge-bases.",
-        process="git diff --numstat and --name-status from merge-base to branch tip.",
-        desired_outcome="Per branch: files touched with add/delete counts and change kinds.",
+        process="git diff --numstat and --name-status for the file map; full patch text captured to observations/patches/, bounded.",
+        desired_outcome="Per branch: files touched with add/delete counts and change kinds, plus the actual patch as an observation.",
     ),
     "merge_history": StageContract(
         name="merge_history",
@@ -111,12 +111,25 @@ def run_bootstrap(
     bases = run_stage(CONTRACTS["baseline"], ledger, stage_baseline)
     observations["baseline_info"] = bases
 
+    PATCH_MAX_LINES = 5000
+
     def stage_diff() -> dict:
         result = {}
+        patches_dir = obs_dir / "patches"
         for br, info in bases.items():
             base = info["merge_base"]
             numstat = git(repo, ["diff", "--numstat", f"{base}..{br}"], ledger, "diff")
             status = git(repo, ["diff", "--name-status", f"{base}..{br}"], ledger, "diff")
+            patch = git(repo, ["diff", f"{base}..{br}"], ledger, "diff")
+            patch_lines = patch.splitlines()
+            truncated = len(patch_lines) > PATCH_MAX_LINES
+            if truncated:
+                patch_lines = patch_lines[:PATCH_MAX_LINES] + [
+                    f"... [truncated at {PATCH_MAX_LINES} lines — full diff reproducible via the ledgered command]"
+                ]
+            patches_dir.mkdir(parents=True, exist_ok=True)
+            patch_path = patches_dir / f"{branch_slug(br)}.patch"
+            patch_path.write_text("\n".join(patch_lines) + "\n", encoding="utf-8")
             kinds = {}
             for line in status.splitlines():
                 parts = line.split("\t")
@@ -135,7 +148,12 @@ def run_bootstrap(
                             "kind": kinds.get(path, "M"),
                         }
                     )
-            result[br] = {"files": files, "file_count": len(files)}
+            result[br] = {
+                "files": files,
+                "file_count": len(files),
+                "patch": str(patch_path.relative_to(obs_dir.parent)),
+                "patch_truncated": truncated,
+            }
         _write_observation(obs_dir, "diff", {"per_branch": result})
         return result
 

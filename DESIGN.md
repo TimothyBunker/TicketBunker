@@ -261,15 +261,16 @@ consequences:
    remotely.
 
 **Report component schema** — each child (and the master, per-branch-sectioned)
-delivers who / what / where / why:
+delivers who / what / where / why. Each section has a defined **determinant**:
+the data source that decides its content.
 
-| Section | Content | Stratum |
-|---|---|---|
-| Who | Direct ticket people first: **assignee, reporter, and any names/users the user adds** (people of interest). Manually configured for now; tracker API compatibility comes after manual is solid. Then git authors from the branches | ticket config + observation |
-| What | Summarized diff: files, hunks, additions/deletions, work vs. merge churn | observation |
-| Where | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs, with emphasis: this is the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
-| Why | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
-| State | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
+| Section | Determined by | Content | Stratum |
+|---|---|---|---|
+| Who | **Users.** Assignee, reporter, people of interest from ticket config; the session's user from session config. Manually configured for now; tracker API compatibility after manual is solid. Git authors supplement | Direct ticket people first, then git authors from the branches | config + observation |
+| What | **Git diffs and actual code** — not just which region changed but the changed code itself. The diff stage captures patch text as an observation so What can quote and describe real changes | Summarized diff: files, hunks, additions/deletions, work vs. merge churn, with the actual changes characterized | observation |
+| Where | **Other ticket work, git diffs, ticket information, and a little agent speculation** — in that order of authority | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs and prior components of this ticket, with emphasis: the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
+| Why | **The ticket itself, primary sources** — then the agent | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
+| State | **Merge history + authorship observations** — then the agent | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
 
 ### 3.5 Report-first UX
 

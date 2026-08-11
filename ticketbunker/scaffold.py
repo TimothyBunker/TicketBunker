@@ -47,7 +47,10 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(f"- [observation] {f['kind']} {f['path']} (+{f['added']}/-{f['deleted']}) (diff).")
     if len(files) > MAX_PREFILL_FILES:
         lines.append(f"- [observation] ...and {len(files) - MAX_PREFILL_FILES} more file(s) — see observations/diff.json.")
-    lines.append(AGENT_AREA.format(instruction="one or two [speculation] lines on the nature of the work, grounded in the files above"))
+    if df.get("patch"):
+        lines.append(f"- [observation] Full patch text: {df['patch']}"
+                     + (" (truncated)" if df.get("patch_truncated") else "") + " (diff).")
+    lines.append(AGENT_AREA.format(instruction="characterize the actual code changes from the patch — what the code does, not just which files moved; [speculation] with grounding"))
     lines.append("")
 
     lines += ["## Where", ""]
