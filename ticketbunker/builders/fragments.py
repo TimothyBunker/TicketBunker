@@ -203,9 +203,12 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
     content, so storage stays partitioned by data type.
     """
     lines = ["# Ticket information", ""]
-    for key in ("id", "key", "title", "priority", "description"):
+    for key in ("id", "key", "title", "type", "status", "priority", "description"):
         if ticket.get(key):
             lines.append(f"- **{key}**: {ticket[key]}")
+    labels = ticket.get("labels") or []
+    if labels:
+        lines.append(f"- **labels**: {', '.join(labels)}")
     lines.append("")
     lines += ["## People", ""]
     lines.append(f"- **assignee**: {ticket.get('assignee') or 'not configured'}")
@@ -218,6 +221,15 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
         lines += ["## Linked tickets (other projects)", ""]
         for ref in refs:
             lines.append(f"- **{ref}** — consult that bunker's report if available; its code is out of bounds")
+    comments = ticket.get("comments") or []
+    if comments:
+        lines.append("")
+        lines += ["## Tracker comments (carried over verbatim — primary sources for Why)", ""]
+        for c in comments:
+            when = (c.get("when") or "")[:10]
+            lines.append(f"- **{c['author']}**{f' ({when})' if when else ''}:")
+            for text_line in c["text"].splitlines():
+                lines.append(f"  {text_line}")
     path = context_dir / "20_ticket.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

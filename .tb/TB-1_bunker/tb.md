@@ -136,12 +136,14 @@ Every command you run is ledgered automatically. Do not narrate commands;
 their record is not your job.
 <!-- tb:end 10_workflow.md -->
 
-<!-- tb:fragment 20_ticket.md sha256:7a6e30cff1f6ac930747746ae948c82509af5a5c21927f04344caf3232793de0 provenance=ours -->
+<!-- tb:fragment 20_ticket.md sha256:2dc6e5d9b8973a789445121d455eb57320d923339eafc563ba599ae9350ba3a8 provenance=ours -->
 # Ticket information
 
 - **id**: TB-1
 - **key**: jira
 - **title**: Jira-git intermediate context agent layer
+- **status**: in-progress
+- **priority**: high
 - **description**: An intermediate agent context layer between agile trackers and git: per-ticket bunkers, deterministic git observation pipeline, tagged agent reports.
 
 ## People

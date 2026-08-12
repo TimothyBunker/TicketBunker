@@ -33,11 +33,33 @@ def _gate(type_name: str, payload: dict, ledger: Ledger, **context) -> None:
     ledger.event("intake_accepted", info_type=type_name, **context)
 
 
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
 def intake_ticket(bunker: Path, payload: dict, ledger: Ledger) -> Path:
+    # Mechanical bookkeeping, stamped at the gate so every accepted write
+    # carries it: created survives from the first intake, updated moves.
+    payload = dict(payload)
+    payload.setdefault("created", _now())
+    payload["updated"] = _now()
     _gate("ticket", payload, ledger, ticket_id=payload.get("id"))
     dest = layout.paths(bunker)["ticket"]
     dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return dest
+
+
+def add_comment(bunker: Path, author: str, text: str, ledger: Ledger,
+                when: str | None = None, source: str | None = None) -> Path:
+    """Carry a tracker comment over onto the ticket, verbatim, keeping the
+    original author. Ours provenance: imported context, not agent output."""
+    ticket_path = layout.paths(bunker)["ticket"]
+    ticket = json.loads(ticket_path.read_text(encoding="utf-8"))
+    comment: dict = {"author": author, "text": text, "when": when or _now()}
+    if source:
+        comment["source"] = source
+    ticket["comments"] = list(ticket.get("comments") or []) + [comment]
+    return intake_ticket(bunker, ticket, ledger)
 
 
 def assign_branch(bunker: Path, branch: str, ledger: Ledger) -> Path:

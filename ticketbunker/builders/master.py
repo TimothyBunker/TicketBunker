@@ -28,6 +28,19 @@ def _branch_order(bunker: Path) -> dict[str, str]:
     }
 
 
+def _section(text: str, name: str) -> list[str]:
+    """The lines of one `## name` section, verbatim — selection, never
+    rewriting."""
+    lines, keep = [], False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            keep = line[3:].strip().lower() == name.lower()
+            continue
+        if keep and line.strip():
+            lines.append(line)
+    return lines
+
+
 def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
     bunker = Path(bunker)
     children_dir = bunker / "reports" / "branches"
@@ -56,6 +69,15 @@ def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
         for c in children:
             parts.append(f"- {c.stem.replace('__', '/')} — last development {recency.get(c.stem, 'unknown')}")
         parts.append("")
+        # The essentials, selected mechanically (each child's State section,
+        # claims verbatim) so a reader gets the whole ticket without scrolling
+        # the full components below.
+        parts += ["## Digest", ""]
+        for c in children:
+            parts.append(f"**{c.stem.replace('__', '/')}**")
+            state = _section(c.read_text(encoding="utf-8"), "State")
+            parts += state if state else ["- _component has no State section_"]
+            parts.append("")
         for c in children:
             parts.append("---")
             parts.append("")

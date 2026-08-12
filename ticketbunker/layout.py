@@ -21,6 +21,7 @@ literal_pi_session.json
 **/sessions/*.form.md
 **/sessions/*.transcript.txt
 **/observations/patches/
+*.draft.md
 sync_ledger.jsonl
 """
 

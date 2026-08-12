@@ -270,13 +270,24 @@ consequences:
    stitching child sections); child sections appear in the ticket's branch
    order — recency of development, or priority when assigned (§3.1). Agent
    writing happens in the children, not the master, so the master inherits —
-   never re-invents — the children's claims.
+   never re-invents — the children's claims. Against bloat, the master leads
+   with a **digest**: each child's State section, selected verbatim — a reader
+   gets the whole ticket at a glance before the full components below.
+   Selection is mechanical; the digest never rewrites a claim.
 3. **The report cannot live inside the session.** The session file is an
    append-only conversation record; the report is a living document with its own
    update lifecycle (children rewritten as branches move, master regenerated on
    every child change) and its own audience (remote, authorized users). So
    reports sit beside the session in the bunker, and only `reports/` syncs
    remotely.
+4. **Components live on their branches; checkout collects them.** Because
+   `.tb/` is committed with the repo, each branch's report component is
+   committed *on that branch* — no single checkout sees them all. `tb
+   checkout <TICKET>` is the collection step: fetch, read each related
+   branch's component out of git (`git show <branch>:.tb/...`), and re-admit
+   every one through the report intake gate (transport is mechanical, but
+   admission is still typed and linted — a component that fails today's gate
+   is reported and skipped, never smuggled in), then recompile the master.
 
 **Report component schema** — each child (and the master, per-branch-sectioned)
 delivers who / what / where / why. Each section has a defined **determinant**:
@@ -304,6 +315,16 @@ with the agent at all:
   and how each inference was derived. It is an audit log, not a chat to resume.
 - If interactive follow-up is ever needed, that's a signal the report schema is
   missing a section — fix the schema, don't normalize talking to the agent.
+
+**The ticket surface mirrors a tracker page, read-only and honest about
+provenance.** `tb list` shows every ticket grouped by declared status and
+ordered by priority then recency; `tb show <TICKET>` is the Jira-page
+equivalent — fields, carried-over comments, a development panel rendered
+from the observations, report state, and the ledger tail as the activity
+log. Declared workflow state (status, ours) is always shown *beside*
+observed git state (merged-back, recency — the pipeline's), never blended.
+A minimal local viewer (stdlib HTTP, rendering the same data) is the
+planned next step; the CLI stays the source of truth for it.
 
 ### 3.6 Report analysis toolset
 
@@ -561,6 +582,23 @@ creates the branch in a relatively normal git fashion** (a ledgered
 `git branch`, nothing exotic). Nobody hand-types the convention, so nobody
 gets it wrong — the pattern is enforced by construction at the same place
 the branch is born.
+
+**The ticket is the deliberate step, so creating one must not hurt.** A
+ticket mirrors the useful core of a tracker issue — id, title, description,
+type (bug/task/story), status (todo/in-progress/in-review/done), priority,
+labels, assignee/reporter/people-of-interest, linked tickets, plus
+mechanical created/updated stamps — without rebuilding the tracker: sprints,
+versions, estimates and votes stay the tracker's job. **Comments are carried
+over, not authored**: `tb comment` pastes a real tracker comment onto the
+ticket verbatim, keeping its original author (and optionally timestamp and
+source URL) — ours-provenance imported context that composition feeds to the
+agent as primary source material for Why. Creation has three ways in, one
+gate: field flags for scripting, `--from FILE` for a saved template, and —
+the default when no fields are given — `$EDITOR` on a pre-filled template,
+like `git commit`; a draft that fails validation is saved and the error says
+how to resume it. After creation, fields move only through `tb set`
+(status transitions, priority, labels, …) — the same ticket gate, so there
+is never a hand-edited side channel into ticket.json.
 
 **Association is automatic by default, explicit when needed.** A ticket's
 branch-match key defaults to the ticket ID itself (`--key` overrides it for

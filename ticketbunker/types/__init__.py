@@ -12,6 +12,8 @@ from typing import Callable
 
 INFERENCE_TAGS = ("real", "speculation")
 GROUNDINGS = ("grounded", "adjacent", "ungrounded")
+TICKET_STATUSES = ("todo", "in-progress", "in-review", "done")
+TICKET_TYPES = ("bug", "task", "story")
 
 
 def _validate_ticket(payload: dict) -> list[str]:
@@ -32,6 +34,22 @@ def _validate_ticket(payload: dict) -> list[str]:
     if assigned is not None:
         if not isinstance(assigned, list) or not all(isinstance(b, str) and b.strip() for b in assigned):
             errors.append("'assigned_branches' must be a list of non-empty branch names")
+    if payload.get("status") is not None and payload["status"] not in TICKET_STATUSES:
+        errors.append(f"'status' must be one of {TICKET_STATUSES}, got {payload['status']!r}")
+    if payload.get("type") is not None and payload["type"] not in TICKET_TYPES:
+        errors.append(f"'type' must be one of {TICKET_TYPES}, got {payload['type']!r}")
+    labels = payload.get("labels")
+    if labels is not None:
+        if not isinstance(labels, list) or not all(isinstance(l, str) and l.strip() for l in labels):
+            errors.append("'labels' must be a list of non-empty strings")
+    comments = payload.get("comments")
+    if comments is not None:
+        if not isinstance(comments, list):
+            errors.append("'comments' must be a list")
+        else:
+            for i, c in enumerate(comments):
+                if not isinstance(c, dict) or not (c.get("author") or "").strip() or not (c.get("text") or "").strip():
+                    errors.append(f"comment {i}: requires a non-empty 'author' and 'text' (carried over verbatim from the tracker)")
     refs = payload.get("references")
     if refs is not None:
         if not isinstance(refs, list):

@@ -2,11 +2,14 @@
   "id": "TB-1",
   "key": "jira",
   "title": "Jira-git intermediate context agent layer",
-  "priority": null,
+  "priority": "high",
   "description": "An intermediate agent context layer between agile trackers and git: per-ticket bunkers, deterministic git observation pipeline, tagged agent reports.",
   "assignee": "Tim",
   "reporter": "Tim",
   "people_of_interest": [],
   "references": [],
-  "repo": "/home/tim/dev/TicketBunker"
+  "repo": "/home/tim/dev/TicketBunker",
+  "status": "in-progress",
+  "created": "2026-08-12T02:41:49+00:00",
+  "updated": "2026-08-12T02:41:49+00:00"
 }

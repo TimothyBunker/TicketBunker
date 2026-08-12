@@ -26,9 +26,9 @@ import json
 import sys
 from pathlib import Path
 
-from . import config, handlers, layout
+from . import config, handlers, layout, types
 from .builders import compose as compose_mod
-from .builders import fragments, master, scaffold
+from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
 from .ledger import Ledger
 from .processors import reportlint, stages
@@ -132,20 +132,51 @@ def cmd_ticket(args: argparse.Namespace) -> int:
     if bunker.exists():
         print(f"error: {bunker} already exists — ticket IDs must be unique", file=sys.stderr)
         return 1
-    layout.init_dirs(bunker)
-    ledger = _ledger(bunker)
-    ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=args.key)
+
+    # Three ways in, one gate: field flags (scripting), a template file
+    # (--from), or $EDITOR on the template when no fields were given at all.
+    fields: dict = {}
+    form_text = None
+    flag_fields = (args.key, args.title, args.priority, args.description, args.assignee,
+                   args.reporter, args.poi, args.ref, args.label, args.type, args.status)
+    if args.from_file:
+        try:
+            form_text = Path(args.from_file).read_text(encoding="utf-8")
+            fields = ticketform.parse(form_text)
+        except OSError as exc:
+            print(f"error: cannot read {args.from_file}: {exc}", file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            print(f"error: {args.from_file}: {exc}", file=sys.stderr)
+            return 1
+    elif all(v is None for v in flag_fields) and sys.stdin.isatty():
+        form_text = ticketform.edit(ticketform.template(args.ticket_id))
+        try:
+            fields = ticketform.parse(form_text)
+        except ValueError as exc:
+            draft = root_dir / f"{args.ticket_id}.draft.md"
+            draft.write_text(form_text, encoding="utf-8")
+            print(f"error: {exc}\n  your draft is saved — fix it and re-run: "
+                  f"tb ticket {args.ticket_id} --from {draft}", file=sys.stderr)
+            return 1
+
     payload = {
         "id": args.ticket_id,
-        "key": args.key or args.ticket_id,
-        "title": args.title,
-        "priority": args.priority,
-        "description": args.description,
-        "assignee": args.assignee,
-        "reporter": args.reporter,
-        "people_of_interest": args.poi or [],
-        "references": args.ref or [],
+        "key": args.key or fields.get("key") or args.ticket_id,
+        "title": args.title or fields.get("title"),
+        "priority": args.priority or fields.get("priority"),
+        "description": args.description or fields.get("description"),
+        "assignee": args.assignee or fields.get("assignee"),
+        "reporter": args.reporter or fields.get("reporter"),
+        "people_of_interest": args.poi or fields.get("people_of_interest") or [],
+        "references": args.ref or fields.get("references") or [],
+        "type": args.type or fields.get("type") or "task",
+        "status": args.status or fields.get("status") or "todo",
+        "labels": args.label or fields.get("labels") or [],
     }
+    layout.init_dirs(bunker)
+    ledger = _ledger(bunker)
+    ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=payload["key"])
     try:
         handlers.intake_ticket(bunker, payload, ledger)
     except IntakeRejected as exc:
@@ -154,7 +185,13 @@ def cmd_ticket(args: argparse.Namespace) -> int:
         import shutil
 
         shutil.rmtree(bunker)
-        print(f"error: {exc}", file=sys.stderr)
+        if form_text is not None:
+            draft = root_dir / f"{args.ticket_id}.draft.md"
+            draft.write_text(form_text, encoding="utf-8")
+            print(f"error: {exc}\n  your draft is saved — fix it and re-run: "
+                  f"tb ticket {args.ticket_id} --from {draft}", file=sys.stderr)
+        else:
+            print(f"error: {exc}", file=sys.stderr)
         return 1
     fragments.seed_static(layout.paths(bunker)["context"])
     _recompose(bunker, ledger)
@@ -541,6 +578,254 @@ def cmd_branch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_comment(args: argparse.Namespace) -> int:
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
+    text = args.text
+    if text is None:
+        if sys.stdin.isatty():
+            raw = ticketform.edit("# paste the tracker comment below — '#' lines are dropped\n")
+            text = "\n".join(l for l in raw.splitlines() if not l.lstrip().startswith("#")).strip()
+        else:
+            text = sys.stdin.read().strip()
+    if not text:
+        print("error: empty comment — pass --text, pipe the text in, or paste it in the editor", file=sys.stderr)
+        return 1
+    try:
+        handlers.add_comment(bunker, args.author, text, _ledger(bunker), when=args.when, source=args.source)
+    except IntakeRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _recompose(bunker, _ledger(bunker))
+    print(f"comment by {args.author} carried onto {_ticket(bunker).get('id')}")
+    return 0
+
+
+_PRIORITY_RANK = {
+    "highest": 0, "critical": 0, "blocker": 0, "p0": 0,
+    "high": 1, "major": 1, "p1": 1,
+    "medium": 2, "p2": 2,
+    "low": 3, "minor": 3, "p3": 3,
+    "lowest": 4, "trivial": 4, "p4": 4,
+}
+
+
+def _git_state(bunker: Path) -> str:
+    """One-line observed git state from the bunker's observations — shown
+    beside the declared status, never merged with it."""
+    obs = layout.paths(bunker)["observations"]
+    br = obs / "branch_resolution.json"
+    if not br.exists():
+        return "no observations (run tb bootstrap)"
+    branches = json.loads(br.read_text(encoding="utf-8")).get("branches", [])
+    bits = [f"branches:{len(branches)}"]
+    mh = obs / "merge_history.json"
+    if mh.exists():
+        per = json.loads(mh.read_text(encoding="utf-8")).get("per_branch", {})
+        merged = sum(1 for i in per.values() if i.get("merged_back"))
+        bits.append(f"merged:{merged}/{len(per)}" if per else "merged:-")
+    au = obs / "authorship.json"
+    if au.exists():
+        per = json.loads(au.read_text(encoding="utf-8")).get("per_branch", {})
+        recency = max((i.get("recency_of_development") or "" for i in per.values()), default="")
+        if recency:
+            bits.append(f"dev:{recency[:10]}")
+    return " ".join(bits)
+
+
+def cmd_set(args: argparse.Namespace) -> int:
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
+    ticket = _ticket(bunker)
+    if not ticket.get("id"):
+        print("error: bunker has no ticket.json", file=sys.stderr)
+        return 1
+    changes = {}
+    for field in ("status", "type", "priority", "title", "assignee", "reporter"):
+        value = getattr(args, field)
+        if value is not None:
+            changes[field] = value
+    if args.label is not None:
+        changes["labels"] = args.label
+    if not changes:
+        print("error: nothing to change — pass at least one of --status/--type/--priority/--title/--assignee/--reporter/--label",
+              file=sys.stderr)
+        return 1
+    ticket.update(changes)
+    ledger = _ledger(bunker)
+    try:
+        handlers.intake_ticket(bunker, ticket, ledger)
+    except IntakeRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _recompose(bunker, ledger)
+    print(f"{ticket['id']}: " + ", ".join(f"{k} → {v}" for k, v in changes.items()))
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    root = layout.find_root()
+    if not root:
+        print("error: no .tb/ found here or above — run 'tb init' inside your git repo first", file=sys.stderr)
+        return 1
+    rows: dict[str, list] = {}
+    for bunker in sorted(layout.bunkers_dir(root).glob("*_bunker")):
+        t = _ticket(bunker)
+        if not t.get("id"):
+            continue
+        if args.status and t.get("status") != args.status:
+            continue
+        if args.label and args.label not in (t.get("labels") or []):
+            continue
+        rows.setdefault(t.get("status") or "(no status)", []).append((t, bunker))
+    if not rows:
+        print("no tickets" + (" matching the filter" if args.status or args.label else " yet — create one with 'tb ticket <ID>'"))
+        return 0
+    order = [*types.TICKET_STATUSES, "(no status)"]
+    for status in [s for s in order if s in rows]:
+        group = rows[status]
+        group.sort(key=lambda pair: (
+            _PRIORITY_RANK.get((pair[0].get("priority") or "").lower(), 2.5),
+            pair[0].get("updated") or "",
+        ))
+        print(f"{status} ({len(group)})")
+        for t, bunker in group:
+            pri = t.get("priority") or "-"
+            labels = f"  [{', '.join(t['labels'])}]" if t.get("labels") else ""
+            title = t.get("title") or "(untitled)"
+            print(f"  {t['id']:<10} {t.get('type') or 'task':<6} {pri:<8} {title}{labels}")
+            print(f"  {'':<10} {_git_state(bunker)}")
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
+    t = _ticket(bunker)
+    print(f"{t.get('id')} — {t.get('title') or '(untitled)'}")
+    print(f"  status: {t.get('status') or '-'}   type: {t.get('type') or '-'}   priority: {t.get('priority') or '-'}")
+    print(f"  created: {t.get('created') or '-'}   updated: {t.get('updated') or '-'}")
+    print(f"  assignee: {t.get('assignee') or '-'}   reporter: {t.get('reporter') or '-'}")
+    if t.get("people_of_interest"):
+        print(f"  people of interest: {', '.join(t['people_of_interest'])}")
+    if t.get("labels"):
+        print(f"  labels: {', '.join(t['labels'])}")
+    if t.get("references"):
+        print(f"  linked tickets: {', '.join(t['references'])}")
+    if t.get("description"):
+        print("\ndescription:")
+        for line in t["description"].splitlines():
+            print(f"  {line}")
+    for c in t.get("comments") or []:
+        header = f"{c['author']} ({c.get('when', '')[:10]}{', ' + c['source'] if c.get('source') else ''})"
+        print(f"\ncomment — {header}:")
+        for line in c["text"].splitlines():
+            print(f"  {line}")
+
+    print("\ndevelopment:")
+    obs = layout.paths(bunker)["observations"]
+    br = obs / "branch_resolution.json"
+    if not br.exists():
+        print("  no observations yet — run 'tb bootstrap'")
+    else:
+        data = json.loads(br.read_text(encoding="utf-8"))
+        mh = obs / "merge_history.json"
+        per = json.loads(mh.read_text(encoding="utf-8")).get("per_branch", {}) if mh.exists() else {}
+        for b in data.get("branches", []):
+            rule = data.get("match_rules", {}).get(b, "")
+            info = per.get(b) or per.get(b.removeprefix("origin/")) or {}
+            state = ""
+            if info:
+                state = f" — ahead {info.get('ahead', '?')}, behind {info.get('behind', '?')}, merged back: {info.get('merged_back')}"
+            print(f"  {b} ({rule}){state}")
+        for b in data.get("assigned_missing", []):
+            print(f"  {b} (assigned, missing from the repo)")
+
+    print("\nreports:")
+    children = sorted(layout.paths(bunker)["children"].glob("*.md"))
+    if not children:
+        print("  none yet")
+    else:
+        stale = set(master.stale_children(bunker))
+        for c in children:
+            mark = "  (stale in master)" if c.name in stale else ""
+            print(f"  {c.stem.replace('__', '/')}{mark}")
+        print(f"  master: {layout.paths(bunker)['master']}")
+
+    ledger_path = layout.paths(bunker)["ledger"]
+    if ledger_path.exists():
+        tail = ledger_path.read_text(encoding="utf-8").splitlines()[-5:]
+        print("\nactivity (ledger tail):")
+        for line in tail:
+            e = json.loads(line)
+            print(f"  {e.get('ts', '')[:19]}  {e.get('type')}" +
+                  (f" [{e.get('stage')}]" if e.get("stage") else ""))
+    return 0
+
+
+def cmd_checkout(args: argparse.Namespace) -> int:
+    bunker = _resolve_bunker(args.bunker)
+    if bunker is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
+    ticket = _ticket(bunker)
+    if not ticket.get("id"):
+        print("error: bunker has no ticket.json", file=sys.stderr)
+        return 1
+    ledger = _ledger(bunker)
+    repo = Path(args.repo).resolve()
+    from .adapters.gitrun import GitError, git
+
+    remotes = git(repo, ["remote"], ledger, "checkout").split()
+    if args.remote in remotes:
+        try:
+            git(repo, ["fetch", "--prune", args.remote], ledger, "checkout")
+        except GitError:
+            print(f"warning: fetch from {args.remote!r} failed — compiling from local refs", file=sys.stderr)
+    elif remotes:
+        print(f"note: no remote {args.remote!r} (have: {', '.join(remotes)}) — compiling from local refs")
+    else:
+        print("note: repo has no remotes — compiling from local refs")
+
+    out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "checkout")
+    names = [n for n in (line.strip() for line in out.splitlines()) if n and not n.endswith("/HEAD")]
+    branches, _rules, missing = stages.relate_branches(
+        names, ticket.get("key") or ticket["id"], ticket.get("assigned_branches") or [])
+
+    imported, absent, rejected = [], [], []
+    for br in branches:
+        local = br.removeprefix("origin/")
+        in_repo = f"{layout.TB_DIR}/{bunker.name}/reports/branches/{layout.branch_slug(local)}.md"
+        try:
+            text = git(repo, ["show", f"{br}:{in_repo}"], ledger, "checkout")
+        except GitError:
+            absent.append(br)
+            continue
+        try:
+            handlers.intake_report_component(bunker, local, text, ledger)
+            imported.append(br)
+        except IntakeRejected as exc:
+            rejected.append((br, exc))
+
+    out_path = master.regenerate(bunker, ledger)
+    print(f"checkout {ticket['id']}: {len(imported)} report component(s) collected"
+          + (f" ({', '.join(imported)})" if imported else ""))
+    for br in absent:
+        print(f"  {br}: no published component on that branch")
+    for br, exc in rejected:
+        print(f"  {br}: component failed today's gate, not imported — {exc}")
+    for b in missing:
+        print(f"  {b}: assigned but missing from the repo")
+    print(f"master compiled: {out_path}")
+    return 0
+
+
 def cmd_sync(args: argparse.Namespace) -> int:
     from .adapters import syncrepo
 
@@ -602,20 +887,60 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("init", help="initialize .tb/ at the root of the current git repo (fails outside one)")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/")
+    s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/ (no field flags: opens $EDITOR on a template)")
     s.add_argument("ticket_id")
     s.add_argument("--key", default=None,
                    help="token matched against branch names (default: the ticket id itself)")
     s.add_argument("--title", default=None)
+    s.add_argument("--type", default=None, choices=list(types.TICKET_TYPES), help="default: task")
+    s.add_argument("--status", default=None, choices=list(types.TICKET_STATUSES), help="default: todo")
     s.add_argument("--priority", default=None)
     s.add_argument("--description", default=None)
     s.add_argument("--assignee", default=None, help="ticket assignee (manual for now; tracker API later)")
     s.add_argument("--reporter", default=None, help="ticket reporter — the tag-up target when nothing concrete is found")
+    s.add_argument("--label", action="append", default=None, metavar="LABEL", help="grouping label; repeatable")
     s.add_argument("--poi", action="append", default=None, metavar="NAME", help="person of interest; repeatable")
     s.add_argument("--ref", action="append", default=None, metavar="TICKET_ID",
                    help="linked ticket in another project (pattern-validated); repeatable")
+    s.add_argument("--from", dest="from_file", default=None, metavar="FILE",
+                   help="read fields from a saved ticket template instead of flags or the editor")
     s.add_argument("--root", default=None, help="create the bunker in this directory instead of the project .tb/")
     s.set_defaults(fn=cmd_ticket)
+
+    s = sub.add_parser("comment", help="carry a tracker comment onto a ticket, keeping its original author")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
+    s.add_argument("--author", required=True, help="the comment's original author, verbatim from the tracker")
+    s.add_argument("--text", default=None, help="comment text (omit to paste in $EDITOR, or pipe on stdin)")
+    s.add_argument("--when", default=None, help="original timestamp, if known")
+    s.add_argument("--source", default=None, help="where it came from, e.g. a Jira comment URL")
+    s.set_defaults(fn=cmd_comment)
+
+    s = sub.add_parser("set", help="update ticket fields through the ticket gate (status, type, priority, ...)")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
+    s.add_argument("--status", default=None, choices=list(types.TICKET_STATUSES))
+    s.add_argument("--type", default=None, choices=list(types.TICKET_TYPES))
+    s.add_argument("--priority", default=None)
+    s.add_argument("--title", default=None)
+    s.add_argument("--assignee", default=None)
+    s.add_argument("--reporter", default=None)
+    s.add_argument("--label", action="append", default=None, metavar="LABEL",
+                   help="replaces the label set; repeatable")
+    s.set_defaults(fn=cmd_set)
+
+    s = sub.add_parser("list", help="all tickets in the project, grouped by status, ordered by priority then recency")
+    s.add_argument("--status", default=None, choices=list(types.TICKET_STATUSES), help="only this status")
+    s.add_argument("--label", default=None, help="only tickets carrying this label")
+    s.set_defaults(fn=cmd_list)
+
+    s = sub.add_parser("show", help="one ticket in full: fields, comments, development state, reports, activity")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
+    s.set_defaults(fn=cmd_show)
+
+    s = sub.add_parser("checkout", help="collect the ticket's report components from its branches and compile the master")
+    s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
+    s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
+    s.add_argument("--remote", default="origin", help="remote to fetch before collecting (default: origin)")
+    s.set_defaults(fn=cmd_checkout)
 
     s = sub.add_parser("bootstrap", help="run the deterministic observation pipeline")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")

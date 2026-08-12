@@ -61,6 +61,29 @@ CONTRACTS: dict[str, StageContract] = {
 }
 
 
+def relate_branches(
+    names: list[str], ticket_key: str, assigned: list[str]
+) -> tuple[list[str], dict[str, str], list[str]]:
+    """The one branch-relation rule (DESIGN.md §3.2 stage 1): key-substring
+    matches unioned with explicit assignments, each labeled with its rule,
+    preferring local names over their origin/ duplicates. Pure, so bootstrap
+    and checkout can never disagree about which branches belong to a ticket.
+    Returns (branches, {branch: rule}, assigned_but_missing)."""
+    matches = [n for n in names if ticket_key.lower() in n.lower()]
+    locals_ = {m for m in matches if not m.startswith("origin/")}
+    branches = [m for m in matches if not (m.startswith("origin/") and m.removeprefix("origin/") in locals_)]
+    rules = {b: "substring, case-insensitive" for b in branches}
+    missing = []
+    for b in assigned:
+        target = b if b in names else (f"origin/{b}" if f"origin/{b}" in names else None)
+        if target is None:
+            missing.append(b)
+        elif target not in rules:
+            branches.append(target)
+            rules[target] = "assigned"
+    return branches, rules, missing
+
+
 def _write_observation(obs_dir: Path, stage: str, payload: dict) -> None:
     obs_dir.mkdir(parents=True, exist_ok=True)
     path = obs_dir / f"{stage}.json"
@@ -81,19 +104,7 @@ def run_bootstrap(
     def stage_branch_resolution() -> list[str]:
         out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "branch_resolution")
         names = [n for n in (line.strip() for line in out.splitlines()) if n and not n.endswith("/HEAD")]
-        matches = [n for n in names if ticket_key.lower() in n.lower()]
-        # Prefer the local name when both local and origin/<name> match.
-        locals_ = {m for m in matches if not m.startswith("origin/")}
-        branches = [m for m in matches if not (m.startswith("origin/") and m.removeprefix("origin/") in locals_)]
-        rules = {b: "substring, case-insensitive" for b in branches}
-        assigned_missing = []
-        for b in assigned_branches or []:
-            target = b if b in names else (f"origin/{b}" if f"origin/{b}" in names else None)
-            if target is None:
-                assigned_missing.append(b)
-            elif target not in rules:
-                branches.append(target)
-                rules[target] = "assigned"
+        branches, rules, assigned_missing = relate_branches(names, ticket_key, assigned_branches or [])
         payload = {
             "ticket_key": ticket_key,
             "branches": branches,
