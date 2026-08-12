@@ -36,11 +36,14 @@ refs:
 
 
 def parse(text: str) -> dict:
-    """Template text -> ticket payload fields. Unknown 'field:' lines are an
-    error so a typo never silently drops information."""
+    """Template text -> ticket payload fields. Field lines are consumed until
+    the description starts: at the separator comment when it survives, else at
+    the first line that isn't a known 'field: value'. Nothing is ever silently
+    dropped — an unrecognized line (typo'd field, pasted prose) simply begins
+    the description, where the user can see it on the created ticket."""
     payload: dict = {}
     lines = text.splitlines()
-    body_at = len(lines)
+    body_at = None
     for i, line in enumerate(lines):
         if line.strip() == DESCRIPTION_MARK.strip():
             body_at = i + 1
@@ -49,16 +52,18 @@ def parse(text: str) -> dict:
             continue
         field, sep, value = line.partition(":")
         field = field.strip().lower()
-        value = value.split("#", 1)[0].strip()
         if not sep or (field not in _SCALAR_FIELDS and field not in _LIST_FIELDS):
-            raise ValueError(f"line {i + 1}: expected 'field: value' with a known field, got {line.strip()!r}")
+            body_at = i
+            break
+        value = value.split("#", 1)[0].strip()
         if not value:
             continue
         if field in _LIST_FIELDS:
             payload[_LIST_FIELDS[field]] = [v.strip() for v in value.split(",") if v.strip()]
         else:
             payload[field] = value
-    description = "\n".join(lines[body_at:]).strip()
+    body = lines[body_at:] if body_at is not None else []
+    description = "\n".join(l for l in body if l.strip() != DESCRIPTION_MARK.strip()).strip()
     if description:
         payload["description"] = description
     return payload

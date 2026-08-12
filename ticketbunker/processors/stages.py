@@ -8,6 +8,7 @@ Outputs are written as JSON under <bunker>/observations/.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from ..contracts import StageContract, run_stage
@@ -64,15 +65,18 @@ CONTRACTS: dict[str, StageContract] = {
 def relate_branches(
     names: list[str], ticket_key: str, assigned: list[str]
 ) -> tuple[list[str], dict[str, str], list[str]]:
-    """The one branch-relation rule (DESIGN.md §3.2 stage 1): key-substring
+    """The one branch-relation rule (DESIGN.md §3.2 stage 1): bounded-key
     matches unioned with explicit assignments, each labeled with its rule,
     preferring local names over their origin/ duplicates. Pure, so bootstrap
     and checkout can never disagree about which branches belong to a ticket.
+    The key must appear with non-alphanumeric characters (or the name's
+    edge) on both sides, so TB-1 never claims TB-11's branches.
     Returns (branches, {branch: rule}, assigned_but_missing)."""
-    matches = [n for n in names if ticket_key.lower() in n.lower()]
+    key_re = re.compile(rf"(?<![A-Za-z0-9]){re.escape(ticket_key)}(?![A-Za-z0-9])", re.IGNORECASE)
+    matches = [n for n in names if key_re.search(n)]
     locals_ = {m for m in matches if not m.startswith("origin/")}
     branches = [m for m in matches if not (m.startswith("origin/") and m.removeprefix("origin/") in locals_)]
-    rules = {b: "substring, case-insensitive" for b in branches}
+    rules = {b: "key match, bounded, case-insensitive" for b in branches}
     missing = []
     for b in assigned:
         target = b if b in names else (f"origin/{b}" if f"origin/{b}" in names else None)

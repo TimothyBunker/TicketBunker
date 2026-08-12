@@ -176,11 +176,13 @@ semantics fit the stage discipline best (§3.2, §3.7), and it runs **headless**
 On session instantiation, harness extensions execute — in order, outside agent
 control:
 
-1. **Branch resolution.** Find branches whose names contain the ticket key
+1. **Branch resolution.** Find branches whose names carry the ticket key
    (default: the ticket ID itself; convention: branches are labeled by ticket),
-   unioned with branches explicitly assigned to the ticket (§3.14). Each match
-   records its rule — key substring or explicit assignment. Zero matches is
-   itself an observation, and an assigned branch absent from the repo is
+   unioned with branches explicitly assigned to the ticket (§3.14). Key
+   matching is bounded — the key must sit against non-alphanumeric characters
+   or the name's edge, so TB-1 never claims TB-11's branches. Each match
+   records its rule — bounded key match or explicit assignment. Zero matches
+   is itself an observation, and an assigned branch absent from the repo is
    recorded as missing, not silently dropped.
 2. **Baseline identification.** Determine the reference branch (default: `main`,
    configurable per repo) and compute `merge-base` for each ticket branch.
@@ -340,6 +342,19 @@ drifts from reality. We therefore need a **procedure/toolset for analyzing
 existing reports and keeping them as straightforward as possible** — a report
 linter + auditor, mechanical wherever possible, in the same spirit as the
 bootstrap pipeline.
+
+**Anchor verification closes the formatted-vs-checked gap.** At every
+publish (and at checkout import), each [real] claim's anchors are resolved
+against the source repo — the branch itself, then the exact baseline state
+(merge-base) the observations were computed from — and against the bunker's
+own files for observation anchors. A cited line number must fall inside the
+file. A claim none of whose anchors resolve is rejected at the gate, and an
+accepted component is stamped (`tb:verified branch/commit/ts`, mechanical,
+never agent-authored) with the ref it was proven against; the master's
+manifest and digest carry that ref, and `tb show`/the viewer badge any
+component whose branch has developed past its verification instant. This
+proves existence, not meaning — a resolvable anchor can still be cited
+dishonestly; that residue is what report grading is for.
 
 v1 checks, in rough priority order:
 

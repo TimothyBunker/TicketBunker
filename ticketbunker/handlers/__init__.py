@@ -37,14 +37,29 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
+# Keys the machinery writes for itself. They never count as a ticket edit:
+# every intake is still ledgered, but 'updated' only moves when a field a
+# person cares about changed (log everything, show what's relevant).
+_MECHANICAL_KEYS = {"created", "updated", "repo"}
+
+
 def intake_ticket(bunker: Path, payload: dict, ledger: Ledger) -> Path:
-    # Mechanical bookkeeping, stamped at the gate so every accepted write
-    # carries it: created survives from the first intake, updated moves.
     payload = dict(payload)
-    payload.setdefault("created", _now())
-    payload["updated"] = _now()
-    _gate("ticket", payload, ledger, ticket_id=payload.get("id"))
     dest = layout.paths(bunker)["ticket"]
+    old: dict = {}
+    if dest.exists():
+        try:
+            old = json.loads(dest.read_text(encoding="utf-8"))
+        except ValueError:
+            old = {}
+    payload.setdefault("created", old.get("created") or _now())
+    meaningful_new = {k: v for k, v in payload.items() if k not in _MECHANICAL_KEYS}
+    meaningful_old = {k: v for k, v in old.items() if k not in _MECHANICAL_KEYS}
+    if meaningful_new == meaningful_old and old.get("updated"):
+        payload["updated"] = old["updated"]
+    else:
+        payload["updated"] = _now()
+    _gate("ticket", payload, ledger, ticket_id=payload.get("id"))
     dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return dest
 
@@ -108,7 +123,16 @@ def load_inferences(bunker: Path) -> list[dict]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger) -> Path:
+def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger,
+                            repo: Path | None = None, refs: list[str] | None = None) -> Path:
+    if repo is not None and refs:
+        from ..processors import anchorcheck
+
+        errors = anchorcheck.verify(text, repo, refs, bunker)
+        if errors:
+            ledger.event("intake_rejected", info_type="report_component", branch=branch, errors=errors)
+            raise IntakeRejected("report_component", errors)
+        text = anchorcheck.annotate(text, repo, refs[0], _now())
     _gate("report_component", {"branch": branch, "text": text}, ledger, branch=branch)
     dest = layout.child_report(bunker, branch)
     dest.parent.mkdir(parents=True, exist_ok=True)

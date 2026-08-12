@@ -74,6 +74,27 @@ def _resolve_bunker(arg: str) -> Path | None:
     return None
 
 
+def _verify_refs(bunker: Path, branch: str) -> list[str]:
+    """The refs a component's [real] anchors are proven against: the branch
+    itself, then the exact baseline state (merge-base) its observations were
+    computed from, then the baseline name as a fallback."""
+    refs = [branch]
+    data = {}
+    base_obs = layout.paths(bunker)["observations"] / "baseline.json"
+    if base_obs.exists():
+        try:
+            data = json.loads(base_obs.read_text(encoding="utf-8"))
+        except ValueError:
+            data = {}
+    per = data.get("per_branch", {})
+    info = per.get(branch) or per.get(branch.removeprefix("origin/")) or {}
+    if info.get("merge_base"):
+        refs.append(info["merge_base"])
+    elif data.get("baseline"):
+        refs.append(data["baseline"])
+    return refs
+
+
 def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
     """Every bunker whose ticket explicitly assigns this branch, across the
     project's .tb/ and the configured bunker root."""
@@ -363,9 +384,13 @@ def cmd_publish(args: argparse.Namespace) -> int:
     _, findings = reportlint.gate(text)
     for f in findings:
         print(f)
+    repo = Path(args.repo).resolve() if args.repo else (layout.find_root() or Path.cwd())
     try:
-        dest = handlers.intake_report_component(bunker, args.branch, text, ledger)
-    except IntakeRejected:
+        dest = handlers.intake_report_component(bunker, args.branch, text, ledger,
+                                                repo=repo, refs=_verify_refs(bunker, args.branch))
+    except IntakeRejected as exc:
+        for err in exc.errors:
+            print(f"[error] {err}")
         print(f"FAIL — component for '{args.branch}' not published")
         return 1
     out = master.regenerate(bunker, ledger)
@@ -495,8 +520,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     for f in findings:
         print(f)
     try:
-        dest = handlers.intake_report_component(bunker, args.branch, text, ledger)
-    except IntakeRejected:
+        dest = handlers.intake_report_component(bunker, args.branch, text, ledger,
+                                                repo=repo, refs=_verify_refs(bunker, args.branch))
+    except IntakeRejected as exc:
+        for err in exc.errors:
+            print(f"[error] {err}", file=sys.stderr)
         print(f"FAIL — agent's form did not pass the gate; left at {form} for repair", file=sys.stderr)
         return 1
     out = master.regenerate(bunker, ledger)
@@ -753,10 +781,25 @@ def cmd_show(args: argparse.Namespace) -> int:
     if not children:
         print("  none yet")
     else:
+        from .processors.anchorcheck import predates, verified_stamp
+
+        au = obs / "authorship.json"
+        recency = {}
+        if au.exists():
+            per = json.loads(au.read_text(encoding="utf-8")).get("per_branch", {})
+            recency = {b: (i.get("recency_of_development") or "") for b, i in per.items()}
         stale = set(master.stale_children(bunker))
         for c in children:
-            mark = "  (stale in master)" if c.name in stale else ""
-            print(f"  {c.stem.replace('__', '/')}{mark}")
+            branch_name = c.stem.replace("__", "/")
+            marks = []
+            if c.name in stale:
+                marks.append("stale in master")
+            v = verified_stamp(c.read_text(encoding="utf-8"))
+            if v.get("ts") and predates(v["ts"], recency.get(branch_name, "")):
+                marks.append("predates latest development — re-run tb run")
+            elif v.get("commit"):
+                marks.append(f"verified at {v['commit']}")
+            print(f"  {branch_name}" + (f"  ({'; '.join(marks)})" if marks else ""))
         print(f"  master: {layout.paths(bunker)['master']}")
 
     ledger_path = layout.paths(bunker)["ledger"]
@@ -837,7 +880,8 @@ def cmd_checkout(args: argparse.Namespace) -> int:
             absent.append(br)
             continue
         try:
-            handlers.intake_report_component(bunker, local, text, ledger)
+            handlers.intake_report_component(bunker, local, text, ledger,
+                                             repo=repo, refs=_verify_refs(bunker, br))
             imported.append(br)
         except IntakeRejected as exc:
             rejected.append((br, exc))
@@ -1030,6 +1074,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--branch", required=True)
     s.add_argument("--file", required=True)
+    s.add_argument("--repo", default=None,
+                   help="repo to verify [real] anchors against (default: the project root)")
     s.set_defaults(fn=cmd_publish)
 
     s = sub.add_parser("run", help="run the agent session: compose, scaffold, harness, publish")

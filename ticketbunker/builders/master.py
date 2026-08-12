@@ -50,15 +50,22 @@ def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
     recency = _branch_order(bunker)
     children.sort(key=lambda p: recency.get(p.stem, ""), reverse=True)
 
+    from ..processors.anchorcheck import verified_stamp
+
     ts = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    manifest = [{"child": c.name, "digest": digest(c.read_text(encoding="utf-8"))} for c in children]
+    manifest = []
+    for c in children:
+        text = c.read_text(encoding="utf-8")
+        manifest.append({"child": c.name, "digest": digest(text), "verified": verified_stamp(text)})
 
     parts = [
         "<!-- master report — regenerated mechanically from reports/branches/. Do not edit. -->",
         f"<!-- built: {ts} -->",
     ]
     for m in manifest:
-        parts.append(f"<!-- child: {m['child']} {m['digest']} -->")
+        v = m["verified"]
+        ref = f" branch={v['branch']} commit={v['commit']}" if v.get("commit") else ""
+        parts.append(f"<!-- child: {m['child']} {m['digest']}{ref} -->")
     parts += ["", "# Master report", ""]
 
     if not children:
@@ -73,8 +80,10 @@ def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
         # claims verbatim) so a reader gets the whole ticket without scrolling
         # the full components below.
         parts += ["## Digest", ""]
-        for c in children:
-            parts.append(f"**{c.stem.replace('__', '/')}**")
+        for c, m in zip(children, manifest):
+            v = m["verified"]
+            at = f" — verified at `{v['commit']}` on {v['branch']}" if v.get("commit") else ""
+            parts.append(f"**{c.stem.replace('__', '/')}**{at}")
             state = _section(c.read_text(encoding="utf-8"), "State")
             parts += state if state else ["- _component has no State section_"]
             parts.append("")

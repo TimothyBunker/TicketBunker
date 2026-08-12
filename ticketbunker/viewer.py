@@ -303,6 +303,10 @@ def page_ticket(root: Path, tid: str, fp: str) -> bytes | None:
         body.append('<p class="muted">No report components yet — run <code>tb run</code>, '
                     'or <code>tb checkout</code> to collect from branches.</p>')
     else:
+        from .processors.anchorcheck import predates, verified_stamp
+
+        au = _read_json(layout.paths(bunker)["observations"] / "authorship.json").get("per_branch", {})
+        recency = {b: (i.get("recency_of_development") or "") for b, i in au.items()}
         stale = set(master_mod.stale_children(bunker))
         if master_path.exists():
             text = master_path.read_text(encoding="utf-8")
@@ -311,9 +315,18 @@ def page_ticket(root: Path, tid: str, fp: str) -> bytes | None:
                 body.append(render_report(digest))
         for c in children:
             branch = c.stem.replace("__", "/")
-            mark = " <span class='muted'>(stale in master — re-run tb regen-master)</span>" if c.name in stale else ""
+            child_text = c.read_text(encoding="utf-8")
+            marks = []
+            if c.name in stale:
+                marks.append("stale in master")
+            v = verified_stamp(child_text)
+            if v.get("ts") and predates(v["ts"], recency.get(branch, "")):
+                marks.append("predates latest development")
+            elif v.get("commit"):
+                marks.append(f"verified at {v['commit']}")
+            mark = f" <span class='muted'>({html.escape('; '.join(marks))})</span>" if marks else ""
             body.append(f"<details><summary class='mono'>{html.escape(branch)}{mark}</summary>"
-                        f"{render_report(c.read_text(encoding='utf-8'))}</details>")
+                        f"{render_report(child_text)}</details>")
 
     ledger_path = layout.paths(bunker)["ledger"]
     if ledger_path.exists():

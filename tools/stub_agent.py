@@ -11,17 +11,29 @@ Usage (as a tb run harness):
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 
+def _real_file() -> str:
+    """A file that actually exists in the repo we run in — the publish gate
+    verifies [real] anchors, so even the stub must anchor honestly."""
+    proc = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
+    for name in proc.stdout.splitlines():
+        if name.strip():
+            return name.strip()
+    return "README.md"
+
+
 def fill(text: str) -> str:
+    anchor = _real_file()
     replacements = {
         "add [real]/[speculation] people context": None,  # drop: nothing to add
         "one or two [speculation] lines on the nature": "- [speculation] grounded: per the patch under observations/patches/, the work is documentation and tooling changes.",
         "characterize the actual code changes": "- [speculation] grounded: the changes in the patch (observations/patches/) extend markdown docs; no runtime code paths are affected.",
-        "[real] located ticket-related information": "- [real] Ticket subject matter appears in DESIGN.md (baseline search).",
-        "[speculation] where changes may be needed": "- [speculation] adjacent: future work likely lands near DESIGN.md and README.md, the files already carrying this ticket's edits.",
+        "[real] located ticket-related information": f"- [real] Ticket-related material exists in the baseline; see `{anchor}` (baseline search).",
+        "[speculation] where changes may be needed": f"- [speculation] adjacent: future work likely lands near `{anchor}`, already carrying this ticket's edits.",
         "primary sources first": "- [speculation] grounded: the goal per the ticket description matches the observed doc-focused diff (observations/diff.json).",
         "[speculation] apparent progress": "- [speculation] grounded: work commits exist and are unmerged per merge_history — in progress, not delivered.",
     }
