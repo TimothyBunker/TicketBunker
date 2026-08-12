@@ -333,6 +333,10 @@ endpoint exists, every page renders from `.tb/` on each request, and pages
 poll a database fingerprint so whatever the user is looking at reloads
 when the data changes. All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.
+Localhost-only is a decision, not a limitation: there is deliberately no
+bind option and no auth surface — remote viewing (phone, another machine)
+is SSH port-forwarding's job, which already carries the repo's own access
+control. Do not add network exposure to the viewer.
 
 ### 3.6 Report analysis toolset
 
