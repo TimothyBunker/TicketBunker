@@ -69,6 +69,52 @@ def parse(text: str) -> dict:
     return payload
 
 
+THREAD_TEMPLATE = """\
+# Paste a whole tracker comment thread. Start each comment with a separator:
+#   --- <author> [<when>] [<source>]
+# e.g.  --- ann 2026-08-10 https://jira.example/FRB-9?focusedId=3
+# Quote multi-word authors: --- "Jane Doe" 2026-08-10
+# Everything until the next separator is that comment's text, verbatim.
+"""
+
+
+def parse_thread(text: str) -> list[dict]:
+    """A pasted comment thread -> comment payloads, authors preserved.
+    Lines before the first separator are dropped (the instructions header);
+    everything inside a comment is kept verbatim."""
+    import shlex
+
+    comments: list[dict] = []
+    current: dict | None = None
+
+    def flush() -> None:
+        nonlocal current
+        if current is not None:
+            body = "\n".join(current.pop("lines")).strip()
+            if body:
+                comments.append({**current, "text": body})
+        current = None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--- "):
+            flush()
+            try:
+                head = shlex.split(stripped[4:])
+            except ValueError:
+                head = stripped[4:].split()
+            if not head:
+                continue
+            author = head[0]
+            when = head[1] if len(head) > 1 and head[1][:1].isdigit() else None
+            source = " ".join(head[2:] if when else head[1:]) or None
+            current = {"author": author, "when": when, "source": source, "lines": []}
+        elif current is not None:
+            current["lines"].append(line)
+    flush()
+    return comments
+
+
 def edit(initial: str) -> str:
     """Open $VISUAL/$EDITOR (fallback vi) on the text; return what was saved."""
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"

@@ -64,17 +64,25 @@ def intake_ticket(bunker: Path, payload: dict, ledger: Ledger) -> Path:
     return dest
 
 
-def add_comment(bunker: Path, author: str, text: str, ledger: Ledger,
-                when: str | None = None, source: str | None = None) -> Path:
-    """Carry a tracker comment over onto the ticket, verbatim, keeping the
-    original author. Ours provenance: imported context, not agent output."""
+def add_comments(bunker: Path, comments: list[dict], ledger: Ledger) -> Path:
+    """Carry tracker comments over onto the ticket, verbatim, keeping the
+    original authors. Ours provenance: imported context, not agent output.
+    One intake for the whole batch — a thread lands atomically or not at all."""
     ticket_path = layout.paths(bunker)["ticket"]
     ticket = json.loads(ticket_path.read_text(encoding="utf-8"))
-    comment: dict = {"author": author, "text": text, "when": when or _now()}
-    if source:
-        comment["source"] = source
-    ticket["comments"] = list(ticket.get("comments") or []) + [comment]
+    prepared = []
+    for c in comments:
+        entry: dict = {"author": c.get("author"), "text": c.get("text"), "when": c.get("when") or _now()}
+        if c.get("source"):
+            entry["source"] = c["source"]
+        prepared.append(entry)
+    ticket["comments"] = list(ticket.get("comments") or []) + prepared
     return intake_ticket(bunker, ticket, ledger)
+
+
+def add_comment(bunker: Path, author: str, text: str, ledger: Ledger,
+                when: str | None = None, source: str | None = None) -> Path:
+    return add_comments(bunker, [{"author": author, "text": text, "when": when, "source": source}], ledger)
 
 
 def assign_branch(bunker: Path, branch: str, ledger: Ledger) -> Path:

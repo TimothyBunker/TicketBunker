@@ -60,15 +60,28 @@ def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
     compose_mod.compose(p["context"], p["tb_md"], ledger)
 
 
+def _bunker_scopes() -> list[Path]:
+    """Everywhere bunkers live, in resolution order: the enclosing project's
+    .tb/, then the configured standalone bunker root. One list, used by every
+    command, so resolution can never disagree with listing."""
+    scopes = []
+    root = layout.find_root()
+    if root:
+        scopes.append(layout.bunkers_dir(root))
+    broot = config.bunker_root()
+    if broot and broot not in scopes:
+        scopes.append(broot)
+    return scopes
+
+
 def _resolve_bunker(arg: str) -> Path | None:
     """A bunker argument may be a path or a bare ticket ID resolved against
-    the enclosing project's .tb/ (found by walking up, like git)."""
+    the project's .tb/ or the configured bunker root."""
     cand = Path(arg)
     if cand.is_dir():
         return cand
-    root = layout.find_root()
-    if root:
-        by_id = layout.bunker_path(root, arg)
+    for scope in _bunker_scopes():
+        by_id = scope / f"{arg}_bunker"
         if by_id.is_dir():
             return by_id
     return None
@@ -611,6 +624,27 @@ def cmd_comment(args: argparse.Namespace) -> int:
     if bunker is None:
         print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
         return 1
+    if args.bulk:
+        if sys.stdin.isatty():
+            raw = ticketform.edit(ticketform.THREAD_TEMPLATE)
+        else:
+            raw = sys.stdin.read()
+        comments = ticketform.parse_thread(raw)
+        if not comments:
+            print("error: no comments found — each one starts with '--- <author> [when] [source]'", file=sys.stderr)
+            return 1
+        try:
+            handlers.add_comments(bunker, comments, _ledger(bunker))
+        except IntakeRejected as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _recompose(bunker, _ledger(bunker))
+        who = ", ".join(dict.fromkeys(c["author"] for c in comments))
+        print(f"{len(comments)} comment(s) by {who} carried onto {_ticket(bunker).get('id')}")
+        return 0
+    if not args.author:
+        print("error: --author is required (or use --bulk to paste a whole thread)", file=sys.stderr)
+        return 1
     text = args.text
     if text is None:
         if sys.stdin.isatty():
@@ -695,25 +729,96 @@ def cmd_set(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote_tickets(repo: Path, have: set[str]) -> list[dict]:
+    """Tickets present on the remote's default branch but absent locally —
+    read straight out of git, best-effort, nothing written."""
+    import subprocess
+
+    def _git(*argv: str) -> str | None:
+        proc = subprocess.run(["git", "-C", str(repo), *argv], capture_output=True, text=True)
+        return proc.stdout if proc.returncode == 0 else None
+
+    head = _git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    candidates = [head.strip()] if head else ["origin/main", "origin/master"]
+    for ref in candidates:
+        listing = _git("ls-tree", "--name-only", f"{ref}:{layout.TB_DIR}")
+        if listing is None:
+            continue
+        found = []
+        for name in listing.split():
+            if not name.endswith("_bunker") or name.removesuffix("_bunker") in have:
+                continue
+            raw = _git("show", f"{ref}:{layout.TB_DIR}/{name}/ticket.json")
+            if raw:
+                try:
+                    t = json.loads(raw)
+                except ValueError:
+                    continue
+                if t.get("id"):
+                    t["_remote_ref"] = ref
+                    found.append(t)
+        return found
+    return []
+
+
 def cmd_list(args: argparse.Namespace) -> int:
-    root = layout.find_root()
-    if not root:
-        print("error: no .tb/ found here or above — run 'tb init' inside your git repo first", file=sys.stderr)
+    scopes = _bunker_scopes()
+    if not scopes:
+        print("error: no .tb/ found here or above and no bunker root configured — "
+              "run 'tb init' inside your git repo first", file=sys.stderr)
         return 1
-    rows: dict[str, list] = {}
-    for bunker in sorted(layout.bunkers_dir(root).glob("*_bunker")):
-        t = _ticket(bunker)
-        if not t.get("id"):
-            continue
-        if args.status and t.get("status") != args.status:
-            continue
-        if args.label and args.label not in (t.get("labels") or []):
-            continue
-        rows.setdefault(t.get("status") or "(no status)", []).append((t, bunker))
-    if not rows:
-        print("no tickets" + (" matching the filter" if args.status or args.label else " yet — create one with 'tb ticket <ID>'"))
+
+    entries: list[tuple[dict, Path | None]] = []
+    seen: set[str] = set()
+    for scope in scopes:
+        for bunker in sorted(scope.glob("*_bunker")):
+            t = _ticket(bunker)
+            if t.get("id") and t["id"] not in seen:
+                seen.add(t["id"])
+                entries.append((t, bunker))
+
+    root = layout.find_root()
+    if args.fetch and root:
+        import subprocess
+
+        subprocess.run(["git", "-C", str(root), "fetch", "--prune"], capture_output=True)
+        for t in _remote_tickets(root, seen):
+            entries.append((t, None))
+
+    entries = [(t, b) for t, b in entries
+               if (not args.status or t.get("status") == args.status)
+               and (not args.label or args.label in (t.get("labels") or []))]
+    if not entries:
+        print("no tickets" + (" matching the filter" if args.status or args.label else
+                              " yet — create one with 'tb ticket <ID>'"))
         return 0
+
+    def line(t: dict, bunker: Path | None) -> None:
+        pri = t.get("priority") or "-"
+        labels = f"  [{', '.join(t['labels'])}]" if t.get("labels") else ""
+        title = t.get("title") or "(untitled)"
+        where = _git_state(bunker) if bunker else f"remote only ({t.get('_remote_ref')}) — merge or pull to work on it"
+        print(f"  {t['id']:<10} {t.get('type') or 'task':<6} {pri:<8} {title}{labels}")
+        print(f"  {'':<10} {where}")
+
+    if args.sort:
+        keys = {
+            "key": lambda t: t.get("id") or "",
+            "priority": lambda t: _PRIORITY_RANK.get((t.get("priority") or "").lower(), 2.5),
+            "created": lambda t: t.get("created") or "",
+            "updated": lambda t: t.get("updated") or "",
+        }
+        entries.sort(key=lambda pair: keys[args.sort](pair[0]), reverse=args.reverse)
+        for t, bunker in entries:
+            line(t, bunker)
+        return 0
+
+    rows: dict[str, list] = {}
+    for t, bunker in entries:
+        rows.setdefault(t.get("status") or "(no status)", []).append((t, bunker))
     order = [*types.TICKET_STATUSES, "(no status)"]
+    if args.reverse:
+        order = list(reversed(order))
     for status in [s for s in order if s in rows]:
         group = rows[status]
         group.sort(key=lambda pair: (
@@ -722,11 +827,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         ))
         print(f"{status} ({len(group)})")
         for t, bunker in group:
-            pri = t.get("priority") or "-"
-            labels = f"  [{', '.join(t['labels'])}]" if t.get("labels") else ""
-            title = t.get("title") or "(untitled)"
-            print(f"  {t['id']:<10} {t.get('type') or 'task':<6} {pri:<8} {title}{labels}")
-            print(f"  {'':<10} {_git_state(bunker)}")
+            line(t, bunker)
     return 0
 
 
@@ -870,7 +971,7 @@ def cmd_checkout(args: argparse.Namespace) -> int:
     branches, _rules, missing = stages.relate_branches(
         names, ticket.get("key") or ticket["id"], ticket.get("assigned_branches") or [])
 
-    imported, absent, rejected = [], [], []
+    imported, absent, rejected, kept = [], [], [], []
     for br in branches:
         local = br.removeprefix("origin/")
         in_repo = f"{layout.TB_DIR}/{bunker.name}/reports/branches/{layout.branch_slug(local)}.md"
@@ -879,6 +980,22 @@ def cmd_checkout(args: argparse.Namespace) -> int:
         except GitError:
             absent.append(br)
             continue
+        # Git decides freshness: a local component identical to HEAD's copy
+        # is just a previous collection and safe to replace; one that differs
+        # from HEAD is uncommitted local work and must not be clobbered.
+        local_path = layout.child_report(bunker, local)
+        if local_path.exists():
+            local_text = local_path.read_text(encoding="utf-8")
+            if local_text == text:
+                imported.append(br)
+                continue
+            try:
+                committed = git(repo, ["show", f"HEAD:{in_repo}"], ledger, "checkout")
+            except GitError:
+                committed = None
+            if local_text != committed:
+                kept.append(br)
+                continue
         try:
             handlers.intake_report_component(bunker, local, text, ledger,
                                              repo=repo, refs=_verify_refs(bunker, br))
@@ -891,6 +1008,8 @@ def cmd_checkout(args: argparse.Namespace) -> int:
           + (f" ({', '.join(imported)})" if imported else ""))
     for br in absent:
         print(f"  {br}: no published component on that branch")
+    for br in kept:
+        print(f"  {br}: local component has uncommitted changes — kept; commit or discard it, then re-run")
     for br, exc in rejected:
         print(f"  {br}: component failed today's gate, not imported — {exc}")
     for b in missing:
@@ -980,12 +1099,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--root", default=None, help="create the bunker in this directory instead of the project .tb/")
     s.set_defaults(fn=cmd_ticket)
 
-    s = sub.add_parser("comment", help="carry a tracker comment onto a ticket, keeping its original author")
+    s = sub.add_parser("comment", help="carry tracker comments onto a ticket, keeping their original authors")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
-    s.add_argument("--author", required=True, help="the comment's original author, verbatim from the tracker")
+    s.add_argument("--author", default=None, help="the comment's original author, verbatim from the tracker")
     s.add_argument("--text", default=None, help="comment text (omit to paste in $EDITOR, or pipe on stdin)")
     s.add_argument("--when", default=None, help="original timestamp, if known")
     s.add_argument("--source", default=None, help="where it came from, e.g. a Jira comment URL")
+    s.add_argument("--bulk", action="store_true",
+                   help="paste a whole thread: comments separated by '--- <author> [when] [source]' lines")
     s.set_defaults(fn=cmd_comment)
 
     s = sub.add_parser("set", help="update ticket fields through the ticket gate (status, type, priority, ...)")
@@ -1000,9 +1121,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="replaces the label set; repeatable")
     s.set_defaults(fn=cmd_set)
 
-    s = sub.add_parser("list", help="all tickets in the project, grouped by status, ordered by priority then recency")
+    s = sub.add_parser("list", help="all tickets, grouped by status (default) or flat-sorted, across the project and bunker root")
     s.add_argument("--status", default=None, choices=list(types.TICKET_STATUSES), help="only this status")
     s.add_argument("--label", default=None, help="only tickets carrying this label")
+    s.add_argument("--sort", default=None, choices=["key", "priority", "created", "updated"],
+                   help="flat list sorted by this field instead of status groups")
+    s.add_argument("--reverse", action="store_true", help="reverse the sort or group order")
+    s.add_argument("--fetch", action="store_true",
+                   help="git fetch first and include tickets that exist only on the remote")
     s.set_defaults(fn=cmd_list)
 
     s = sub.add_parser("show", help="one ticket in full: fields, comments, development state, reports, activity")

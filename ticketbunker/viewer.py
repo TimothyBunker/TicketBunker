@@ -40,6 +40,7 @@ h3 { font-size:0.95rem; margin:1.1rem 0 0.4rem; }
 .chip.st-todo { } .chip.st-in-progress { border-color:var(--accent); color:var(--accent); }
 .chip.st-in-review { border-color:var(--spec); color:var(--spec); }
 .chip.st-done { border-color:var(--real); color:var(--real); }
+.chip.st-backlog, .chip.st-closed { color:var(--muted); }
 .tag { font-size:0.72rem; border-radius:3px; padding:0 0.35em; margin-right:0.4em;
        font-family:ui-monospace,monospace; }
 .tag.obs { color:var(--obs); border:1px solid var(--obs); }
@@ -207,7 +208,7 @@ def _git_state_line(bunker: Path) -> str:
     return " · ".join(bits)
 
 
-_STATUS_ORDER = ("todo", "in-progress", "in-review", "done", "(no status)")
+_STATUS_ORDER = ("backlog", "todo", "in-progress", "in-review", "done", "closed", "(no status)")
 
 
 def page_index(root: Path, fp: str) -> bytes:

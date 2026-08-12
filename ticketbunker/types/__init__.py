@@ -12,7 +12,7 @@ from typing import Callable
 
 INFERENCE_TAGS = ("real", "speculation")
 GROUNDINGS = ("grounded", "adjacent", "ungrounded")
-TICKET_STATUSES = ("todo", "in-progress", "in-review", "done")
+TICKET_STATUSES = ("backlog", "todo", "in-progress", "in-review", "done", "closed")
 TICKET_TYPES = ("bug", "task", "story")
 
 
