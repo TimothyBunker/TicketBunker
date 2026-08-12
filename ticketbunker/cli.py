@@ -361,9 +361,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         args.bunker = str(found)
         print(f"resolved: branch {branch} → ticket {tid} → {found}")
 
+    # An explicit bunker argument may be a path or a bare ticket ID, same
+    # as every other command.
+    resolved = _resolve_bunker(args.bunker)
+    if resolved is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
     # The harness runs with cwd inside the source repo — every bunker path
     # it receives must be absolute.
-    bunker = Path(args.bunker).resolve()
+    bunker = resolved.resolve()
     p = layout.paths(bunker)
     obs = fragments.load_observations(p["observations"])
     if not obs:
