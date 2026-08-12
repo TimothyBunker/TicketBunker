@@ -5,8 +5,9 @@ validated, ledgered), artifacts are produced by builders/, facts by
 processors/, external systems live behind adapters/. The bunker layout is
 defined once in layout.py.
 
-  tb init <ticket_id> --key KEY [--title T] [--priority P] [--description D]
-          [--assignee A] [--reporter R] [--poi NAME ...] [--root DIR]
+  tb ticket <ticket_id> [--key KEY] [--title T] [--priority P] [--description D]
+            [--assignee A] [--reporter R] [--poi NAME ...] [--root DIR]
+  tb branch <bunker> --repo PATH (--name SHORT | --assign BRANCH)
   tb bootstrap <bunker> --repo PATH [--baseline main]
   tb session <bunker> --branch NAME [--user U] [--baseline B] [--note N] [--data K=V]
   tb compose <bunker> [--branch NAME]
@@ -73,6 +74,29 @@ def _resolve_bunker(arg: str) -> Path | None:
     return None
 
 
+def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
+    """Every bunker whose ticket explicitly assigns this branch, across the
+    project's .tb/ and the configured bunker root."""
+    roots = []
+    if project:
+        roots.append(layout.bunkers_dir(project))
+    root = config.bunker_root()
+    if root:
+        roots.append(root)
+    found = []
+    for r in roots:
+        if not r.is_dir():
+            continue
+        for bunker in sorted(r.glob("*_bunker")):
+            try:
+                ticket = _ticket(bunker)
+            except Exception:
+                continue
+            if branch in (ticket.get("assigned_branches") or []) and bunker not in found:
+                found.append(bunker)
+    return found
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     import subprocess
 
@@ -90,7 +114,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     (tb_dir / ".gitignore").write_text(layout.TB_GITIGNORE, encoding="utf-8")
     (tb_dir / "config.json").write_text(json.dumps({"project": project.name}, indent=2) + "\n", encoding="utf-8")
     print(f"initialized {tb_dir} — ticket bunkers live here and travel with the repo")
-    print("next: tb ticket <TICKET-ID> --key <KEY> ...")
+    print("next: tb ticket <TICKET-ID> ...")
     return 0
 
 
@@ -113,7 +137,7 @@ def cmd_ticket(args: argparse.Namespace) -> int:
     ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=args.key)
     payload = {
         "id": args.ticket_id,
-        "key": args.key,
+        "key": args.key or args.ticket_id,
         "title": args.title,
         "priority": args.priority,
         "description": args.description,
@@ -156,6 +180,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
             baseline=args.baseline,
             obs_dir=layout.paths(bunker)["observations"],
             ledger=ledger,
+            assigned_branches=ticket.get("assigned_branches") or [],
         )
     except GitError as exc:
         if "rev-parse" in " ".join(exc.argv):
@@ -331,35 +356,51 @@ def cmd_run(args: argparse.Namespace) -> int:
         branch = proc.stdout.strip()
     args.branch = branch
 
-    # Default the bunker from the ticket ID embedded in the branch name.
+    # Default the bunker from the ticket ID embedded in the branch name,
+    # falling back to an explicit assignment recorded on a ticket.
     if args.bunker is None:
+        project = layout.find_root(repo) or layout.find_root()
         tid = config.extract_ticket_id(branch)
         if not tid:
-            print(
-                f"error: branch {branch!r} carries no ticket ID matching {config.ticket_pattern()!r} — "
-                "name branches with 'tb branch', or pass the bunker explicitly",
-                file=sys.stderr,
-            )
-            return 1
-        candidates = []
-        project = layout.find_root(repo) or layout.find_root()
-        if project:
-            candidates.append(layout.bunker_path(project, tid))
-        candidates.append(Path.cwd() / f"{tid}_bunker")
-        root = config.bunker_root()
-        if root:
-            candidates.append(root / f"{tid}_bunker")
-        found = next((c for c in candidates if c.is_dir()), None)
-        if not found:
-            looked = ", ".join(str(c) for c in candidates)
-            print(
-                f"error: no bunker for {tid} (looked in: {looked}) — "
-                "run 'tb init' then 'tb ticket', or set 'tb config --bunker-root DIR'",
-                file=sys.stderr,
-            )
-            return 1
-        args.bunker = str(found)
-        print(f"resolved: branch {branch} → ticket {tid} → {found}")
+            assigned_to = _bunkers_assigned(project, branch)
+            if len(assigned_to) == 1:
+                args.bunker = str(assigned_to[0])
+                print(f"resolved: branch {branch} → assigned ticket → {assigned_to[0]}")
+            elif len(assigned_to) > 1:
+                names = ", ".join(b.name for b in assigned_to)
+                print(
+                    f"error: branch {branch!r} is assigned to more than one ticket ({names}) — "
+                    "pass the bunker explicitly",
+                    file=sys.stderr,
+                )
+                return 1
+            else:
+                print(
+                    f"error: branch {branch!r} carries no ticket ID matching {config.ticket_pattern()!r} "
+                    "and is not assigned to any ticket — name branches with 'tb branch', assign this one "
+                    "with 'tb branch <TICKET> --assign', or pass the bunker explicitly",
+                    file=sys.stderr,
+                )
+                return 1
+        else:
+            candidates = []
+            if project:
+                candidates.append(layout.bunker_path(project, tid))
+            candidates.append(Path.cwd() / f"{tid}_bunker")
+            root = config.bunker_root()
+            if root:
+                candidates.append(root / f"{tid}_bunker")
+            found = next((c for c in candidates if c.is_dir()), None)
+            if not found:
+                looked = ", ".join(str(c) for c in candidates)
+                print(
+                    f"error: no bunker for {tid} (looked in: {looked}) — "
+                    "run 'tb init' then 'tb ticket', or set 'tb config --bunker-root DIR'",
+                    file=sys.stderr,
+                )
+                return 1
+            args.bunker = str(found)
+            print(f"resolved: branch {branch} → ticket {tid} → {found}")
 
     # An explicit bunker argument may be a path or a bare ticket ID, same
     # as every other command.
@@ -461,16 +502,40 @@ def cmd_branch(args: argparse.Namespace) -> int:
     if not ticket.get("id"):
         print("error: bunker has no ticket.json", file=sys.stderr)
         return 1
+    ledger = _ledger(bunker)
+    repo = Path(args.repo).resolve()
+    from .adapters.gitrun import git
+
     user = args.user or config.get_user()[0]
+
+    if args.assign:
+        out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "branch_assign")
+        names = [n.strip() for n in out.splitlines() if n.strip() and not n.strip().endswith("/HEAD")]
+        if args.assign not in names:
+            listing = ", ".join(n for n in names if not n.startswith("origin/")) or "none"
+            print(
+                f"error: {args.assign!r} is not a branch in {repo}\n"
+                f"  branches here: {listing}\n"
+                f"  create it first, or use 'tb branch {ticket['id']} --name SHORT --repo .' for a convention-named one",
+                file=sys.stderr,
+            )
+            return 1
+        already = args.assign in (ticket.get("assigned_branches") or [])
+        handlers.assign_branch(bunker, args.assign, ledger)
+        session_payload = {"branch": args.assign}
+        if user:
+            session_payload["user"] = user
+        handlers.intake_session_config(bunker, session_payload, ledger)
+        verb = "already assigned" if already else "assigned"
+        print(f"{verb}: branch {args.assign} → ticket {ticket['id']}; session config initialized")
+        return 0
+
     if not user:
         print("error: no user identifier — set one with 'tb config --user NAME'", file=sys.stderr)
         return 1
     full = config.build_branch(user, ticket["id"], args.name)
-    ledger = _ledger(bunker)
-    from .adapters.gitrun import git
-
     base = args.base or ticket.get("repo_baseline") or "HEAD"
-    git(Path(args.repo).resolve(), ["branch", full, base], ledger, "branch_create")
+    git(repo, ["branch", full, base], ledger, "branch_create")
     handlers.intake_session_config(bunker, {"branch": full, "user": user}, ledger)
     print(f"created branch {full} (from {base}); session config initialized")
     return 0
@@ -539,7 +604,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/")
     s.add_argument("ticket_id")
-    s.add_argument("--key", required=True, help="ticket key matched against branch names")
+    s.add_argument("--key", default=None,
+                   help="token matched against branch names (default: the ticket id itself)")
     s.add_argument("--title", default=None)
     s.add_argument("--priority", default=None)
     s.add_argument("--description", default=None)
@@ -627,9 +693,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="set where the bunker database lives, so tb run resolves bunkers from any repo")
     s.set_defaults(fn=cmd_config)
 
-    s = sub.add_parser("branch", help="create a convention-named branch for a ticket: user/TICKET-name")
+    s = sub.add_parser("branch", help="associate a branch with a ticket: create user/TICKET-name, or --assign an existing branch")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
-    s.add_argument("--name", required=True, help="short branch name, e.g. fourier-alg-impl")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--name", help="short branch name to create, e.g. fourier-alg-impl")
+    g.add_argument("--assign", metavar="BRANCH",
+                   help="record an existing branch as this ticket's (for names that don't carry the ticket key)")
     s.add_argument("--repo", required=True, help="the source repo to create the branch in")
     s.add_argument("--user", default=None, help="override the configured user identifier")
     s.add_argument("--base", default=None, help="ref to branch from (default: HEAD)")

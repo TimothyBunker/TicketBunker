@@ -177,8 +177,11 @@ On session instantiation, harness extensions execute — in order, outside agent
 control:
 
 1. **Branch resolution.** Find branches whose names contain the ticket key
-   (convention: branches are labeled by ticket). Record all matches; zero matches
-   is itself an observation.
+   (default: the ticket ID itself; convention: branches are labeled by ticket),
+   unioned with branches explicitly assigned to the ticket (§3.14). Each match
+   records its rule — key substring or explicit assignment. Zero matches is
+   itself an observation, and an assigned branch absent from the repo is
+   recorded as missing, not silently dropped.
 2. **Baseline identification.** Determine the reference branch (default: `main`,
    configurable per repo) and compute `merge-base` for each ticket branch.
 3. **Diff extraction.** `git diff <merge-base> <branch>` per branch — the actual
@@ -558,6 +561,18 @@ creates the branch in a relatively normal git fashion** (a ledgered
 `git branch`, nothing exotic). Nobody hand-types the convention, so nobody
 gets it wrong — the pattern is enforced by construction at the same place
 the branch is born.
+
+**Association is automatic by default, explicit when needed.** A ticket's
+branch-match key defaults to the ticket ID itself (`--key` overrides it for
+teams whose convention uses a different token), so any branch carrying the
+ID associates automatically — and `tb branch`-created branches carry it by
+construction. For a branch that predates the convention or won't be
+renamed, `tb branch <TICKET> --assign BRANCH` records an explicit
+assignment on the ticket itself (`assigned_branches` in ticket.json — ours
+provenance, travels with the repo, re-entering through the ticket intake
+gate). Branch resolution (§3.2) unions both sources and labels each
+branch's match rule; `tb run` on an assigned branch resolves its ticket
+through the assignment when the branch name carries no ID.
 
 **User identity:** the one hard requirement is that **each user has an
 identifier that means something to the team**. To avoid configuration time

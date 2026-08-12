@@ -66,8 +66,9 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 cd your-repo && tb init            # once per repo: creates .tb/ at the git root (fails outside a repo)
 tb config --user Tim               # once per machine: team identifier (defaults from git user.name)
 
-tb ticket TB-1267 --key TB-1267 --assignee ann --reporter bob  # create the ticket's bunker in .tb/
-tb branch TB-1267 --name fourier-alg-impl --repo .             # creates Tim/TB-1267-fourier-alg-impl
+tb ticket TB-1267 --assignee ann --reporter bob    # create the ticket's bunker in .tb/ (branch-match key defaults to TB-1267)
+tb branch TB-1267 --name fourier-alg-impl --repo . # creates Tim/TB-1267-fourier-alg-impl
+tb branch TB-1267 --assign legacy-fix --repo .     # or adopt an existing branch whose name carries no ticket ID
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
 tb run                             # on the ticket branch: everything else is inferred
 

@@ -28,6 +28,10 @@ def _validate_ticket(payload: dict) -> list[str]:
         errors.append("ticket requires a 'key' (matched against branch names)")
     if payload.get("people_of_interest") is not None and not isinstance(payload["people_of_interest"], list):
         errors.append("'people_of_interest' must be a list")
+    assigned = payload.get("assigned_branches")
+    if assigned is not None:
+        if not isinstance(assigned, list) or not all(isinstance(b, str) and b.strip() for b in assigned):
+            errors.append("'assigned_branches' must be a list of non-empty branch names")
     refs = payload.get("references")
     if refs is not None:
         if not isinstance(refs, list):

@@ -40,6 +40,21 @@ def intake_ticket(bunker: Path, payload: dict, ledger: Ledger) -> Path:
     return dest
 
 
+def assign_branch(bunker: Path, branch: str, ledger: Ledger) -> Path:
+    """Record an explicit branch→ticket assignment on the ticket itself.
+
+    The assignment travels with the repo (it lives in ticket.json, ours
+    provenance) and re-enters through the ticket gate like any other edit;
+    assigning an already-assigned branch is a no-op re-intake."""
+    ticket_path = layout.paths(bunker)["ticket"]
+    ticket = json.loads(ticket_path.read_text(encoding="utf-8"))
+    assigned = list(ticket.get("assigned_branches") or [])
+    if branch not in assigned:
+        assigned.append(branch)
+    ticket["assigned_branches"] = assigned
+    return intake_ticket(bunker, ticket, ledger)
+
+
 def intake_session_config(bunker: Path, payload: dict, ledger: Ledger) -> Path:
     _gate("session_config", payload, ledger, branch=payload.get("branch"))
     dest = layout.session_config(bunker, payload["branch"])

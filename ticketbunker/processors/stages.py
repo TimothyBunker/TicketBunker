@@ -19,9 +19,9 @@ CONTRACTS: dict[str, StageContract] = {
     "branch_resolution": StageContract(
         name="branch_resolution",
         purpose="Find every branch related to the ticket.",
-        inputs="Ticket key; repo refs.",
-        process="List local and remote branches whose names contain the ticket key.",
-        desired_outcome="A list of matching branches (zero matches is itself an observation).",
+        inputs="Ticket key; explicitly assigned branches; repo refs.",
+        process="List local and remote branches whose names contain the ticket key; union with branches explicitly assigned on the ticket.",
+        desired_outcome="A list of related branches, each with its match rule (zero matches is itself an observation).",
     ),
     "baseline": StageContract(
         name="baseline",
@@ -73,21 +73,33 @@ def run_bootstrap(
     baseline: str,
     obs_dir: Path,
     ledger: Ledger,
+    assigned_branches: list[str] | None = None,
 ) -> dict:
     """Run all six stages in order. Returns the combined observation set."""
     observations: dict = {"ticket_key": ticket_key, "baseline": baseline, "repo": str(repo)}
 
     def stage_branch_resolution() -> list[str]:
         out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "branch_resolution")
-        matches = [
-            name
-            for name in (line.strip() for line in out.splitlines())
-            if name and not name.endswith("/HEAD") and ticket_key.lower() in name.lower()
-        ]
+        names = [n for n in (line.strip() for line in out.splitlines()) if n and not n.endswith("/HEAD")]
+        matches = [n for n in names if ticket_key.lower() in n.lower()]
         # Prefer the local name when both local and origin/<name> match.
         locals_ = {m for m in matches if not m.startswith("origin/")}
         branches = [m for m in matches if not (m.startswith("origin/") and m.removeprefix("origin/") in locals_)]
-        payload = {"ticket_key": ticket_key, "branches": branches, "match_rule": "substring, case-insensitive"}
+        rules = {b: "substring, case-insensitive" for b in branches}
+        assigned_missing = []
+        for b in assigned_branches or []:
+            target = b if b in names else (f"origin/{b}" if f"origin/{b}" in names else None)
+            if target is None:
+                assigned_missing.append(b)
+            elif target not in rules:
+                branches.append(target)
+                rules[target] = "assigned"
+        payload = {
+            "ticket_key": ticket_key,
+            "branches": branches,
+            "match_rules": rules,
+            "assigned_missing": assigned_missing,
+        }
         _write_observation(obs_dir, "branch_resolution", payload)
         return branches
 
