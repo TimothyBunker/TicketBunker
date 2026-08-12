@@ -151,6 +151,54 @@
           "author": "Claude",
           "date": "2026-08-11T23:36:15+00:00",
           "subject": "Root .tb/ in the git repo: tb init like git init, tb ticket for bunkers"
+        },
+        {
+          "sha": "35feeb37c4e01c58e0488a1b3bef44a0a9cc56c2",
+          "author": "Claude",
+          "date": "2026-08-12T01:14:21+00:00",
+          "subject": "Friendly error when the bootstrap baseline branch does not exist"
+        },
+        {
+          "sha": "e8a964302ad7df41fb13b90d21384bf35e9b19c5",
+          "author": "Claude",
+          "date": "2026-08-12T01:29:26+00:00",
+          "subject": "tb run resolves explicit ticket IDs; fix .tb/.gitignore pattern anchoring"
+        },
+        {
+          "sha": "bf785940550a0276c35dd2ab69e1df59fbc00d38",
+          "author": "Claude",
+          "date": "2026-08-12T01:53:00+00:00",
+          "subject": "Refuse to publish an unfilled form; keep the harness transcript; codex workspace-write"
+        },
+        {
+          "sha": "88fb11fadc3d58f1c1902baf7c0484253add98a2",
+          "author": "Claude",
+          "date": "2026-08-12T01:55:28+00:00",
+          "subject": "Add agent handoff brief and Claude Code working rules"
+        },
+        {
+          "sha": "d0fd3140916df46561211755daabdb65df48ce16",
+          "author": "TimothyBunker",
+          "date": "2026-08-11T22:05:29-04:00",
+          "subject": "TB-1 dogfood: first live codex-published report"
+        },
+        {
+          "sha": "20034d5d8e983036e7d51752a73f9cd4a5dd4841",
+          "author": "TimothyBunker",
+          "date": "2026-08-11T22:05:35-04:00",
+          "subject": "Anchor honesty for verified absences: path only, no invented line"
+        },
+        {
+          "sha": "2a9c87e19e3ff6be3e9fe18f5bc5da0e108d8c27",
+          "author": "TimothyBunker",
+          "date": "2026-08-11T22:23:43-04:00",
+          "subject": "Branch↔ticket association: key defaults to id, explicit --assign fallback"
+        },
+        {
+          "sha": "71c65e6bc36f2cb592c662079c3e365d5778a728",
+          "author": "TimothyBunker",
+          "date": "2026-08-11T22:42:11-04:00",
+          "subject": "Jira-parity ticket surface: richer model, editor create, list/show/set, checkout collection, master digest"
         }
       ],
       "merge_commits": 0

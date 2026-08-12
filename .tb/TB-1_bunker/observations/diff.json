@@ -9,14 +9,134 @@
           "kind": "A"
         },
         {
+          "path": ".tb/.gitignore",
+          "added": 8,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/context/00_explanation.md",
+          "added": 94,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/context/10_workflow.md",
+          "added": 36,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/context/20_ticket.md",
+          "added": 14,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/context/30_observations.md",
+          "added": 14,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/inferences/inferences.jsonl",
+          "added": 12,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/ledger.jsonl",
+          "added": 62,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/authorship.json",
+          "added": 14,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/baseline.json",
+          "added": 9,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/branch_resolution.json",
+          "added": 7,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/diff.json",
+          "added": 179,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/merge_history.json",
+          "added": 11,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/observations/work_separation.json",
+          "added": 159,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/reports/branches/claude__jira-git-context-agent-artex0.md",
+          "added": 71,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/reports/master.md",
+          "added": 95,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/tb.md",
+          "added": 171,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/TB-1_bunker/ticket.json",
+          "added": 15,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": ".tb/config.json",
+          "added": 3,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "CLAUDE.md",
+          "added": 32,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
           "path": "DESIGN.md",
-          "added": 652,
-          "deleted": 44,
+          "added": 709,
+          "deleted": 46,
           "kind": "M"
         },
         {
+          "path": "HANDOFF.md",
+          "added": 127,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
           "path": "README.md",
-          "added": 118,
+          "added": 125,
           "deleted": 1,
           "kind": "M"
         },
@@ -52,7 +172,7 @@
         },
         {
           "path": "ticketbunker/adapters/harness.py",
-          "added": 126,
+          "added": 128,
           "deleted": 0,
           "kind": "A"
         },
@@ -64,7 +184,7 @@
         },
         {
           "path": "ticketbunker/adapters/syncrepo.py",
-          "added": 102,
+          "added": 103,
           "deleted": 0,
           "kind": "A"
         },
@@ -82,13 +202,13 @@
         },
         {
           "path": "ticketbunker/builders/fragments.py",
-          "added": 298,
+          "added": 313,
           "deleted": 0,
           "kind": "A"
         },
         {
           "path": "ticketbunker/builders/master.py",
-          "added": 94,
+          "added": 116,
           "deleted": 0,
           "kind": "A"
         },
@@ -99,8 +219,14 @@
           "kind": "A"
         },
         {
+          "path": "ticketbunker/builders/ticketform.py",
+          "added": 78,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
           "path": "ticketbunker/cli.py",
-          "added": 614,
+          "added": 1051,
           "deleted": 0,
           "kind": "A"
         },
@@ -118,13 +244,13 @@
         },
         {
           "path": "ticketbunker/handlers/__init__.py",
-          "added": 79,
+          "added": 116,
           "deleted": 0,
           "kind": "A"
         },
         {
           "path": "ticketbunker/layout.py",
-          "added": 83,
+          "added": 93,
           "deleted": 0,
           "kind": "A"
         },
@@ -148,13 +274,13 @@
         },
         {
           "path": "ticketbunker/processors/stages.py",
-          "added": 218,
+          "added": 241,
           "deleted": 0,
           "kind": "A"
         },
         {
           "path": "ticketbunker/types/__init__.py",
-          "added": 116,
+          "added": 138,
           "deleted": 0,
           "kind": "A"
         },
@@ -171,9 +297,9 @@
           "kind": "A"
         }
       ],
-      "file_count": 28,
+      "file_count": 49,
       "patch": "observations/patches/claude__jira-git-context-agent-artex0.patch",
-      "patch_truncated": false
+      "patch_truncated": true
     }
   }
 }

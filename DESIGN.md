@@ -323,8 +323,14 @@ equivalent — fields, carried-over comments, a development panel rendered
 from the observations, report state, and the ledger tail as the activity
 log. Declared workflow state (status, ours) is always shown *beside*
 observed git state (merged-back, recency — the pipeline's), never blended.
-A minimal local viewer (stdlib HTTP, rendering the same data) is the
-planned next step; the CLI stays the source of truth for it.
+`tb view` serves the same data as a minimal local viewer
+(`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
+per-ticket pages with the master digest inline, full components collapsed,
+and trust tags rendered as chips. It is strictly read-only — no write
+endpoint exists, every page renders from `.tb/` on each request, and pages
+poll a database fingerprint so whatever the user is looking at reloads
+when the data changes. All content is HTML-escaped before the constrained
+report markup is re-introduced; agent text can never inject into the page.
 
 ### 3.6 Report analysis toolset
 

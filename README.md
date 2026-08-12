@@ -75,6 +75,7 @@ tb set TB-1267 --status in-review                  # move ticket fields through 
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # fetch + collect each branch's report component, compile the master
+tb view                                            # read-only local ticket viewer at http://127.0.0.1:8377 (auto-refreshes)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
 tb run                             # on the ticket branch: everything else is inferred
 

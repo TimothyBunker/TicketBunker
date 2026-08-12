@@ -742,8 +742,9 @@ def cmd_show(args: argparse.Namespace) -> int:
             info = per.get(b) or per.get(b.removeprefix("origin/")) or {}
             state = ""
             if info:
-                state = f" — ahead {info.get('ahead', '?')}, behind {info.get('behind', '?')}, merged back: {info.get('merged_back')}"
-            print(f"  {b} ({rule}){state}")
+                state = (f" — ahead {info.get('ahead_of_merge_base', '?')}, "
+                         f"behind {info.get('behind_baseline', '?')}, merged back: {info.get('merged_back')}")
+            print(f"  {b}{f' ({rule})' if rule else ''}{state}")
         for b in data.get("assigned_missing", []):
             print(f"  {b} (assigned, missing from the repo)")
 
@@ -766,6 +767,34 @@ def cmd_show(args: argparse.Namespace) -> int:
             e = json.loads(line)
             print(f"  {e.get('ts', '')[:19]}  {e.get('type')}" +
                   (f" [{e.get('stage')}]" if e.get("stage") else ""))
+    return 0
+
+
+def cmd_view(args: argparse.Namespace) -> int:
+    root = layout.find_root()
+    if not root:
+        print("error: no .tb/ found here or above — run 'tb init' inside your git repo first", file=sys.stderr)
+        return 1
+    from . import viewer
+
+    try:
+        server = viewer.serve(root, args.port)
+    except OSError as exc:
+        print(f"error: cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}) — "
+              f"try another port: tb view --port {args.port + 1}", file=sys.stderr)
+        return 1
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    print(f"viewing {layout.bunkers_dir(root)} at {url} — Ctrl-C stops it")
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nviewer stopped")
+    finally:
+        server.server_close()
     return 0
 
 
@@ -935,6 +964,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("show", help="one ticket in full: fields, comments, development state, reports, activity")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.set_defaults(fn=cmd_show)
+
+    s = sub.add_parser("view", help="serve a read-only local ticket viewer (auto-refreshes as the database changes)")
+    s.add_argument("--port", type=int, default=8377, help="localhost port (default: 8377)")
+    s.add_argument("--open", action="store_true", help="open the viewer in your browser")
+    s.set_defaults(fn=cmd_view)
 
     s = sub.add_parser("checkout", help="collect the ticket's report components from its branches and compile the master")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")

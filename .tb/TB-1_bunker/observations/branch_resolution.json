@@ -3,5 +3,8 @@
   "branches": [
     "claude/jira-git-context-agent-artex0"
   ],
-  "match_rule": "substring, case-insensitive"
+  "match_rules": {
+    "claude/jira-git-context-agent-artex0": "substring, case-insensitive"
+  },
+  "assigned_missing": []
 }

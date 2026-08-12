@@ -153,7 +153,7 @@ their record is not your job.
 - **people of interest**: none configured
 <!-- tb:end 20_ticket.md -->
 
-<!-- tb:fragment 30_observations.md sha256:c58a72c13b6a94d40df4c965ff73ddba4cc522cc1a55e9b54d05fe2aba335563 provenance=pipeline -->
+<!-- tb:fragment 30_observations.md sha256:1d4368aff633767d72aa4620373f1c003a4e07b8b3d4239eeb8b70a233e63ab1 provenance=pipeline -->
 # Observations (bootstrap)
 
 - **baseline**: main
@@ -161,11 +161,11 @@ their record is not your job.
 
 ### claude/jira-git-context-agent-artex0
 
-- ahead 25 / behind baseline 0, merged back: False
+- ahead 33 / behind baseline 0, merged back: False
 - last sync with baseline: 2026-08-11T18:57:18+00:00
-- recency of development: 2026-08-11T23:36:15+00:00
-- files touched: 28, work commits: 25, merge commits: 0
-- authors: Claude (25)
+- recency of development: 2026-08-12T01:55:28+00:00
+- files touched: 49, work commits: 33, merge commits: 0
+- authors: Claude (29), TimothyBunker (4)
 
 Full atomic observations: observations/*.json
 <!-- tb:end 30_observations.md -->
