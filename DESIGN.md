@@ -233,7 +233,9 @@ epistemic weight, and the report must say which is which:
 **Finding nothing is a first-class result.** If the agent can't ground the
 ticket in the code, the report must say so and recommend the human move: tag
 up with the **reporter** or a configured **person of interest**, when one is
-available. An honest "talk to X" beats a confident guess.
+available. An honest "talk to X" beats a confident guess. A verified absence
+is itself a real finding, anchored to the searched file or directory — path
+only, never a fabricated line number.
 
 **Investigation promotion.** The agent may be promoted to investigate further
 (deeper tracing beyond the standard enrichment); everything submitted from

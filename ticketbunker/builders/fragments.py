@@ -41,7 +41,10 @@ promoted to investigate deeper, everything from that investigation is
 
 **Finding nothing is a result.** If you cannot ground the ticket in the
 code, say so plainly and recommend tagging up with the reporter or a
-person of interest from the ticket configuration, if one is listed.
+person of interest from the ticket configuration, if one is listed. A
+verified absence ("X appears nowhere in Y") is a [real] claim: anchor it
+to the file or directory you searched — path only, no line number. Never
+anchor any claim to a line that does not contain the stated fact.
 
 ## Your universe
 
