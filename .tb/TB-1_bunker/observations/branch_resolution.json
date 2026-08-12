@@ -1,0 +1,7 @@
+{
+  "ticket_key": "jira",
+  "branches": [
+    "claude/jira-git-context-agent-artex0"
+  ],
+  "match_rule": "substring, case-insensitive"
+}

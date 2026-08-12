@@ -1,0 +1,179 @@
+{
+  "per_branch": {
+    "claude/jira-git-context-agent-artex0": {
+      "files": [
+        {
+          "path": ".gitignore",
+          "added": 6,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "DESIGN.md",
+          "added": 652,
+          "deleted": 44,
+          "kind": "M"
+        },
+        {
+          "path": "README.md",
+          "added": 118,
+          "deleted": 1,
+          "kind": "M"
+        },
+        {
+          "path": "harness/pi/tb.ts",
+          "added": 52,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "pyproject.toml",
+          "added": 16,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/__init__.py",
+          "added": 9,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/adapters/__init__.py",
+          "added": 0,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/adapters/gitrun.py",
+          "added": 64,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/adapters/harness.py",
+          "added": 126,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/adapters/proc.py",
+          "added": 37,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/adapters/syncrepo.py",
+          "added": 102,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/builders/__init__.py",
+          "added": 0,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/builders/compose.py",
+          "added": 56,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/builders/fragments.py",
+          "added": 298,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/builders/master.py",
+          "added": 94,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/builders/scaffold.py",
+          "added": 84,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/cli.py",
+          "added": 614,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/config.py",
+          "added": 82,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/contracts.py",
+          "added": 43,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/handlers/__init__.py",
+          "added": 79,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/layout.py",
+          "added": 83,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/ledger.py",
+          "added": 78,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/processors/__init__.py",
+          "added": 0,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/processors/reportlint.py",
+          "added": 134,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/processors/stages.py",
+          "added": 218,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "ticketbunker/types/__init__.py",
+          "added": 116,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "tools/build_tb.py",
+          "added": 47,
+          "deleted": 0,
+          "kind": "A"
+        },
+        {
+          "path": "tools/stub_agent.py",
+          "added": 53,
+          "deleted": 0,
+          "kind": "A"
+        }
+      ],
+      "file_count": 28,
+      "patch": "observations/patches/claude__jira-git-context-agent-artex0.patch",
+      "patch_truncated": false
+    }
+  }
+}

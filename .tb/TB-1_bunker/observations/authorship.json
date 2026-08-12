@@ -1,0 +1,14 @@
+{
+  "per_branch": {
+    "claude/jira-git-context-agent-artex0": {
+      "authors": {
+        "Claude": {
+          "commits": 25,
+          "first": "2026-08-11T19:16:00+00:00",
+          "last": "2026-08-11T23:36:15+00:00"
+        }
+      },
+      "recency_of_development": "2026-08-11T23:36:15+00:00"
+    }
+  }
+}

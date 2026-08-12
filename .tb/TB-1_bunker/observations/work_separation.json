@@ -1,0 +1,159 @@
+{
+  "per_branch": {
+    "claude/jira-git-context-agent-artex0": {
+      "work_commits": [
+        {
+          "sha": "3ca8c4c47addfc9ec5e985a4d8ae047d45ba657a",
+          "author": "Claude",
+          "date": "2026-08-11T19:16:00+00:00",
+          "subject": "Refine design: bunker layout, local session / remote report split, report-first UX"
+        },
+        {
+          "sha": "3d2a118199bac2e8889d086ea007759484891071",
+          "author": "Claude",
+          "date": "2026-08-11T19:51:20+00:00",
+          "subject": "Design the report subsystem: per-branch components, auto-regenerated master, lint toolset"
+        },
+        {
+          "sha": "f8c8513fe7286bf3225c7d6f04637fd1f2fa124f",
+          "author": "Claude",
+          "date": "2026-08-11T20:00:51+00:00",
+          "subject": "Resolve ticket-branch cardinality: >=1 branch required, many allowed, ordered"
+        },
+        {
+          "sha": "7bc910e3881ac5114ce790324428b1a2ed11c9ee",
+          "author": "Claude",
+          "date": "2026-08-11T20:05:59+00:00",
+          "subject": "Add backend ownership, stage contracts, and execution ledger to design"
+        },
+        {
+          "sha": "4143e5c672ba03ac35da53b37d44d829f86c693e",
+          "author": "Claude",
+          "date": "2026-08-11T20:09:21+00:00",
+          "subject": "Narrow pi's role to session ownership; make the pipeline harness-portable"
+        },
+        {
+          "sha": "51ab00e00b4774a541a010a06fcc2f907ebaf510",
+          "author": "Claude",
+          "date": "2026-08-11T20:10:54+00:00",
+          "subject": "Clarify backend-to-session flow: backend state populates the session"
+        },
+        {
+          "sha": "f766a0d405ae4689b0a345b3e0a38e7318e82101",
+          "author": "Claude",
+          "date": "2026-08-11T20:21:15+00:00",
+          "subject": "Add tb.md context composition to design; implement the harness-neutral core"
+        },
+        {
+          "sha": "a45d77236dac0506587a0fa3cd88cc4a2b11916f",
+          "author": "Claude",
+          "date": "2026-08-11T20:21:23+00:00",
+          "subject": "Remove committed bytecode; add .gitignore"
+        },
+        {
+          "sha": "86fc7bbcc82c22165a9f516c7446fd703b4a3a22",
+          "author": "Claude",
+          "date": "2026-08-11T21:06:00+00:00",
+          "subject": "Ship tb as a first-class command: zipapp build for install-free use"
+        },
+        {
+          "sha": "40f9db6b6bd02fb8b19e14ce492190c743d793d6",
+          "author": "Claude",
+          "date": "2026-08-11T21:21:56+00:00",
+          "subject": "Three-tag ontology: observation / real / speculation, plus the inference store"
+        },
+        {
+          "sha": "04cb0bdf7252401e0f35613e477ad0a58ed6c260",
+          "author": "Claude",
+          "date": "2026-08-11T21:22:34+00:00",
+          "subject": "Define Where as three epistemic blocks: past edits, ticket finds, change-site speculation"
+        },
+        {
+          "sha": "a1868c910d2d4a001b8dba1195c38f36050e6b54",
+          "author": "Claude",
+          "date": "2026-08-11T21:35:02+00:00",
+          "subject": "Add the root surveyor and tbroot.md: per-project local-universe preamble"
+        },
+        {
+          "sha": "e2d278fbe7268f533f0e1b55a2cd575f83ac681a",
+          "author": "Claude",
+          "date": "2026-08-11T21:45:24+00:00",
+          "subject": "Provenance-separated preamble fragments and the pre-filled report form"
+        },
+        {
+          "sha": "04cfddee6b6d76d69de2a27759834a61a44d4734",
+          "author": "Claude",
+          "date": "2026-08-11T21:47:29+00:00",
+          "subject": "Per-session configs: user data injection scoped to one branch session"
+        },
+        {
+          "sha": "185702759831b401821af1a812206869ed716e7d",
+          "author": "Claude",
+          "date": "2026-08-11T21:50:47+00:00",
+          "subject": "Codify section determinants; capture actual patch text as an observation"
+        },
+        {
+          "sha": "d2e4af86ab0169fba7935ebfe4bd376e2cc243b8",
+          "author": "Claude",
+          "date": "2026-08-11T22:05:26+00:00",
+          "subject": "Typed information intake + role-separated architecture + layout module"
+        },
+        {
+          "sha": "96a3555aa9fd3db08603f62460463af6b8a9e4ac",
+          "author": "Claude",
+          "date": "2026-08-11T22:18:39+00:00",
+          "subject": "Git is the backend: tb sync with .tbignore, union-merged ledgers"
+        },
+        {
+          "sha": "c92e99d081c01e03adc46a89239f966263fd7a57",
+          "author": "Claude",
+          "date": "2026-08-11T22:18:55+00:00",
+          "subject": "Mark sync-transport open question resolved by git-as-backend"
+        },
+        {
+          "sha": "8680ce27dff6b367ecc66c51899c9a6baf020a1b",
+          "author": "Claude",
+          "date": "2026-08-11T22:29:17+00:00",
+          "subject": "Naming conventions: patterned tickets, user/TICKET-name branches, tb branch"
+        },
+        {
+          "sha": "bf390b517eecfc9043db67407d6c72737fd4d9c1",
+          "author": "Claude",
+          "date": "2026-08-11T22:34:47+00:00",
+          "subject": "Project universe boundary, cross-project references, format doctrine"
+        },
+        {
+          "sha": "6eed7e7e09ab6a23e851570c2859fa423cfbf7b9",
+          "author": "Claude",
+          "date": "2026-08-11T23:15:26+00:00",
+          "subject": "Pi harness adapter and tb run: the full agent-session loop"
+        },
+        {
+          "sha": "e0c148501ba29690a47c4cc812179c001b0d18ad",
+          "author": "Claude",
+          "date": "2026-08-11T23:25:16+00:00",
+          "subject": "tb run resolves branch and bunker from the current repo"
+        },
+        {
+          "sha": "ba8d39c6384fd2fcfe68b0568598c759b480a086",
+          "author": "Claude",
+          "date": "2026-08-11T23:28:21+00:00",
+          "subject": "Add codex harness profile"
+        },
+        {
+          "sha": "c5e2f088342df0085d4ece846da892a57c6d76dc",
+          "author": "Claude",
+          "date": "2026-08-11T23:31:53+00:00",
+          "subject": "Fix packaging: include subpackages in the wheel"
+        },
+        {
+          "sha": "ce5661a788b0c2e326d53b2c5adef0ac39c8a63f",
+          "author": "Claude",
+          "date": "2026-08-11T23:36:15+00:00",
+          "subject": "Root .tb/ in the git repo: tb init like git init, tb ticket for bunkers"
+        }
+      ],
+      "merge_commits": 0
+    }
+  }
+}
