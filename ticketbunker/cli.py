@@ -146,9 +146,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
     tb_dir.mkdir()
     (tb_dir / ".gitignore").write_text(layout.TB_GITIGNORE, encoding="utf-8")
+    (tb_dir / ".gitattributes").write_text(layout.TB_GITATTRIBUTES, encoding="utf-8")
     (tb_dir / "config.json").write_text(json.dumps({"project": project.name}, indent=2) + "\n", encoding="utf-8")
+    # The 'ours' merge driver the gitattributes reference — builtin behavior,
+    # but git only honors it when declared in config.
+    subprocess.run(["git", "-C", str(project), "config", "merge.ours.driver", "true"], capture_output=True)
     print(f"initialized {tb_dir} — ticket bunkers live here and travel with the repo")
-    print("next: tb ticket <TICKET-ID> ...")
+    print("next: tb ticket <TICKET-ID> ...   (optional: 'tb hooks --install' keeps observations fresh)")
     return 0
 
 
@@ -914,6 +918,109 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """Hook-driven observation refresh for the current branch's ticket.
+    Must never break git: a branch without a ticket, or any failure, exits 0."""
+    import subprocess
+
+    repo = Path(args.repo).resolve()
+    proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return 0
+    branch = proc.stdout.strip()
+    project = layout.find_root(repo)
+    bunker = None
+    tid = config.extract_ticket_id(branch)
+    if tid and project:
+        cand = layout.bunker_path(project, tid)
+        bunker = cand if cand.is_dir() else None
+    if bunker is None:
+        assigned = _bunkers_assigned(project, branch)
+        bunker = assigned[0] if len(assigned) == 1 else None
+    if bunker is None:
+        return 0
+    ticket = _ticket(bunker)
+    ledger = _ledger(bunker)
+    baseline = "main"
+    base_obs = layout.paths(bunker)["observations"] / "baseline.json"
+    if base_obs.exists():
+        try:
+            baseline = json.loads(base_obs.read_text(encoding="utf-8")).get("baseline") or "main"
+        except ValueError:
+            pass
+    try:
+        ticket["repo"] = str(repo)
+        handlers.intake_ticket(bunker, ticket, ledger)
+        stages.run_bootstrap(
+            repo=repo,
+            ticket_key=ticket.get("key") or ticket["id"],
+            baseline=baseline,
+            obs_dir=layout.paths(bunker)["observations"],
+            ledger=ledger,
+            assigned_branches=ticket.get("assigned_branches") or [],
+        )
+        _recompose(bunker, ledger)
+        master.regenerate(bunker, ledger)
+    except Exception as exc:  # a hook must never block a commit or merge
+        if not args.quiet:
+            print(f"tb refresh skipped: {exc}", file=sys.stderr)
+        return 0
+    if not args.quiet:
+        print(f"refreshed {ticket['id']}: observations, tb.md, master")
+    return 0
+
+
+_HOOK_MARKER = "# TicketBunker hook"
+_HOOK_NAMES = ("post-commit", "post-merge")
+_HOOK_BODY = f"""#!/bin/sh
+{_HOOK_MARKER} — refresh the current branch's ticket bunker. Never blocks git.
+tb refresh --quiet 2>/dev/null || true
+"""
+
+
+def cmd_hooks(args: argparse.Namespace) -> int:
+    import subprocess
+
+    repo = Path(args.repo).resolve()
+    proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(f"error: {repo} is not a git repository", file=sys.stderr)
+        return 1
+    git_dir = Path(proc.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = repo / git_dir
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    if args.uninstall:
+        removed = []
+        for name in _HOOK_NAMES:
+            path = hooks_dir / name
+            if path.exists() and _HOOK_MARKER in path.read_text(encoding="utf-8"):
+                path.unlink()
+                removed.append(name)
+        print(f"removed: {', '.join(removed) if removed else 'nothing (no TicketBunker hooks found)'}")
+        return 0
+
+    installed, skipped = [], []
+    for name in _HOOK_NAMES:
+        path = hooks_dir / name
+        if path.exists() and _HOOK_MARKER not in path.read_text(encoding="utf-8"):
+            skipped.append(name)
+            continue
+        path.write_text(_HOOK_BODY, encoding="utf-8")
+        path.chmod(path.stat().st_mode | 0o111)
+        installed.append(name)
+    subprocess.run(["git", "-C", str(repo), "config", "merge.ours.driver", "true"], capture_output=True)
+    if installed:
+        print(f"installed: {', '.join(installed)} — observations and the master refresh on every commit and merge")
+    for name in skipped:
+        print(f"skipped {name}: a non-TicketBunker hook is already there — add 'tb refresh --quiet || true' to it yourself")
+    return 0
+
+
 def cmd_view(args: argparse.Namespace) -> int:
     root = layout.find_root()
     if not root:
@@ -1134,6 +1241,18 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("show", help="one ticket in full: fields, comments, development state, reports, activity")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.set_defaults(fn=cmd_show)
+
+    s = sub.add_parser("refresh", help="refresh the current branch's ticket observations and master (hook-friendly; never fails)")
+    s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
+    s.add_argument("--quiet", action="store_true", help="print nothing (hook mode)")
+    s.set_defaults(fn=cmd_refresh)
+
+    s = sub.add_parser("hooks", help="install git hooks that keep the bunker fresh on every commit and merge")
+    s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--install", action="store_true")
+    g.add_argument("--uninstall", action="store_true")
+    s.set_defaults(fn=cmd_hooks)
 
     s = sub.add_parser("view", help="serve a read-only local ticket viewer (auto-refreshes as the database changes)")
     s.add_argument("--port", type=int, default=8377, help="localhost port (default: 8377)")

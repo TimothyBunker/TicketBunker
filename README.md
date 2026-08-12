@@ -76,6 +76,9 @@ tb list                                            # every ticket, grouped by st
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # fetch + collect each branch's report component, compile the master
 tb view                                            # read-only local ticket viewer at http://127.0.0.1:8377 (auto-refreshes)
+tb hooks --install                                 # git hooks: observations + master refresh on every commit/merge
+tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
+tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
 tb run                             # on the ticket branch: everything else is inferred
 

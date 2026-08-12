@@ -585,6 +585,27 @@ files, patches) out of the shared history. A standalone external database
 (tb ticket --root, tb sync) remains supported for teams that want bunkers
 in a separate repo.
 
+**The bunker merges the way the repo merges.** Branches carrying `.tb/`
+changes come together through ordinary git, with the merge behavior the
+data shapes demand, declared in a generated `.tb/.gitattributes`:
+append-only logs (`ledger.jsonl`, `inferences.jsonl`) merge by **union** —
+every side's entries survive, order within the merge is immaterial for
+append-only records; the **master is never merged**, it is a generated
+artifact — `merge=ours` keeps a placeholder and the post-merge hook
+regenerates it from the actual children. `tb hooks --install` writes
+`post-commit`/`post-merge` hooks that run `tb refresh` — resolve the
+current branch's ticket, re-run the observation pipeline, recompose,
+regenerate the master — never blocking git (a branch without a ticket, or
+any failure, is a silent no-op). This is the first slice of the §3.1
+trigger model: the viewer polls the database, the hooks keep the database
+current, so what a user is looking at tracks the repo as they work.
+Ticket.json edits from two branches still conflict like source code — by
+design, they are declared data. **A merge session is future work in the
+same trust frame**: merging is part of solving a ticket, so semantic
+conflicts (two branches' components disagreeing about the same code) are
+a legitimate agent task — a promoted session that reconciles components
+through the same gates, never a silent auto-resolution.
+
 ### 3.14 Naming conventions and branch creation
 
 **Tickets and branches follow an allowed pattern.**
