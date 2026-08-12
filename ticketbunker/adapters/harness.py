@@ -102,7 +102,9 @@ def run_session(
             + "\n\n---\n\n"
             + prompt
         )
-        argv = [codex_bin, "exec", "--cd", str(repo)]
+        # exec defaults to a read-only sandbox; the agent must be able to
+        # write the form (which lives in .tb/ inside the workspace).
+        argv = [codex_bin, "exec", "--cd", str(repo), "--sandbox", "workspace-write"]
         if model:
             argv += ["--model", model]
         argv.append(full_prompt)

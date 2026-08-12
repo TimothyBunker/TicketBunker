@@ -19,6 +19,7 @@ TB_GITIGNORE = """\
 *.session.json
 literal_pi_session.json
 **/sessions/*.form.md
+**/sessions/*.transcript.txt
 **/observations/patches/
 sync_ledger.jsonl
 """
@@ -73,6 +74,12 @@ def session_form(bunker: Path, branch: str) -> Path:
     """The working copy of the report form an agent session fills in.
     A local draft — the shared artifact is the published component."""
     return paths(bunker)["sessions"] / f"{branch_slug(branch)}.form.md"
+
+
+def session_transcript(bunker: Path, branch: str) -> Path:
+    """The harness's captured output for a session — local diagnostic
+    material, never synced."""
+    return paths(bunker)["sessions"] / f"{branch_slug(branch)}.transcript.txt"
 
 
 def child_report(bunker: Path, branch: str) -> Path:

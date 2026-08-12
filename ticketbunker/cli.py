@@ -390,13 +390,29 @@ def cmd_run(args: argparse.Namespace) -> int:
         pi_bin=args.pi_bin, codex_bin=args.codex_bin,
         provider=args.provider, model=args.model,
     )
+    transcript = layout.session_transcript(bunker, args.branch)
+    transcript.write_text(output, encoding="utf-8")
     if code != 0:
         print(output)
         print(f"error: harness exited {code}; form left at {form}", file=sys.stderr)
         return 1
 
-    # 3. Publish what came back, through typed intake.
+    # 3. Refuse to publish untouched work: a session that filled nothing is
+    #    a failed session, not a report.
     text = form.read_text(encoding="utf-8")
+    unfilled = text.count("<!-- agent:")
+    if unfilled:
+        ledger.event("session_unfilled", branch=args.branch, remaining_areas=unfilled)
+        print(
+            f"FAIL — the agent left {unfilled} area(s) of the form unfilled; nothing published.\n"
+            f"  form:       {form}\n"
+            f"  transcript: {transcript}\n"
+            "  Common cause with codex: sandbox denied the write (the codex profile now "
+            "passes --sandbox workspace-write). Inspect the transcript, then re-run, or "
+            "fill the form by hand and 'tb publish'.",
+            file=sys.stderr,
+        )
+        return 1
     _, findings = reportlint.gate(text)
     for f in findings:
         print(f)

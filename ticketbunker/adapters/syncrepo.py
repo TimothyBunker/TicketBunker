@@ -28,6 +28,7 @@ literal_pi_session.json
 # Form drafts are session-local working copies; the published component
 # is the shared artifact.
 *_bunker/sessions/*.form.md
+*_bunker/sessions/*.transcript.txt
 
 # Local scratch.
 scratch/
