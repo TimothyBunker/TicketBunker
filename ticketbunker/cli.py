@@ -147,13 +147,34 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     ticket["repo"] = str(Path(args.repo).resolve())
     ledger = _ledger(bunker)
     handlers.intake_ticket(bunker, ticket, ledger)
-    obs = stages.run_bootstrap(
-        repo=Path(args.repo).resolve(),
-        ticket_key=args.ticket_key or ticket["key"],
-        baseline=args.baseline,
-        obs_dir=layout.paths(bunker)["observations"],
-        ledger=ledger,
-    )
+    from .adapters.gitrun import GitError
+
+    try:
+        obs = stages.run_bootstrap(
+            repo=Path(args.repo).resolve(),
+            ticket_key=args.ticket_key or ticket["key"],
+            baseline=args.baseline,
+            obs_dir=layout.paths(bunker)["observations"],
+            ledger=ledger,
+        )
+    except GitError as exc:
+        if "rev-parse" in " ".join(exc.argv):
+            import subprocess
+
+            proc = subprocess.run(
+                ["git", "-C", str(Path(args.repo).resolve()), "branch", "--format=%(refname:short)"],
+                capture_output=True, text=True,
+            )
+            branches = ", ".join(proc.stdout.split()) or "none"
+            print(
+                f"error: baseline {args.baseline!r} is not a branch in this repo.\n"
+                f"  branches here: {branches}\n"
+                f"  pass one with --baseline, or create one, e.g. a baseline at the first commit:\n"
+                f"    git branch main $(git rev-list --max-parents=0 HEAD)",
+                file=sys.stderr,
+            )
+            return 1
+        raise
     _recompose(bunker, ledger)
     print(f"bootstrap complete: {len(obs.get('branches', []))} branch(es) observed; tb.md recomposed")
     return 0
