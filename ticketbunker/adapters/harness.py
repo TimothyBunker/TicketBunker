@@ -35,7 +35,8 @@ Your pre-filled report form is at: {form}
 The source repo is at: {repo}
 
 Follow the tool order from your context. Fill in every `<!-- agent: ... -->`
-area of the form with tagged claims, leaving the [observation] lines exactly
+area of the form with tagged claims — your claims replace the marker line
+itself; no such marker may remain — leaving the [observation] lines exactly
 as they are, and save the file in place. Do not publish; publishing happens
 outside your session. When the form is complete, you are done.
 """
@@ -86,9 +87,11 @@ The source repo is at: {repo}
 
 Follow the merge workflow from your context: verify each candidate
 disagreement against the code, edit the embedded components in place
-between their markers, fill the Reconciliation agent area, and save the
-file in place. Do not publish; republication happens outside your session.
-When the form is reconciled, you are done.
+between their markers, and fill the Reconciliation agent area — your
+claims replace the `<!-- agent: ... -->` marker line itself; no such
+marker may remain in the saved form. Keep the `tb:component` markers
+untouched. Save the file in place. Do not publish; republication happens
+outside your session. When the form is reconciled, you are done.
 """
 
 # The extension that mirrors agent tool calls into the bunker ledger.

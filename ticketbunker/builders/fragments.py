@@ -189,7 +189,9 @@ silently picking a side.
    every claim tagged. Do not move claims across components; do not
    remove or alter the component markers.
 4. Fill the Reconciliation agent area: each disagreement, what the code
-   shows, how you resolved it — tagged like any other claims.
+   shows, how you resolved it — tagged like any other claims. Your claims
+   replace the `<!-- agent: ... -->` marker line itself; a marker left in
+   the form means the area is unfilled and nothing republishes.
 5. Save the form. Do not publish; each reconciled component is
    republished through the lint and anchor gates outside your session,
    and the set lands atomically or not at all.
