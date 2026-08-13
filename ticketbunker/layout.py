@@ -97,6 +97,20 @@ def child_report(bunker: Path, branch: str) -> Path:
     return paths(bunker)["children"] / f"{branch_slug(branch)}.md"
 
 
+# The merge session occupies a reserved session slot named "merge". Ticket
+# branches follow username/TICKET-name (§3.14) and so never slug to it, and
+# the existing sessions/ ignore patterns cover its form and transcript.
+MERGE_SESSION = "merge"
+
+
+def merge_form(bunker: Path) -> Path:
+    return session_form(bunker, MERGE_SESSION)
+
+
+def merge_transcript(bunker: Path) -> Path:
+    return session_transcript(bunker, MERGE_SESSION)
+
+
 def init_dirs(bunker: Path) -> None:
     p = paths(bunker)
     for key in ("context", "sessions", "observations", "inferences", "children"):

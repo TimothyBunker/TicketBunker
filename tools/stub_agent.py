@@ -36,6 +36,7 @@ def fill(text: str) -> str:
         "[speculation] where changes may be needed": f"- [speculation] adjacent: future work likely lands near `{anchor}`, already carrying this ticket's edits.",
         "primary sources first": "- [speculation] grounded: the goal per the ticket description matches the observed doc-focused diff (observations/diff.json).",
         "[speculation] apparent progress": "- [speculation] grounded: work commits exist and are unmerged per merge_history — in progress, not delivered.",
+        "each semantic disagreement about the same code": "- [speculation] ungrounded: stub merge session — no semantic comparison performed; components left as published.",
     }
     out = []
     for line in text.splitlines():

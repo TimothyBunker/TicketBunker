@@ -30,7 +30,7 @@ from . import config, handlers, layout, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
-from .ledger import Ledger
+from .ledger import Ledger, digest
 from .processors import reportlint, stages
 
 
@@ -43,7 +43,7 @@ def _ticket(bunker: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
+def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None, merge: bool = False) -> None:
     p = layout.paths(bunker)
     ticket = _ticket(bunker)
     if ticket.get("repo"):
@@ -56,6 +56,7 @@ def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None) -> None:
         if cfg_path.exists():
             session_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     fragments.write_session(p["context"], session_cfg)
+    fragments.write_merge(p["context"], merge)
     fragments.write_observations(p["context"], obs)
     compose_mod.compose(p["context"], p["tb_md"], ledger)
 
@@ -546,6 +547,161 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
     out = master.regenerate(bunker, ledger)
     print(f"session complete: published {dest}; master regenerated at {out}")
+    return 0
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    """The promoted merge session (DESIGN.md §3.13): reconcile report
+    components that may disagree semantically about the same code, through
+    the same gates as any publish — never a silent auto-resolution."""
+    import itertools
+
+    from .adapters import harness as harness_mod
+    from .processors import anchorcheck
+
+    resolved = _resolve_bunker(args.bunker)
+    if resolved is None:
+        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
+        return 1
+    bunker = resolved.resolve()
+    ticket = _ticket(bunker)
+    if not ticket.get("id"):
+        print("error: bunker has no ticket.json", file=sys.stderr)
+        return 1
+    ledger = _ledger(bunker)
+    repo = Path(args.repo).resolve()
+    p = layout.paths(bunker)
+
+    children = sorted(p["children"].glob("*.md")) if p["children"].exists() else []
+    available = {c.stem.replace("__", "/"): c for c in children}
+    if args.branches:
+        missing = [b for b in args.branches if b not in available]
+        if missing:
+            print(
+                f"error: no published component for: {', '.join(missing)} — "
+                "publish with 'tb run' or collect with 'tb checkout' first",
+                file=sys.stderr,
+            )
+            return 1
+        selected = {b: available[b] for b in args.branches}
+    else:
+        selected = available
+    if len(selected) < 2:
+        print(
+            f"nothing to reconcile: {len(selected)} published component(s) "
+            f"({', '.join(selected) or 'none'}) — a merge session needs at least two"
+        )
+        return 0
+
+    # Component text with the mechanical verified stamp stripped; republication
+    # re-stamps whatever survives the gates.
+    texts = {
+        br: anchorcheck.VERIFIED_RE.sub("", path.read_text(encoding="utf-8"))
+        for br, path in selected.items()
+    }
+    # The candidate signal, computed mechanically: repo paths that more than
+    # one component's claims anchor to. A candidate, not a verdict.
+    paths_by_branch = {br: anchorcheck.claim_paths(text) for br, text in texts.items()}
+    overlap_paths = sorted({
+        shared
+        for a, b in itertools.combinations(sorted(selected), 2)
+        for shared in paths_by_branch[a] & paths_by_branch[b]
+    })
+
+    # 1. Merge-scoped context and the merge form embedding every component.
+    _recompose(bunker, ledger, merge=True)
+    form = layout.merge_form(bunker)
+    form.write_text(
+        scaffold.build_merge(ticket, [(br, texts[br]) for br in selected], overlap_paths),
+        encoding="utf-8",
+    )
+
+    # 2. The promoted session — same harness path, its own stage contract.
+    prompt = harness_mod.MERGE_PROMPT.format(ticket_id=ticket["id"], form=form, repo=repo)
+    output, code = harness_mod.run_session(
+        bunker, layout.MERGE_SESSION, repo, ledger,
+        harness=args.harness, command_template=args.cmd,
+        pi_bin=args.pi_bin, codex_bin=args.codex_bin,
+        provider=args.provider, model=args.model,
+        form=form, prompt=prompt, contract=harness_mod.MERGE_CONTRACT,
+    )
+    transcript = layout.merge_transcript(bunker)
+    transcript.write_text(output, encoding="utf-8")
+    if code != 0:
+        print(output)
+        print(f"error: harness exited {code}; merge form left at {form}", file=sys.stderr)
+        return 1
+
+    # 3. A session that filled nothing reconciled nothing.
+    text = form.read_text(encoding="utf-8")
+    unfilled = text.count("<!-- agent:")
+    if unfilled:
+        ledger.event("session_unfilled", branch=layout.MERGE_SESSION, remaining_areas=unfilled)
+        print(
+            f"FAIL — the agent left {unfilled} area(s) of the merge form unfilled; nothing republished.\n"
+            f"  form:       {form}\n"
+            f"  transcript: {transcript}",
+            file=sys.stderr,
+        )
+        return 1
+    bodies = scaffold.split_merge(text)
+    if set(bodies) != set(selected):
+        got = ", ".join(sorted(bodies)) or "none"
+        ledger.event("merge_form_malformed", expected=sorted(selected), got=sorted(bodies))
+        print(
+            f"FAIL — merge form component markers are broken (expected {', '.join(sorted(selected))}; "
+            f"got {got}); nothing republished. Form left at {form} for repair",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 4. Every gate, every component, before any write: the reconciled set
+    #    lands atomically or not at all.
+    head_sections = reportlint.split_sections(scaffold.merge_head(text))
+    recon_lines = head_sections.get("Reconciliation") or []
+    recon_text = "\n".join(l for l in recon_lines if l.strip())
+    errors: list[str] = []
+    recon_claims = [l for l in recon_lines if l.strip().startswith(("-", "*"))]
+    for l in recon_claims:
+        if not reportlint.STRATUM_RE.match(l):
+            errors.append(f"Reconciliation: claim without an [observation]/[real]/[speculation] label: {l.strip()[:80]}")
+    all_refs: list[str] = []
+    for br in selected:
+        all_refs += [r for r in _verify_refs(bunker, br) if r not in all_refs]
+    errors += [f"Reconciliation: {e}" for e in anchorcheck.verify(recon_text, repo, all_refs, bunker)]
+    findings_by_branch = {}
+    for br, body in bodies.items():
+        ok, findings = reportlint.gate(body)
+        findings_by_branch[br] = findings
+        errors += [f"{br}: {f}" for f in findings if f.severity == "error"]
+        errors += [f"{br}: {e}" for e in anchorcheck.verify(body, repo, _verify_refs(bunker, br), bunker)]
+    if errors:
+        ledger.event("merge_rejected", branches=sorted(bodies), errors=errors)
+        for e in errors:
+            print(f"[error] {e}", file=sys.stderr)
+        print(
+            f"FAIL — the reconciled set did not pass the gates; nothing republished. "
+            f"Form left at {form} for repair",
+            file=sys.stderr,
+        )
+        return 1
+
+    for br, body in bodies.items():
+        for f in findings_by_branch[br]:
+            print(f"{br}: {f}")
+        handlers.intake_report_component(bunker, br, body, ledger,
+                                         repo=repo, refs=_verify_refs(bunker, br))
+    ledger.event(
+        "merge_reconciled",
+        branches=sorted(bodies),
+        overlap_paths=overlap_paths,
+        reconciliation=recon_text,
+        components={br: digest(body) for br, body in bodies.items()},
+    )
+    out = master.regenerate(bunker, ledger)
+    print("Reconciliation:")
+    print(recon_text)
+    print(f"merge session complete: {len(bodies)} component(s) republished; master regenerated at {out}")
     return 0
 
 
@@ -1336,6 +1492,20 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
     s.add_argument("--model", default=None, help="pi model pattern")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("merge", help="promoted agent session reconciling divergent report components through the gates")
+    s.add_argument("bunker", help="bunker path or bare ticket ID")
+    s.add_argument("--repo", default=".", help="source repo (default: current directory)")
+    s.add_argument("--branches", nargs="+", default=None,
+                   help="components to reconcile (default: every published component)")
+    s.add_argument("--harness", default="pi", choices=["pi", "codex", "command"])
+    s.add_argument("--cmd", default=None,
+                   help="harness 'command' template; placeholders: {form} {tb_md} {repo} {prompt}")
+    s.add_argument("--pi-bin", default="pi", help="pi executable (default: pi on PATH)")
+    s.add_argument("--codex-bin", default="codex", help="codex executable (default: codex on PATH)")
+    s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
+    s.add_argument("--model", default=None, help="pi model pattern")
+    s.set_defaults(fn=cmd_merge)
 
     s = sub.add_parser("config", help="show or set global TicketBunker config (user identity, patterns)")
     s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")

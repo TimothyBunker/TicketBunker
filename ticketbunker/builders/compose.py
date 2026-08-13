@@ -26,6 +26,7 @@ PROVENANCE = {
     "20_ticket.md": "ours",
     "25_session.md": "user",
     "30_observations.md": "pipeline",
+    "40_merge.md": "ours",
 }
 
 

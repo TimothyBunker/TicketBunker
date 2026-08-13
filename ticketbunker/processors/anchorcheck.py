@@ -37,6 +37,30 @@ def extract_real_anchors(text: str) -> list[tuple[str, str, int | None]]:
     return out
 
 
+CLAIM_LINE_RE = re.compile(r"^\s*[-*]\s*\[(observation|real|speculation|inference)\]", re.IGNORECASE)
+# Bunker-internal citations are shared between components by construction
+# and carry no overlap signal.
+_BUNKER_INTERNAL = ("observations/", "inferences/", "reports/", "sessions/", "context/")
+
+
+def claim_paths(text: str) -> set[str]:
+    """Repo paths named by any tagged claim — the mechanical candidate
+    signal for 'these components talk about the same code'. A candidate,
+    not a verdict: deciding disagreement is the merge session's job."""
+    out = set()
+    for raw in text.splitlines():
+        if not CLAIM_LINE_RE.match(raw):
+            continue
+        for m in ANCHOR_RE.finditer(raw):
+            path = m.group("path").rstrip("/")
+            if path.startswith(_BUNKER_INTERNAL) or "_bunker" in path:
+                continue
+            if not re.search(r"[A-Za-z]", path):
+                continue  # diff-stat noise like "+1/-1", not a path
+            out.add(path)
+    return out
+
+
 def _file_at_ref(repo: Path, ref: str, path: str) -> str | None:
     proc = subprocess.run(
         ["git", "-C", str(repo), "show", f"{ref}:{path}"],

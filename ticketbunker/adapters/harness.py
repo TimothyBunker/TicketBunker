@@ -40,6 +40,32 @@ as they are, and save the file in place. Do not publish; publishing happens
 outside your session. When the form is complete, you are done.
 """
 
+MERGE_CONTRACT = StageContract(
+    name="merge_session",
+    purpose="Reconcile divergent report components through a promoted agent session.",
+    inputs="tb.md with the merge preamble, the merge form embedding every component, the source repo, a harness.",
+    process="Invoke the harness headless; the agent verifies candidate disagreements against "
+    "the code, edits the embedded components between their markers, and fills the "
+    "Reconciliation area.",
+    desired_outcome="A reconciled merge form on disk; every component republishes through the "
+    "lint and anchor gates atomically — never a silent auto-resolution.",
+)
+
+MERGE_PROMPT = """\
+You are the TicketBunker merge agent for ticket {ticket_id}.
+Your context (rules, ontology, ticket, observations, and the merge session
+preamble) is in your system prompt.
+
+Your merge form is at: {form}
+The source repo is at: {repo}
+
+Follow the merge workflow from your context: verify each candidate
+disagreement against the code, edit the embedded components in place
+between their markers, fill the Reconciliation agent area, and save the
+file in place. Do not publish; republication happens outside your session.
+When the form is reconciled, you are done.
+"""
+
 # The extension that mirrors agent tool calls into the bunker ledger.
 PI_EXTENSION = Path(__file__).resolve().parent.parent.parent / "harness" / "pi" / "tb.ts"
 
@@ -80,12 +106,19 @@ def run_session(
     codex_bin: str = "codex",
     provider: str | None = None,
     model: str | None = None,
+    form: Path | None = None,
+    prompt: str | None = None,
+    contract: StageContract = RUN_CONTRACT,
 ) -> tuple[str, int]:
-    """Run the agent session as a ledgered stage. Returns (output, exit)."""
+    """Run an agent session as a ledgered stage. Returns (output, exit).
+
+    Defaults run the ticket session; a promoted session (merge) passes its
+    own form, prompt, and stage contract — same harness path, same ledger
+    discipline, different job."""
     p = layout.paths(bunker)
     ticket_id = bunker.name.removesuffix("_bunker")
-    form = layout.session_form(bunker, branch)
-    prompt = PROMPT.format(ticket_id=ticket_id, branch=branch, form=form, repo=repo)
+    form = form or layout.session_form(bunker, branch)
+    prompt = prompt or PROMPT.format(ticket_id=ticket_id, branch=branch, form=form, repo=repo)
 
     if harness == "pi":
         argv = build_pi_argv(
@@ -123,6 +156,6 @@ def run_session(
     env["TB_BRANCH"] = branch
 
     def _run() -> tuple[str, int]:
-        return proc.run(argv, cwd=Path(repo), ledger=ledger, stage="agent_session", env=env)
+        return proc.run(argv, cwd=Path(repo), ledger=ledger, stage=contract.name, env=env)
 
-    return run_stage(RUN_CONTRACT, ledger, _run)
+    return run_stage(contract, ledger, _run)

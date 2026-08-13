@@ -446,7 +446,10 @@ The bootstrap context handed to a session is a **composite markdown document,
 
 Fragments 1–2 and 4 are *ours*; 3 is agent-written but gated (§3.10); 5 is
 pipeline output. The composition manifest records each fragment's provenance
-(§4) — the agent reads one document, the storage stays partitioned.
+(§4) — the agent reads one document, the storage stays partitioned. A merge
+session (§3.13) composes one fragment more — the merge preamble
+(`40_merge.md`, ours), session-scoped and removed from every non-merge
+composition.
 
 **The report is a form.** A report component doesn't start empty: the
 pipeline **pre-fills** it — Who from ticket config and authorship, What from
@@ -604,11 +607,24 @@ any failure, is a silent no-op). This is the first slice of the §3.1
 trigger model: the viewer polls the database, the hooks keep the database
 current, so what a user is looking at tracks the repo as they work.
 Ticket.json edits from two branches still conflict like source code — by
-design, they are declared data. **A merge session is future work in the
-same trust frame**: merging is part of solving a ticket, so semantic
-conflicts (two branches' components disagreeing about the same code) are
-a legitimate agent task — a promoted session that reconciles components
-through the same gates, never a silent auto-resolution.
+design, they are declared data. **Semantic conflicts get a merge session
+in the same trust frame** (`tb merge`): merging is part of solving a
+ticket, so two branches' report components disagreeing about the same
+code is a legitimate agent task — a promoted session, never a silent
+auto-resolution. The candidate signal is computed mechanically — repo
+paths that more than one component's claims anchor to — and pre-filled as
+`[observation]` lines in a merge form that embeds every component
+verbatim between markers; a merge preamble fragment (`40_merge.md`, ours,
+removed from every non-merge composition) carries the rules: resolve by
+verification, not preference; tags upgrade only by verification; finding
+no disagreement is a result. The session runs on the ordinary harness
+path under its own stage contract (`merge_session`), edits the embedded
+components in place, and fills a Reconciliation section held to the same
+stratum and anchor rules as any report. Republication happens outside the
+session, through the same lint and anchor gates as any publish — each
+component re-verified and re-stamped against its own branch refs — and
+the reconciled set lands atomically or not at all; the ledger records
+`merge_reconciled` (or the rejection), and the master regenerates.
 
 ### 3.14 Naming conventions and branch creation
 

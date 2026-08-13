@@ -150,6 +150,64 @@ their record is not your job.
 """
 
 
+MERGE_PREAMBLE = """\
+# Merge session
+
+This is a promoted merge session, not a regular ticket session. The ticket
+has report components from more than one branch, and they may disagree
+semantically about the same code. Your job is to reconcile the components
+into a consistent set — through the same gates as any report, never by
+silently picking a side.
+
+## Rules of reconciliation
+
+- A semantic disagreement is two components making incompatible claims
+  about the same code: the same path characterized differently, work one
+  component predicts that another shows already done, state claims that
+  cannot both hold.
+- Resolve by verification, not preference. Check the code at each
+  component's branch before rewriting either side. A resolution you
+  verified now is [real] with an anchor; one you could not verify stays
+  [speculation] with a grounding rank.
+- Tags upgrade only by verification, exactly as everywhere else. Never
+  merge two [speculation] claims into something stronger than its parts.
+- Preserve what does not disagree. Components are prior work: claims that
+  stand, stand verbatim. Shared facts belong once, in the oldest component
+  that established them.
+- Finding no disagreement is a result: say so in the Reconciliation
+  section and leave the components as they are.
+
+## Your workflow
+
+1. Read the merge form: the Reconciliation section first (pipeline overlap
+   candidates are pre-filled there as [observation] lines), then every
+   embedded component.
+2. Check each candidate disagreement against the code. Save each finding
+   as it happens with `tb infer` — [real] with an anchor, [speculation]
+   with a grounding rank.
+3. Edit the embedded components in place, between their markers, keeping
+   every claim tagged. Do not move claims across components; do not
+   remove or alter the component markers.
+4. Fill the Reconciliation agent area: each disagreement, what the code
+   shows, how you resolved it — tagged like any other claims.
+5. Save the form. Do not publish; each reconciled component is
+   republished through the lint and anchor gates outside your session,
+   and the set lands atomically or not at all.
+"""
+
+
+def write_merge(context_dir: Path, active: bool) -> None:
+    """Generate or remove 40_merge.md — the merge-session preamble.
+    Provenance: ours. Removed on every non-merge composition, so a regular
+    ticket session never reads merge instructions."""
+    path = context_dir / "40_merge.md"
+    if not active:
+        if path.exists():
+            path.unlink()
+        return
+    path.write_text(MERGE_PREAMBLE, encoding="utf-8")
+
+
 TBROOT_TEMPLATE = """\
 <!-- tbroot.md — the project's local universe, maintained by the root
      surveyor agent. RULES: real observations only, each anchored to a

@@ -9,6 +9,8 @@ pipeline's; only the fill is the agent's.
 
 from __future__ import annotations
 
+import re
+
 MAX_PREFILL_FILES = 15
 
 AGENT_AREA = "<!-- agent: {instruction} -->"
@@ -82,3 +84,57 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+# --- merge form (DESIGN.md §3.13) ------------------------------------------
+# The merge session's form embeds every component verbatim between markers;
+# the agent edits the bodies in place and fills the Reconciliation area. The
+# markers let the runner split the reconciled bodies back out per branch.
+
+MERGE_COMPONENT_BEGIN = "<!-- tb:component branch={branch} -->"
+MERGE_COMPONENT_END = "<!-- tb:end-component -->"
+_COMPONENT_RE = re.compile(
+    r"<!-- tb:component branch=(?P<branch>\S+) -->\n(?P<body>.*?)<!-- tb:end-component -->",
+    re.DOTALL,
+)
+
+
+def build_merge(ticket: dict, components: list[tuple[str, str]], overlap_paths: list[str]) -> str:
+    lines: list[str] = [
+        f"<!-- tb:merge-form ticket={ticket.get('id', '?')} -->",
+        "",
+        "## Reconciliation",
+        "",
+        f"- [observation] Components under reconciliation: {', '.join(br for br, _ in components)} (reports/branches/).",
+    ]
+    for path in overlap_paths:
+        lines.append(f"- [observation] More than one component anchors claims to {path} (anchor overlap).")
+    if not overlap_paths:
+        lines.append("- [observation] No anchor-path overlap between components — disagreement, if any, is not mechanically indicated (anchor overlap).")
+    lines.append(AGENT_AREA.format(
+        instruction="each semantic disagreement about the same code: what the components claim, "
+        "what the code shows, how you resolved it — [real] with anchors for what you verified, "
+        "[speculation] ranked otherwise; if the components do not disagree, say so"
+    ))
+    lines.append("")
+    for branch, text in components:
+        lines.append(MERGE_COMPONENT_BEGIN.format(branch=branch))
+        lines.append(text.rstrip())
+        lines.append(MERGE_COMPONENT_END)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def split_merge(text: str) -> dict[str, str]:
+    """branch -> reconciled component body, from a filled merge form."""
+    return {
+        m.group("branch"): m.group("body").strip("\n") + "\n"
+        for m in _COMPONENT_RE.finditer(text)
+    }
+
+
+def merge_head(text: str) -> str:
+    """The form text before the first embedded component — where the
+    Reconciliation section lives."""
+    idx = text.find("<!-- tb:component ")
+    return text[:idx] if idx >= 0 else text

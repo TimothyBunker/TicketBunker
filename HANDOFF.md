@@ -72,30 +72,36 @@ Trust model, non-negotiable:
   → regen master; never blocks git). `tb checkout` collects each branch's
   committed component via `git show`, re-gates every import, and keeps
   (with a warning) local components that differ from HEAD.
+- **Agent merge session** (`tb merge`, DESIGN.md §3.13): promoted session
+  reconciling report components that may disagree about the same code.
+  Mechanical anchor-overlap candidates pre-filled as [observation] lines;
+  components embedded verbatim in a merge form between markers; merge
+  preamble fragment (`40_merge.md`, removed on non-merge composes); own
+  stage contract (`merge_session`) on the same harness path; republication
+  through the same lint + anchor gates, all-or-nothing (pre-checked before
+  any write), `merge_reconciled`/`merge_rejected` ledgered, master regen.
+  Stub-verified end-to-end incl. adversarial cases (fabricated [real]
+  anchor and broken markers both rejected atomically) — **not yet
+  live-graded with a real agent**; grade the first live merge like the
+  codex report was.
 
 ## Your mission, in priority order
 
-1. **Agent merge session.** Designed in DESIGN.md (§3.13 storage section,
-   "The bunker merges the way the repo merges"): when two branches'
-   report components disagree semantically about the same code, a promoted
-   agent session reconciles them *through the same gates* — never silent
-   auto-resolution. Merging is part of solving a ticket. Build the runner
-   on the existing harness machinery (`adapters/harness.py`); the merge
-   preamble is a new fragment set in `builders/fragments.py`.
-2. **Root surveyor runner.** `tb survey` seeds/lints tbroot.md but nothing
+1. **Root surveyor runner.** `tb survey` seeds/lints tbroot.md but nothing
    *runs* a surveyor session (same machinery as tb run, different
    preamble — it writes the universe rather than receives it, gated by
    `lint_root`). This is also the missing piece for main-branch
    surveillance (`tb refresh` on main should eventually trigger it).
-3. **pi harness live verification** past the login wall (`pi /login`
+2. **pi harness live verification** past the login wall (`pi /login`
    first; extension `harness/pi/tb.ts` is confirmed loading). Grade the
    report like the codex one was: spot-check every [real] anchor, audit
-   speculation ranks, read Where/Why cold.
-4. **Composed-size check**: warn in `tb compose`/`tb run` when tb.md
+   speculation ranks, read Where/Why cold. Grade the first live `tb merge`
+   the same way.
+3. **Composed-size check**: warn in `tb compose`/`tb run` when tb.md
    exceeds a sane token budget — a 40k-token preamble fails silently.
-5. **Ticket archival**: closed tickets should age out of the default
+4. **Ticket archival**: closed tickets should age out of the default
    `tb list` view (Jira-style), without deleting bunker data.
-6. **Re-run policy**: hooks refresh observations, but agent re-runs are
+5. **Re-run policy**: hooks refresh observations, but agent re-runs are
    manual. Decide + build the trigger policy for re-running `tb run` when
    a report is badged "predates latest development" (cost-aware — an
    agent session per commit is too much; per push or on demand may be
@@ -147,6 +153,7 @@ Then: point it at a real work repo — that is the actual next phase.
 | Ticket editor template + thread parser | `ticketbunker/builders/ticketform.py` |
 | Lint gates | `ticketbunker/processors/reportlint.py` |
 | Anchor verification + verified stamps | `ticketbunker/processors/anchorcheck.py` |
+| Merge session (preamble, form build/split, runner) | `builders/fragments.py`, `builders/scaffold.py`, `cli.py` cmd_merge |
 | Observation pipeline + branch relation rule | `ticketbunker/processors/stages.py` |
 | Master regen + digest | `ticketbunker/builders/master.py` |
 | Local web viewer | `ticketbunker/viewer.py` |
