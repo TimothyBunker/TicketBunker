@@ -84,24 +84,28 @@ Trust model, non-negotiable:
   anchor and broken markers both rejected atomically) — **not yet
   live-graded with a real agent**; grade the first live merge like the
   codex report was.
+- **Root surveyor runner** (`tb survey REPO --run`, DESIGN.md §3.10):
+  session home at `.tb/root/` (bunker-shaped, above all tickets), working
+  copy seeded from existing tbroot.md or the template, surveyor preamble
+  fragment (`00_surveyor.md`), own stage contract (`survey_session`),
+  installation only through the new typed `intake_tbroot` handler
+  (conjecture + anchor gate, ledgered). Untouched fresh template fails;
+  unchanged existing tbroot is `survey_no_update`. Stub-verified incl.
+  conjecture rejection — **not yet live-graded**; refresh-triggered
+  surveys stay future work under the re-run cost policy (mission item 4).
 
 ## Your mission, in priority order
 
-1. **Root surveyor runner.** `tb survey` seeds/lints tbroot.md but nothing
-   *runs* a surveyor session (same machinery as tb run, different
-   preamble — it writes the universe rather than receives it, gated by
-   `lint_root`). This is also the missing piece for main-branch
-   surveillance (`tb refresh` on main should eventually trigger it).
-2. **pi harness live verification** past the login wall (`pi /login`
+1. **pi harness live verification** past the login wall (`pi /login`
    first; extension `harness/pi/tb.ts` is confirmed loading). Grade the
    report like the codex one was: spot-check every [real] anchor, audit
    speculation ranks, read Where/Why cold. Grade the first live `tb merge`
-   the same way.
-3. **Composed-size check**: warn in `tb compose`/`tb run` when tb.md
+   and `tb survey --run` the same way.
+2. **Composed-size check**: warn in `tb compose`/`tb run` when tb.md
    exceeds a sane token budget — a 40k-token preamble fails silently.
-4. **Ticket archival**: closed tickets should age out of the default
+3. **Ticket archival**: closed tickets should age out of the default
    `tb list` view (Jira-style), without deleting bunker data.
-5. **Re-run policy**: hooks refresh observations, but agent re-runs are
+4. **Re-run policy**: hooks refresh observations, but agent re-runs are
    manual. Decide + build the trigger policy for re-running `tb run` when
    a report is badged "predates latest development" (cost-aware — an
    agent session per commit is too much; per push or on demand may be
@@ -154,6 +158,7 @@ Then: point it at a real work repo — that is the actual next phase.
 | Lint gates | `ticketbunker/processors/reportlint.py` |
 | Anchor verification + verified stamps | `ticketbunker/processors/anchorcheck.py` |
 | Merge session (preamble, form build/split, runner) | `builders/fragments.py`, `builders/scaffold.py`, `cli.py` cmd_merge |
+| Surveyor session (preamble, runner, tbroot intake) | `builders/fragments.py`, `cli.py` cmd_survey, `handlers/` intake_tbroot |
 | Observation pipeline + branch relation rule | `ticketbunker/processors/stages.py` |
 | Master regen + digest | `ticketbunker/builders/master.py` |
 | Local web viewer | `ticketbunker/viewer.py` |

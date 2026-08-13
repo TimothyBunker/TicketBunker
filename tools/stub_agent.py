@@ -55,9 +55,43 @@ def fill(text: str) -> str:
     return "\n".join(out) + "\n"
 
 
+def fill_tbroot(text: str) -> str:
+    """Survey-session mode: append mechanical, anchored observations under
+    each template heading — no conjecture, so even the stub passes the
+    tbroot gate."""
+    proc = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
+    files = [f.strip() for f in proc.stdout.splitlines() if f.strip()]
+    anchor = files[0] if files else "README.md"
+    exts: dict[str, int] = {}
+    for f in files:
+        ext = f.rsplit(".", 1)[-1] if "." in f.rsplit("/", 1)[-1] else "(none)"
+        exts[ext] = exts.get(ext, 0) + 1
+    top = ", ".join(f".{e} ({n})" for e, n in sorted(exts.items(), key=lambda kv: -kv[1])[:3])
+    additions = {
+        "# Project": f"- {len(files)} tracked file(s); extensions {top}; example: `{anchor}` (git ls-files).",
+        "# Build & test": f"- Build system not observed in this stub session; inventory from `git ls-files` only, e.g. `{anchor}`.",
+        "# Components": "- Tracked entries: " + ", ".join(f"`{f}`" for f in files[:5]) + " (git ls-files).",
+        "# Conventions": f"- File naming as tracked in git, e.g. `{anchor}` (git ls-files).",
+    }
+    out = []
+    for line in text.splitlines():
+        out.append(line)
+        if line.strip() in additions:
+            out.append("")
+            out.append(additions[line.strip()])
+    return "\n".join(out) + "\n"
+
+
 def main() -> int:
     form = Path(sys.argv[1])
-    form.write_text(fill(form.read_text(encoding="utf-8")), encoding="utf-8")
+    text = form.read_text(encoding="utf-8")
+    if "<!-- agent:" in text:
+        form.write_text(fill(text), encoding="utf-8")
+    elif "# Project" in text:
+        form.write_text(fill_tbroot(text), encoding="utf-8")
+    else:
+        print(f"stub agent: unrecognized form shape at {form}", file=sys.stderr)
+        return 1
     print(f"stub agent filled {form}")
     return 0
 

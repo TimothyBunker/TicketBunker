@@ -379,16 +379,80 @@ def cmd_lint_root(args: argparse.Namespace) -> int:
 
 
 def cmd_survey(args: argparse.Namespace) -> int:
-    tbroot = Path(args.repo) / "tbroot.md"
-    if not tbroot.exists():
-        tbroot.write_text(fragments.TBROOT_TEMPLATE, encoding="utf-8")
-        print(f"seeded {tbroot} — the root surveyor fills it in (observations only)")
-        return 0
-    ok, findings = reportlint.gate_root(tbroot.read_text(encoding="utf-8"))
+    repo = Path(args.repo).resolve()
+    tbroot = repo / "tbroot.md"
+    if not args.run:
+        if not tbroot.exists():
+            tbroot.write_text(fragments.TBROOT_TEMPLATE, encoding="utf-8")
+            print(f"seeded {tbroot} — fill it in with 'tb survey {args.repo} --run' or by hand (observations only)")
+            return 0
+        ok, findings = reportlint.gate_root(tbroot.read_text(encoding="utf-8"))
+        for f in findings:
+            print(f)
+        print("PASS" if ok else "FAIL")
+        return 0 if ok else 1
+
+    # --run: the root surveyor session (DESIGN.md §3.10) — same harness
+    # path as tb run, its own stage contract, a project-level session home.
+    from .adapters import harness as harness_mod
+
+    if not (repo / layout.TB_DIR).is_dir():
+        print(f"error: no {layout.TB_DIR}/ in {repo} — run 'tb init' there first", file=sys.stderr)
+        return 1
+    area = layout.root_area(repo)
+    p = layout.paths(area)
+    p["sessions"].mkdir(parents=True, exist_ok=True)
+    ledger = Ledger(p["ledger"])
+
+    seed = tbroot.read_text(encoding="utf-8") if tbroot.exists() else fragments.TBROOT_TEMPLATE
+    form = layout.session_form(area, layout.SURVEY_SESSION)
+    form.write_text(seed, encoding="utf-8")
+    fragments.write_surveyor(p["context"])
+    compose_mod.compose(p["context"], p["tb_md"], ledger)
+
+    prompt = harness_mod.SURVEY_PROMPT.format(form=form, repo=repo)
+    output, code = harness_mod.run_session(
+        area, layout.SURVEY_SESSION, repo, ledger,
+        harness=args.harness, command_template=args.cmd,
+        pi_bin=args.pi_bin, codex_bin=args.codex_bin,
+        provider=args.provider, model=args.model,
+        form=form, prompt=prompt, contract=harness_mod.SURVEY_CONTRACT,
+    )
+    transcript = layout.session_transcript(area, layout.SURVEY_SESSION)
+    transcript.write_text(output, encoding="utf-8")
+    if code != 0:
+        print(output)
+        print(f"error: harness exited {code}; working copy left at {form}", file=sys.stderr)
+        return 1
+
+    text = form.read_text(encoding="utf-8")
+    if text == seed:
+        if tbroot.exists():
+            ledger.event("survey_no_update")
+            print("survey complete: no update — tbroot.md unchanged")
+            return 0
+        ledger.event("session_unfilled", branch=layout.SURVEY_SESSION, remaining_areas=1)
+        print(
+            f"FAIL — the surveyor left the fresh template untouched; nothing installed.\n"
+            f"  working copy: {form}\n"
+            f"  transcript:   {transcript}",
+            file=sys.stderr,
+        )
+        return 1
+    _, findings = reportlint.gate_root(text)
     for f in findings:
         print(f)
-    print("PASS" if ok else "FAIL")
-    return 0 if ok else 1
+    installing = "updated" if tbroot.exists() else "installed"
+    try:
+        dest = handlers.intake_tbroot(repo, text, ledger)
+    except IntakeRejected as exc:
+        for err in exc.errors:
+            print(err if "[error]" in err else f"[error] {err}", file=sys.stderr)
+        print(f"FAIL — surveyor's tbroot did not pass the gate; working copy left at {form} for repair",
+              file=sys.stderr)
+        return 1
+    print(f"survey complete: tbroot.md {installing} at {dest} — mirrored into bunker context on next recompose")
+    return 0
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
@@ -678,7 +742,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if errors:
         ledger.event("merge_rejected", branches=sorted(bodies), errors=errors)
         for e in errors:
-            print(f"[error] {e}", file=sys.stderr)
+            print(e if "[error]" in e else f"[error] {e}", file=sys.stderr)
         print(
             f"FAIL — the reconciled set did not pass the gates; nothing republished. "
             f"Form left at {form} for repair",
@@ -1467,8 +1531,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("file")
     s.set_defaults(fn=cmd_lint_root)
 
-    s = sub.add_parser("survey", help="seed a project tbroot.md, or lint an existing one")
+    s = sub.add_parser("survey", help="seed/lint a project tbroot.md, or --run the root surveyor session")
     s.add_argument("repo")
+    s.add_argument("--run", action="store_true",
+                   help="run the surveyor agent session and install its tbroot.md through the gate")
+    s.add_argument("--harness", default="pi", choices=["pi", "codex", "command"])
+    s.add_argument("--cmd", default=None,
+                   help="harness 'command' template; placeholders: {form} {tb_md} {repo} {prompt}")
+    s.add_argument("--pi-bin", default="pi", help="pi executable (default: pi on PATH)")
+    s.add_argument("--codex-bin", default="codex", help="codex executable (default: codex on PATH)")
+    s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
+    s.add_argument("--model", default=None, help="pi model pattern")
     s.set_defaults(fn=cmd_survey)
 
     s = sub.add_parser("publish", help="submit a component through the typed intake; regenerate the master")

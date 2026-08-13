@@ -21,6 +21,7 @@ END = "<!-- tb:end {name} -->"
 # intermingles the types.
 PROVENANCE = {
     "00_explanation.md": "ours",
+    "00_surveyor.md": "ours",
     "10_workflow.md": "ours",
     "15_tbroot.md": "agent-gated",
     "20_ticket.md": "ours",

@@ -515,6 +515,23 @@ language ("probably", "seems", "likely", ...), which is rejected. The lint
 cannot prove a claim true, but it can refuse the *form* that conjecture
 takes.
 
+**The surveyor runs like any other session** (`tb survey REPO --run`): the
+same harness path, its own stage contract (`survey_session`), and a
+project-level session home at `.tb/root/` — bunker-shaped (ledger,
+sessions/, context/, tb.md) so the machinery applies unchanged, above all
+ticket bunkers, never colliding with one (bunker directories end in
+`_bunker`). The runner seeds the session's working copy from the existing
+tbroot.md — updating, not rewriting — or from the template, composes the
+surveyor preamble (`00_surveyor.md`, ours: the write-the-universe rules),
+and the agent edits the working copy in place. Installation happens outside
+the session through the typed tbroot intake: the conjecture/anchor lint
+gates the text, acceptance and rejection are ledgered in
+`.tb/root/ledger.jsonl`, and the installed tbroot.md mirrors into every
+bunker's composition at the next recompose (§3.9). A session that leaves a
+fresh template untouched fails; an update session that changes nothing is
+recorded (`survey_no_update`). Refresh-triggered surveys on the main branch
+remain future work under the re-run cost policy.
+
 ### 3.11 Per-session configuration
 
 Each ticket has a **config for each specific session** — one per branch

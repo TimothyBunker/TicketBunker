@@ -131,6 +131,16 @@ def load_inferences(bunker: Path) -> list[dict]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def intake_tbroot(repo: Path, text: str, ledger: Ledger) -> Path:
+    """Install a surveyor session's tbroot.md into the project — the only
+    write path for the local universe. The gate refuses the form conjecture
+    takes; grading refuses the rest."""
+    _gate("tbroot", {"text": text}, ledger)
+    dest = Path(repo) / "tbroot.md"
+    dest.write_text(text, encoding="utf-8")
+    return dest
+
+
 def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger,
                             repo: Path | None = None, refs: list[str] | None = None) -> Path:
     if repo is not None and refs:

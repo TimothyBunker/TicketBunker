@@ -102,6 +102,17 @@ def child_report(bunker: Path, branch: str) -> Path:
 # the existing sessions/ ignore patterns cover its form and transcript.
 MERGE_SESSION = "merge"
 
+# The root surveyor (§3.10) lives per project, above all ticket bunkers. Its
+# session home is bunker-shaped — paths() applies — so the harness, ledger,
+# and composition machinery run unchanged; it never collides with a ticket
+# because bunker directories always end in `_bunker`.
+ROOT_AREA = "root"
+SURVEY_SESSION = "survey"
+
+
+def root_area(project_root: Path) -> Path:
+    return bunkers_dir(project_root) / ROOT_AREA
+
 
 def merge_form(bunker: Path) -> Path:
     return session_form(bunker, MERGE_SESSION)

@@ -107,8 +107,16 @@ ROOT_MAX_LINES = 200
 def lint_root(text: str) -> list[Finding]:
     findings: list[Finding] = []
     lines = text.splitlines()
+    in_comment = False
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
+        if in_comment:
+            if "-->" in stripped:
+                in_comment = False
+            continue
+        if stripped.startswith("<!--") and "-->" not in stripped:
+            in_comment = True
+            continue
         if not stripped or stripped.startswith(("#", "<!--")):
             continue
         m = CONJECTURE_RE.search(stripped)

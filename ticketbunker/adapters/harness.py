@@ -51,6 +51,31 @@ MERGE_CONTRACT = StageContract(
     "lint and anchor gates atomically — never a silent auto-resolution.",
 )
 
+SURVEY_CONTRACT = StageContract(
+    name="survey_session",
+    purpose="Run the root surveyor over the project to maintain tbroot.md.",
+    inputs="tb.md with the surveyor preamble, a working copy of tbroot.md, the source repo, a harness.",
+    process="Invoke the harness headless; the agent peruses the project and updates the working "
+    "copy — real observations only, each anchored, gaps left as gaps.",
+    desired_outcome="An updated working copy on disk, ready for the typed tbroot intake; "
+    "installation happens outside the session through the conjecture and anchor lint gate.",
+)
+
+SURVEY_PROMPT = """\
+You are the TicketBunker root surveyor for this project.
+Your context (the surveyor rules) is in your system prompt.
+
+Your working copy of tbroot.md is at: {form}
+The project repo is at: {repo}
+
+Follow the surveyor workflow from your context: peruse the project, update
+the working copy in place — real observations only, each anchored to a
+checkable path, file, or command; no conjecture; gaps stay gaps — and save
+the file in place. Do not install it into the project; installation
+happens outside your session. When the working copy is current, you are
+done.
+"""
+
 MERGE_PROMPT = """\
 You are the TicketBunker merge agent for ticket {ticket_id}.
 Your context (rules, ontology, ticket, observations, and the merge session
