@@ -115,6 +115,7 @@ the door, and the rejection is ledgered.
 ```
 ticketbunker/
 ├── layout.py      # the bunker layout, defined once — navigable like .git
+├── api.py         # public read model: ticket + branches + reports, no cache
 ├── types/         # information type registry + validation rules
 ├── handlers/      # typed intake: validate → write → ledger (the only write paths)
 ├── builders/      # artifact construction: tb.md, report form, master, fragments
@@ -124,6 +125,24 @@ ticketbunker/
 ├── ledger.py      # append-only execution ledger
 └── cli.py         # thin orchestration over the above
 ```
+
+The same repository-owned view is available to Python integrations without
+going through HTML or scraping CLI output:
+
+```python
+from ticketbunker.api import TicketDatabase
+
+tickets = TicketDatabase.discover(".")
+ticket = tickets.get_ticket("TB-1267")
+for branch in ticket.branches:
+    print(branch.name, branch.state)
+```
+
+This API is deliberately read-only. Ticket changes still enter through the
+typed handlers (or the `tb` commands that call them), so validation and the
+ledger cannot be bypassed. Optional `acceptance_criteria` and `metadata`
+fields preserve tracker-shaped and project-specific information in
+`ticket.json` without making the tracker authoritative.
 
 ## Running the agent
 

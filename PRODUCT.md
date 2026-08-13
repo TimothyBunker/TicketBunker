@@ -1,0 +1,51 @@
+# TicketBunker Product
+
+## Register
+
+product
+
+## Users
+
+Engineers, technical leads, and project contributors working from a shared
+git repository. Their primary job is to open one ticket, understand its
+current truth, find the relevant branch and report, and continue or review the
+work without reconstructing history by hand.
+
+## Product Purpose
+
+The project's remote repository owns the ticket system and acts as its shared,
+updating database. TicketBunker combines the familiar information anatomy of
+an agile ticket with repository-owned lifecycle state, branches, verified
+reports, observations, and extensible metadata. Success means a contributor
+can understand and act on a ticket without needing the originating agent
+session or an external service.
+
+## Brand Personality
+
+Direct, calm, trustworthy.
+
+The interface should feel familiar to Jira users while making repository proof
+and report provenance easier to reach. It should disappear into the task.
+
+## Anti-references
+
+- Generic analytics dashboards with metrics that do not help complete a ticket.
+- Card grids, nested panels, decorative status treatments, and excessive chrome.
+- Helper text that compensates for unclear labels or hierarchy.
+- Agent-first interfaces that expose prompts, transcripts, or raw reasoning by default.
+- Flashy motion, gradients, glass effects, and ornamental visuals.
+
+## Design Principles
+
+1. The repository is the authority. External trackers are import sources and familiar information models.
+2. Design one ticket first. Global search and portfolio views come after the singular ticket works.
+3. Make the next useful object obvious. Branches and child reports stay visible and directly accessible.
+4. Put proof beside claims. Verification, freshness, and provenance are visible without dominating the page.
+5. Reveal depth progressively. Metadata, activity, and full reports remain available without crowding the default view.
+6. Keep one Python model. The CLI and viewer should render the same composed ticket state.
+
+## Accessibility & Inclusion
+
+Target WCAG 2.2 AA contrast and interaction behavior. Support keyboard navigation,
+visible focus, reduced motion, zoom, narrow screens, long branch names, and report
+content without horizontal page overflow. Never rely on color alone for state.

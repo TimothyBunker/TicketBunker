@@ -42,6 +42,14 @@ def _validate_ticket(payload: dict) -> list[str]:
     if labels is not None:
         if not isinstance(labels, list) or not all(isinstance(l, str) and l.strip() for l in labels):
             errors.append("'labels' must be a list of non-empty strings")
+    criteria = payload.get("acceptance_criteria")
+    if criteria is not None:
+        if not isinstance(criteria, list) or not all(isinstance(item, str) and item.strip() for item in criteria):
+            errors.append("'acceptance_criteria' must be a list of non-empty strings")
+    metadata = payload.get("metadata")
+    if metadata is not None:
+        if not isinstance(metadata, dict) or not all(isinstance(key, str) and key.strip() for key in metadata):
+            errors.append("'metadata' must be a mapping with non-empty string keys")
     comments = payload.get("comments")
     if comments is not None:
         if not isinstance(comments, list):

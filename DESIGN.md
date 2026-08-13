@@ -327,8 +327,14 @@ log. Declared workflow state (status, ours) is always shown *beside*
 observed git state (merged-back, recency — the pipeline's), never blended.
 `tb view` serves the same data as a minimal local viewer
 (`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
-per-ticket pages with the master digest inline, full components collapsed,
-and trust tags rendered as chips. It is strictly read-only — no write
+per-ticket pages organized around completing one ticket. The singular page
+keeps tracker-declared lifecycle beside (never blended with) observed branch
+state; description and optional acceptance criteria lead, a compact
+What/Where/Why/State selection comes verbatim from the newest child, and
+branches link directly to collapsed full reports with verification/freshness
+visible. Details and carried-over comments remain available without turning
+the page into a dashboard. Trust tags render as chips. It is strictly
+read-only — no write
 endpoint exists, every page renders from `.tb/` on each request, and pages
 poll a database fingerprint so whatever the user is looking at reloads
 when the data changes. All content is HTML-escaped before the constrained
@@ -337,6 +343,18 @@ Localhost-only is a decision, not a limitation: there is deliberately no
 bind option and no auth surface — remote viewing (phone, another machine)
 is SSH port-forwarding's job, which already carries the repo's own access
 control. Do not add network exposure to the viewer.
+
+**There is one Python read model.** `ticketbunker/api.py` exposes the public,
+read-only `TicketDatabase` and typed ticket/branch/report snapshots. It
+composes ticket fields, deterministic branch observations, report ownership,
+verification/freshness, the master digest, and activity straight from layout-
+defined bunker paths on every query; it holds no cache or second database.
+Both the viewer and future non-CLI integrations consume this boundary. Writes
+remain exclusively in the typed, validated, ledgered handlers (§3.12–3.13).
+Ticket intake accepts optional `acceptance_criteria` (a list of non-empty
+strings) and `metadata` (an extensible mapping) so tracker-shaped information
+can travel with the repository without turning Jira or another importer into
+the authority.
 
 ### 3.6 Report analysis toolset
 

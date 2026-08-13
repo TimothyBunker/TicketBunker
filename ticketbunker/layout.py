@@ -60,14 +60,18 @@ def bunker_path(project_root: Path, ticket_id: str) -> Path:
 
 def paths(bunker: Path) -> dict[str, Path]:
     bunker = Path(bunker)
+    observations = bunker / "observations"
     return {
         "root": bunker,
         "tb_md": bunker / "tb.md",
         "ticket": bunker / "ticket.json",
         "context": bunker / "context",
         "sessions": bunker / "sessions",
-        "observations": bunker / "observations",
-        "patches": bunker / "observations" / "patches",
+        "observations": observations,
+        "patches": observations / "patches",
+        "branch_resolution": observations / "branch_resolution.json",
+        "merge_history": observations / "merge_history.json",
+        "authorship": observations / "authorship.json",
         "inferences": bunker / "inferences",
         "inference_log": bunker / "inferences" / "inferences.jsonl",
         "ledger": bunker / "ledger.jsonl",
