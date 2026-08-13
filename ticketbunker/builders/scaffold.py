@@ -24,6 +24,33 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
 
     lines: list[str] = []
 
+    # The brief is agent-authored interpretation over the evidence below. It
+    # never replaces or mutates an observation: the complete pre-filled trail
+    # remains in Who/What/Where/Why/State and the brief keeps the same trust
+    # labels and anchor requirements as every other claim.
+    lines += ["## Reader brief", ""]
+    lines += ["### Who", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief Who: one or two concise [real]/[speculation] claims naming the people "
+        "most important to this ticket and why; use ticket/authorship evidence, do not merely list everyone"
+    ))
+    lines += ["", "### What", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief What: one or two concise [real]/[speculation] claims explaining the most "
+        "important work or result in plain language, grounded in the diff and observations"
+    ))
+    lines += ["", "### Where", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief Where: one short [real]/[speculation] claim naming up to three paths worth "
+        "checking first, in importance order, and why; [real] paths need anchors, inferred recommendations need a grounding rank"
+    ))
+    lines += ["", "### Why", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief Why: one or two concise [real]/[speculation] claims explaining the ticket's "
+        "purpose and your best-supported interpretation, grounded in primary ticket and code evidence"
+    ))
+    lines.append("")
+
     lines += ["## Who", ""]
     if ticket.get("assignee"):
         lines.append(f"- [observation] Assignee: {ticket['assignee']} (ticket config).")

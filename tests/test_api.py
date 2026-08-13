@@ -77,6 +77,28 @@ class TicketDatabaseTests(unittest.TestCase):
         )
         layout.child_report(self.bunker, "ada/TB-7-api").write_text(
             """<!-- tb:verified branch=ada/TB-7-api commit=abc1234 ts=2026-08-12T08:10:00+00:00 -->
+## Reader brief
+
+### Who
+
+- [speculation] grounded: Ada owns the report and Tim owns the ticket (ticket, authorship).
+
+### What
+
+- [speculation] grounded: The API now keeps presentations aligned (observations/diff.json).
+
+### Where
+
+- [real] Start with `ticketbunker/api.py:1`, the shared read boundary.
+
+### Why
+
+- [speculation] grounded: One read model prevents presentation drift (ticket, observations/diff.json).
+
+## Who
+
+- [observation] Tim is the assignee and Ada is the author.
+
 ## What
 
 - [observation] Three commits changed the API.
@@ -112,6 +134,10 @@ class TicketDatabaseTests(unittest.TestCase):
         self.assertEqual(ticket.reports[0].owner, "Ada")
         self.assertEqual(ticket.reports[0].verified_commit, "abc1234")
         self.assertEqual(ticket.reports[0].state, "predates development")
+        self.assertIsNotNone(ticket.reports[0].brief)
+        self.assertIn("Ada owns", ticket.reports[0].brief.who)
+        self.assertNotIn("Reader brief", ticket.reports[0].evidence_text)
+        self.assertIn("## What", ticket.reports[0].evidence_text)
         self.assertIn("Three commits", ticket.reports[0].what)
         self.assertEqual(ticket.validation_errors, ())
 

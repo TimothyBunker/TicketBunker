@@ -64,6 +64,36 @@ def _section(text: str, name: str) -> str:
     return "\n".join(selected).strip()
 
 
+def _subsection(text: str, section: str, subsection: str) -> str:
+    """Select one ``###`` subsection inside a named ``##`` section."""
+    in_section = False
+    keep = False
+    selected: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            in_section = line[3:].strip().casefold() == section.casefold()
+            keep = False
+            continue
+        if in_section and line.startswith("### "):
+            keep = line[4:].strip().casefold() == subsection.casefold()
+            continue
+        if in_section and keep:
+            selected.append(line)
+    return "\n".join(selected).strip()
+
+
+def _without_section(text: str, name: str) -> str:
+    """Remove a top-level section while preserving every other source line."""
+    skipping = False
+    selected: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            skipping = line[3:].strip().casefold() == name.casefold()
+        if not skipping:
+            selected.append(line)
+    return "\n".join(selected).strip() + "\n"
+
+
 def _digest(master_text: str) -> str:
     lines: list[str] = []
     keep = False
@@ -105,6 +135,20 @@ class BranchSnapshot:
 
 
 @dataclass(frozen=True)
+class ReaderBrief:
+    """Agent-prioritized explanation whose source evidence remains below it."""
+
+    who: str
+    what: str
+    where: str
+    why: str
+
+    @property
+    def complete(self) -> bool:
+        return all((self.who, self.what, self.where, self.why))
+
+
+@dataclass(frozen=True)
 class ReportSnapshot:
     """One published child report and its mechanical verification state."""
 
@@ -112,6 +156,8 @@ class ReportSnapshot:
     slug: str
     path: Path
     text: str
+    evidence_text: str
+    brief: ReaderBrief | None = None
     owner: str = ""
     verified_branch: str = ""
     verified_commit: str = ""
@@ -297,6 +343,14 @@ class TicketDatabase:
         if paths["children"].is_dir():
             for report_path in paths["children"].glob("*.md"):
                 text = _read_text(report_path)
+                brief = ReaderBrief(
+                    who=_subsection(text, "Reader brief", "Who"),
+                    what=_subsection(text, "Reader brief", "What"),
+                    where=_subsection(text, "Reader brief", "Where"),
+                    why=_subsection(text, "Reader brief", "Why"),
+                )
+                if not brief.complete:
+                    brief = None
                 branch_info = branch_by_slug.get(report_path.stem)
                 branch = branch_info.name if branch_info else report_path.stem.replace("__", "/")
                 stamp = verified_stamp(text)
@@ -310,6 +364,8 @@ class TicketDatabase:
                         slug=report_path.stem,
                         path=report_path,
                         text=text,
+                        evidence_text=_without_section(text, "Reader brief"),
+                        brief=brief,
                         owner=owner,
                         verified_branch=str(stamp.get("branch") or ""),
                         verified_commit=str(stamp.get("commit") or ""),
@@ -359,6 +415,7 @@ class TicketDatabase:
 __all__ = [
     "ActivityEntry",
     "BranchSnapshot",
+    "ReaderBrief",
     "ReportSnapshot",
     "TicketDatabase",
     "TicketSnapshot",

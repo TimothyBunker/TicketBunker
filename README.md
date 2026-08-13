@@ -16,9 +16,10 @@ TicketBunker closes that gap. Given a ticket's context, it:
    reference branch, merge-base and merge history, separation of the author's work
    from incidental main merges — *before* any agent reasoning happens.
 3. Lets an agent search the base branch for related code and context.
-4. Reports back **who / what / where / why** for the ticket, including a compiled
-   list of relevant paths and code locations: changes, new work, old work, and
-   candidate places to implement future work.
+4. Reports back **who / what / where / why** for the ticket. A compact
+   agent-written Reader brief prioritizes the people, work, paths, and purpose
+   that matter most; the full tagged observation and inference trail remains
+   unchanged beneath it for audit.
 
 Sessions are organized **by ticket**. Each session stores the session name and the
 ticket information, retrievable on request by an authorized user.

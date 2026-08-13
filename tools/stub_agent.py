@@ -20,15 +20,27 @@ def _real_file() -> str:
     """A file that actually exists in the repo we run in — the publish gate
     verifies [real] anchors, so even the stub must anchor honestly."""
     proc = subprocess.run(["git", "ls-files"], capture_output=True, text=True)
-    for name in proc.stdout.splitlines():
-        if name.strip():
-            return name.strip()
+    files = [name.strip() for name in proc.stdout.splitlines() if name.strip()]
+    for include_bunker in (False, True):
+        for clean in files:
+            if not include_bunker and clean.startswith(".tb/"):
+                continue
+            leaf = clean.rsplit("/", 1)[-1]
+            # Match the same path shapes the report linter accepts. A root
+            # hidden file such as `.gitignore` is real but deliberately not a
+            # report anchor; a nested file or ordinary extension is clear.
+            if "/" in clean or re.fullmatch(r"[\w-]+\.\w{1,8}", leaf):
+                return clean
     return "README.md"
 
 
 def fill(text: str) -> str:
     anchor = _real_file()
     replacements = {
+        "reader brief Who": "- [speculation] grounded: the ticket assignee and observed git authors are the people most directly connected to this work (ticket, authorship).",
+        "reader brief What": "- [speculation] grounded: the observed diff is the clearest statement of what this branch changes (observations/diff.json).",
+        "reader brief Where": f"- [real] Start with `{anchor}`; it is the clearest ticket-related path in the observed work.",
+        "reader brief Why": "- [speculation] grounded: the ticket intent and observed diff explain why this work exists (ticket, observations/diff.json).",
         "add [real]/[speculation] people context": None,  # drop: nothing to add
         "one or two [speculation] lines on the nature": "- [speculation] grounded: per the patch under observations/patches/, the work is documentation and tooling changes.",
         "characterize the actual code changes": "- [speculation] grounded: the changes in the patch (observations/patches/) extend markdown docs; no runtime code paths are affected.",

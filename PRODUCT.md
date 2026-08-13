@@ -43,6 +43,7 @@ and report provenance easier to reach. It should disappear into the task.
 4. Put proof beside claims. Verification, freshness, and provenance are visible without dominating the page.
 5. Reveal depth progressively. Metadata, activity, and full reports remain available without crowding the default view.
 6. Keep one Python model. The CLI and viewer should render the same composed ticket state.
+7. Separate reading from auditing. Lead with a concise, evidence-bounded agent brief and keep the complete unchanged trail one disclosure away.
 
 ## Accessibility & Inclusion
 

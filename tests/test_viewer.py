@@ -48,7 +48,29 @@ class ViewerTests(unittest.TestCase):
             encoding="utf-8",
         )
         layout.child_report(self.bunker, branch).write_text(
-            """## What
+            """## Reader brief
+
+### Who
+
+- [speculation] grounded: Grace wrote the branch and Tim owns the ticket (ticket, authorship).
+
+### What
+
+- [speculation] grounded: The viewer now reads one composed snapshot (observations/diff.json).
+
+### Where
+
+- [real] Start with `ticketbunker/viewer.py:1`, where the ticket page is rendered.
+
+### Why
+
+- [speculation] grounded: One read path prevents presentation drift (ticket, observations/diff.json).
+
+## Who
+
+- [observation] Grace authored the branch.
+
+## What
 
 - [observation] The viewer reads one snapshot.
 
@@ -77,14 +99,19 @@ class ViewerTests(unittest.TestCase):
 
         self.assertIn("Description", page)
         self.assertIn("Acceptance criteria", page)
-        self.assertIn("Current state", page)
-        self.assertIn("Child reports", page)
+        self.assertIn("Reader brief", page)
+        self.assertIn("The viewer now reads one composed snapshot", page)
+        self.assertIn("Evidence trail", page)
+        self.assertIn("1 child report", page)
         self.assertIn("Lifecycle", page)
         self.assertIn("Branches", page)
         self.assertIn("Details", page)
         self.assertIn('aria-current="step"', page)
         self.assertIn('<link rel="icon" href="data:,">', page)
         self.assertIn('href="#report-grace__TB-9-a-very-long-branch-name-that-must-wrap"', page)
+        self.assertIn('<details class="evidence">', page)
+        self.assertNotIn('<details class="evidence" open', page)
+        self.assertNotIn("<h2>Reader brief</h2><h3>Who</h3>", page)
         self.assertIn("&lt;script&gt;alert(&#x27;no&#x27;)&lt;/script&gt;", page)
         self.assertNotIn("<script>alert('no')</script>", page)
         self.assertNotIn("<form", page)

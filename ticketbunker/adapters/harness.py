@@ -37,7 +37,8 @@ The source repo is at: {repo}
 Follow the tool order from your context. Fill in every `<!-- agent: ... -->`
 area of the form with tagged claims — your claims replace the marker line
 itself; no such marker may remain — leaving the [observation] lines exactly
-as they are, and save the file in place. Do not publish; publishing happens
+as they are. Treat Reader brief as a prioritized explanation over that trail,
+not a second inventory, and save the file in place. Do not publish; publishing happens
 outside your session. When the form is complete, you are done.
 """
 

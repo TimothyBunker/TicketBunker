@@ -7,9 +7,11 @@
 - Full-view comparison: `/tmp/ticketbunker-option2-comparison-final2.png`
 - Focused ticket-core comparison: `/tmp/ticketbunker-option2-focus-comparison.png`
 - Responsive implementation: `/tmp/ticketbunker-option2-mobile-final2.png`
+- Reader brief desktop: `/tmp/ticketbunker-reader-brief-desktop-final.png`
+- Reader brief expanded evidence on mobile: `/tmp/ticketbunker-reader-brief-mobile.png`
 - Browser: Google Chrome 144.0.7559.59, light theme.
 - State: the selected mock's single in-progress ticket and the real TB-1
-  in-progress dogfood ticket, with child reports collapsed. The data is not
+  in-progress dogfood ticket, with the Evidence trail collapsed. The data is not
   identical: the mock deliberately shows acceptance criteria, two branches,
   and verified reports; current TB-1 has no acceptance criteria, one open
   branch, and an older unverified report. QA compares the page structure and
@@ -51,7 +53,7 @@ There are no remaining actionable P0, P1, or P2 findings.
   omitted (P3) because the repository has no icon/avatar system and they are
   unnecessary to identify assignee, owner, or branch.
 - Copy and content: labels are direct and standalone: Description, Acceptance
-  criteria, Current state, Child reports, Lifecycle, Branches, and Details.
+  criteria, Reader brief, Evidence trail, Lifecycle, Branches, and Details.
   Empty-state copy is brief. No agent prompt, transcript, or helper prose leaks
   into the default ticket page.
 - States and interactions: Current report and branch links open the matching
@@ -84,13 +86,21 @@ There are no remaining actionable P0, P1, or P2 findings.
    390px capture shows natural wrapping and no page overflow. The report-link
    interaction expands the correct child, keyboard focus is visible, and a
    fresh console inspection is clean.
+4. Reader brief iteration: the user asked for concise agent synthesis without
+   losing the concrete trail. The desktop evidence above shows one open
+   Who/What/Where/Why reading surface and a single native Evidence trail
+   disclosure. At an exact 390px viewport, document and body width both remain
+   390px. Activating the brief's Evidence link opens both the outer trail and
+   exact nested branch report; a clean Chrome target reported no console errors.
 
 ## Implementation checklist
 
 - [x] Match the selected single-ticket information hierarchy.
 - [x] Keep tracker lifecycle distinct from observed branch state.
-- [x] Link branches and current state directly to child reports.
+- [x] Link branches and the Reader brief directly to child reports.
 - [x] Preserve verification, freshness, and provenance labels.
+- [x] Keep concise agent synthesis open and the unchanged evidence trail
+  collapsed by default.
 - [x] Render optional acceptance criteria and extensible metadata.
 - [x] Verify desktop, mobile, keyboard, interaction, console, escaping, and
   long dynamic content.

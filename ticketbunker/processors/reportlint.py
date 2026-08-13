@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 REQUIRED_SECTIONS = ["Who", "What", "Where", "Why", "State"]
 SECTION_BUDGET_LINES = 60
+BRIEF_SECTION = "Reader brief"
+BRIEF_PARTS = ("Who", "What", "Where", "Why")
+BRIEF_CLAIM_LIMITS = {"Who": 2, "What": 2, "Where": 1, "Why": 2}
+BRIEF_WORD_LIMITS = {"Who": 80, "What": 120, "Where": 70, "Why": 120}
 # Tags: observation (pipeline fact) / real (agent-located, checkable) /
 # speculation (interpretation, ranked by grounding). [inference] is accepted
 # as a deprecated alias of [speculation].
@@ -44,6 +48,20 @@ def split_sections(text: str) -> dict[str, list[str]]:
     return sections
 
 
+def split_subsections(lines: list[str]) -> dict[str, list[str]]:
+    """Split the ``###`` subsections inside one top-level report section."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in lines:
+        match = re.match(r"^###\s+(.+?)\s*$", line)
+        if match:
+            current = match.group(1)
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return sections
+
+
 def lint(text: str) -> list[Finding]:
     findings: list[Finding] = []
     sections = split_sections(text)
@@ -51,6 +69,53 @@ def lint(text: str) -> list[Finding]:
     for name in REQUIRED_SECTIONS:
         if name not in sections:
             findings.append(Finding("schema", "error", f"missing required section '## {name}'"))
+
+    # Reader brief is optional only for components published before the brief
+    # schema existed. New scaffolded sessions always contain it. When present,
+    # it is held to a compact shape so it cannot become a second evidence dump.
+    if BRIEF_SECTION in sections:
+        brief = split_subsections(sections[BRIEF_SECTION])
+        for name in BRIEF_PARTS:
+            if name not in brief:
+                findings.append(
+                    Finding("brief-schema", "error", f"Reader brief is missing '### {name}'")
+                )
+                continue
+            claims = [line for line in brief[name] if line.strip().startswith(("-", "*"))]
+            if not claims:
+                findings.append(
+                    Finding("brief-schema", "error", f"Reader brief '{name}' needs at least one tagged claim")
+                )
+                continue
+            limit = BRIEF_CLAIM_LIMITS[name]
+            if len(claims) > limit:
+                findings.append(
+                    Finding(
+                        "brief-length",
+                        "error",
+                        f"Reader brief '{name}' has {len(claims)} claims (max {limit})",
+                    )
+                )
+            words = sum(len(line.split()) for line in brief[name] if line.strip())
+            word_limit = BRIEF_WORD_LIMITS[name]
+            if words > word_limit:
+                findings.append(
+                    Finding(
+                        "brief-length",
+                        "error",
+                        f"Reader brief '{name}' is {words} words (max {word_limit})",
+                    )
+                )
+            for line in claims:
+                match = STRATUM_RE.match(line)
+                if match and match.group(1).lower() == "observation":
+                    findings.append(
+                        Finding(
+                            "brief-provenance",
+                            "error",
+                            f"Reader brief '{name}' is agent-authored and cannot create [observation] claims",
+                        )
+                    )
 
     for name, lines in sections.items():
         body = [l for l in lines if l.strip()]

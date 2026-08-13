@@ -13,12 +13,13 @@ import datetime
 import json
 from pathlib import Path
 
+from .. import layout
 from ..ledger import Ledger, digest
 
 
 def _branch_order(bunker: Path) -> dict[str, str]:
     """slug -> recency_of_development, from the authorship observation."""
-    obs = bunker / "observations" / "authorship.json"
+    obs = layout.paths(bunker)["authorship"]
     if not obs.exists():
         return {}
     per_branch = json.loads(obs.read_text(encoding="utf-8")).get("per_branch", {})
@@ -43,8 +44,9 @@ def _section(text: str, name: str) -> list[str]:
 
 def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
     bunker = Path(bunker)
-    children_dir = bunker / "reports" / "branches"
-    out = bunker / "reports" / "master.md"
+    paths = layout.paths(bunker)
+    children_dir = paths["children"]
+    out = paths["master"]
     children = sorted(children_dir.glob("*.md")) if children_dir.exists() else []
 
     recency = _branch_order(bunker)
@@ -76,15 +78,20 @@ def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
         for c in children:
             parts.append(f"- {c.stem.replace('__', '/')} — last development {recency.get(c.stem, 'unknown')}")
         parts.append("")
-        # The essentials, selected mechanically (each child's State section,
-        # claims verbatim) so a reader gets the whole ticket without scrolling
-        # the full components below.
+        # The essentials are selected mechanically and copied verbatim. Newer
+        # components lead with an agent-authored Reader brief, followed by the
+        # mechanical/agent State trail. Legacy components fall back to State.
         parts += ["## Digest", ""]
         for c, m in zip(children, manifest):
             v = m["verified"]
             at = f" — verified at `{v['commit']}` on {v['branch']}" if v.get("commit") else ""
             parts.append(f"**{c.stem.replace('__', '/')}**{at}")
-            state = _section(c.read_text(encoding="utf-8"), "State")
+            child_text = c.read_text(encoding="utf-8")
+            brief = _section(child_text, "Reader brief")
+            state = _section(child_text, "State")
+            if brief:
+                parts += brief
+                parts += ["", "**State**"]
             parts += state if state else ["- _component has no State section_"]
             parts.append("")
         for c in children:
@@ -104,7 +111,8 @@ def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
 
 def stale_children(bunker: Path) -> list[str]:
     """Children whose current digest differs from what the master recorded."""
-    out = Path(bunker) / "reports" / "master.md"
+    paths = layout.paths(Path(bunker))
+    out = paths["master"]
     if not out.exists():
         return []
     recorded: dict[str, str] = {}
@@ -114,7 +122,7 @@ def stale_children(bunker: Path) -> list[str]:
             if len(fields) >= 4:
                 recorded[fields[2]] = fields[3]
     stale = []
-    children_dir = Path(bunker) / "reports" / "branches"
+    children_dir = paths["children"]
     current = {c.name: digest(c.read_text(encoding="utf-8")) for c in children_dir.glob("*.md")} if children_dir.exists() else {}
     for name, d in current.items():
         if recorded.get(name) != d:

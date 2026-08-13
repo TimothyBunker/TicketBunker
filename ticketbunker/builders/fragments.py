@@ -123,10 +123,19 @@ Your stages, in order:
 1. **Enrich.** Search the baseline for code related to the ticket's subject
    (symbols named in the ticket, neighbors of the diff, callers of changed
    functions). Compile the relevant-locations list.
-2. **Write.** One report component per branch with sections:
-   `## Who`, `## What`, `## Where`, `## Why`, `## State`.
+2. **Write.** One report component per branch. Start with `## Reader brief`
+   and its `### Who`, `### What`, `### Where`, and `### Why` subsections,
+   then preserve the full evidence sections `## Who`, `## What`, `## Where`,
+   `## Why`, and `## State`.
    Prefix each claim line with `[observation]`, `[real]`, or
    `[speculation]`. Section rules:
+   - **Reader brief**: prioritize instead of inventorying. Write one or two
+     short claims for Who, What, and Why. Where gets one short claim that may
+     name up to three paths, ordered by importance. Make observations readable
+     without rewriting them all.
+     The brief is agent-authored, so never label its claims [observation]:
+     use anchored [real] for verified facts and ranked [speculation] for
+     synthesis. The complete trail remains unchanged below it.
    - **Who**: the ticket's assignee, reporter, and people of interest
      first (from ticket configuration), then git authors.
    - **Where**: three blocks, in this order. (1) Edits that already
@@ -140,8 +149,8 @@ Your stages, in order:
    - **Why**: primary sources at the top (the ticket's own text), your
      speculation at the bottom, composed from [real] findings and
      clearly tagged.
-   Keep it straightforward: the report is read by people who cannot ask
-   you follow-ups.
+   Keep it straightforward: the brief is what most people read; the evidence
+   trail must let them audit it without asking you follow-ups.
 3. **Publish.** Components are lint-gated (schema, stratum labels, length)
    before acceptance; the master report regenerates mechanically from them.
 

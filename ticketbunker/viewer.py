@@ -102,6 +102,18 @@ p { margin: 0 0 12px; }
 .current-item dd { min-width: 0; margin: 0; }
 .current-item p { margin: 0; }
 .current-report { display: inline-block; margin-top: 5px; font-size: 12px; }
+.reader-brief { max-width: 78ch; }
+.brief-item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; padding: 5px 0; }
+.brief-item h3 { margin: 1px 0 0; }
+.brief-claims { min-width: 0; }
+.brief-claims p { margin: 0 0 7px; }
+.brief-claims p:last-child { margin-bottom: 0; }
+.brief-source { display: inline-block; margin-top: 9px; font-size: 12px; }
+.evidence { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.evidence > summary { display: list-item; cursor: pointer; padding: 13px 2px; color: var(--fg); }
+.evidence-title { font-size: 16px; font-weight: 650; }
+.evidence-count { float: right; margin-left: 16px; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; }
+.evidence-body { padding: 0 0 4px 18px; }
 .reports { border-top: 1px solid var(--line); }
 .report { margin: 0; border-bottom: 1px solid var(--line); }
 .report summary { cursor: pointer; list-style-position: outside; padding: 13px 3px; }
@@ -109,7 +121,7 @@ p { margin: 0 0 12px; }
 .report-name { min-width: 0; color: var(--fg); font-weight: 650; }
 .report-meta { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
 .report-state { align-self: center; white-space: nowrap; }
-.report-body { margin: 0 0 17px 19px; padding: 5px 18px 8px; border-left: 2px solid var(--line); }
+.report-body { margin: 0 0 17px 19px; padding: 13px 18px 8px; border-top: 1px solid var(--line); }
 .report-body h2 { font-size: 15px; margin: 24px 0 8px; }
 .report-body h3 { margin: 18px 0 7px; }
 .report-body ul { padding-left: 20px; }
@@ -120,7 +132,7 @@ p { margin: 0 0 12px; }
 .comment-meta { margin-left: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .comment-text { white-space: pre-wrap; }
 .lifecycle { margin: 0; padding: 0; list-style: none; }
-.lifecycle li { padding: 6px 10px; border-left: 2px solid var(--line); color: var(--muted); }
+.lifecycle li { padding: 6px 10px; border-left: 1px solid var(--line); color: var(--muted); }
 .lifecycle li.current { border-color: var(--accent); color: var(--fg); background: var(--accent-soft); font-weight: 650; }
 .branch-list { border-top: 1px solid var(--line); }
 .branch-row { display: block; padding: 11px 2px; border-bottom: 1px solid var(--line); color: inherit; }
@@ -133,7 +145,7 @@ p { margin: 0 0 12px; }
 .details dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px 11px; margin: 0; padding: 2px 2px 15px; font-size: 12px; }
 .details dt { color: var(--muted); }
 .details dd { min-width: 0; margin: 0; color: var(--fg); }
-.validation { padding: 11px 13px; margin-bottom: 18px; border-left: 3px solid var(--danger); background: var(--danger-soft); }
+.validation { padding: 11px 13px; margin-bottom: 18px; border: 1px solid var(--danger); border-radius: var(--radius); background: var(--danger-soft); }
 .validation strong { color: var(--danger); }
 .validation ul { margin: 5px 0 0; padding-left: 18px; }
 .empty { color: var(--muted); }
@@ -161,6 +173,9 @@ li { margin: 3px 0; }
   .ticket-main { padding: 25px 0 0; }
   .ticket-rail { padding: 28px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .current-item { grid-template-columns: 48px minmax(0, 1fr); }
+  .brief-item { display: block; padding: 7px 0; }
+  .brief-item h3 { margin-bottom: 4px; }
+  .evidence-body { padding-left: 0; }
   .section-heading { align-items: flex-start; }
   .section-heading h2 { flex: 0 0 auto; }
   .section-heading a { flex: 1 1 auto; }
@@ -177,8 +192,11 @@ _POLL_JS = """
 const fp = document.documentElement.dataset.fp;
 function openLinkedReport(hash) {
   if (!hash || !hash.startsWith('#report-')) return;
-  const target = document.querySelector(hash);
-  if (target instanceof HTMLDetailsElement) target.open = true;
+  let target = document.querySelector(hash);
+  while (target) {
+    if (target instanceof HTMLDetailsElement) target.open = true;
+    target = target.parentElement?.closest('details');
+  }
 }
 openLinkedReport(location.hash);
 document.addEventListener('click', (event) => {
@@ -337,6 +355,48 @@ def _summary_markdown(text: str, limit: int = 1) -> str:
     return "\n".join(selected)
 
 
+def _brief_claims(text: str) -> str:
+    claims: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        if line.startswith(("- ", "* ")):
+            if current:
+                claims.append(" ".join(current))
+            current = [line[2:].strip()]
+        elif current and line.strip() and not line.startswith("#"):
+            current.append(line.strip())
+        elif current:
+            claims.append(" ".join(current))
+            current = []
+    if current:
+        claims.append(" ".join(current))
+    return "".join(f"<p>{_claim(html.escape(claim))}</p>" for claim in claims)
+
+
+def _reader_brief(ticket: TicketSnapshot) -> str:
+    if not ticket.reports or ticket.reports[0].brief is None:
+        return ""
+    report = ticket.reports[0]
+    brief = report.brief
+    assert brief is not None
+    items = (
+        ("Who", brief.who),
+        ("What", brief.what),
+        ("Where", brief.where),
+        ("Why", brief.why),
+    )
+    rows = "".join(
+        f'<div class="brief-item"><h3>{label}</h3>'
+        f'<div class="brief-claims">{_brief_claims(value)}</div></div>'
+        for label, value in items
+    )
+    return (
+        '<section class="section reader-brief"><h2>Reader brief</h2>'
+        f'{rows}<a class="brief-source" href="#{_report_anchor(report)}">Evidence: '
+        f'{html.escape(report.branch)}</a></section>'
+    )
+
+
 def _current_state(ticket: TicketSnapshot) -> str:
     if not ticket.reports:
         return ""
@@ -389,9 +449,22 @@ def _reports(ticket: TicketSnapshot) -> str:
             f'<span class="report-name mono">{html.escape(report.branch)}'
             f'<span class="report-meta">Child report{html.escape(owner)}{html.escape(commit)}</span></span>'
             f'<span class="report-state">{_report_state_badge(report)}</span>'
-            f'</span></summary><div class="report-body">{render_report(report.text)}</div></details>'
+            f'</span></summary><div class="report-body">{render_report(report.evidence_text)}</div></details>'
         )
     return f'<div class="reports">{"".join(rows)}</div>'
+
+
+def _evidence(ticket: TicketSnapshot) -> str:
+    count = len(ticket.reports)
+    if not count:
+        return '<section class="section"><h2>Evidence trail</h2><p class="empty">No child reports.</p></section>'
+    noun = "report" if count == 1 else "reports"
+    return (
+        '<section class="section"><details class="evidence">'
+        '<summary><span class="evidence-title">Evidence trail</span>'
+        f'<span class="evidence-count">{count} child {noun}</span></summary>'
+        f'<div class="evidence-body">{_reports(ticket)}</div></details></section>'
+    )
 
 
 def _comments(ticket: TicketSnapshot) -> str:
@@ -581,12 +654,14 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         main_sections.append(
             f'<section class="section"><h2>Acceptance criteria</h2><ul class="criteria">{items}</ul></section>'
         )
-    state_html = _current_state(ticket)
-    if state_html:
-        main_sections.append(state_html)
-    main_sections.append(
-        '<section class="section"><h2>Child reports</h2>' + _reports(ticket) + "</section>"
-    )
+    brief_html = _reader_brief(ticket)
+    if brief_html:
+        main_sections.append(brief_html)
+    else:
+        state_html = _current_state(ticket)
+        if state_html:
+            main_sections.append(state_html)
+    main_sections.append(_evidence(ticket))
     comments = _comments(ticket)
     if comments:
         main_sections.append(comments)

@@ -273,9 +273,11 @@ consequences:
    order — recency of development, or priority when assigned (§3.1). Agent
    writing happens in the children, not the master, so the master inherits —
    never re-invents — the children's claims. Against bloat, the master leads
-   with a **digest**: each child's State section, selected verbatim — a reader
-   gets the whole ticket at a glance before the full components below.
-   Selection is mechanical; the digest never rewrites a claim.
+   with a **digest**: each child's Reader brief when present, followed by its
+   State section, all selected verbatim. Legacy children without a brief fall
+   back to State. A reader gets the whole ticket at a glance before the full
+   components below. Selection is mechanical; the digest never rewrites a
+   claim.
 3. **The report cannot live inside the session.** The session file is an
    append-only conversation record; the report is a living document with its own
    update lifecycle (children rewritten as branches move, master regenerated on
@@ -291,12 +293,15 @@ consequences:
    admission is still typed and linted — a component that fails today's gate
    is reported and skipped, never smuggled in), then recompile the master.
 
-**Report component schema** — each child (and the master, per-branch-sectioned)
-delivers who / what / where / why. Each section has a defined **determinant**:
-the data source that decides its content.
+**Report component schema** — each new child leads with a compact Reader brief,
+then carries the complete who / what / where / why / state evidence trail. Each
+section has a defined **determinant**: the data source that decides its content.
+The brief is optional only when admitting a legacy component published before
+this schema; every newly scaffolded session must fill it.
 
 | Section | Determined by | Content | Stratum |
 |---|---|---|---|
+| Reader brief | **The agent, bounded by the evidence below.** Ticket fields, git observations, and verified finds determine what may be emphasized | `### Who`, `### What`, `### Where`, `### Why`: one or two short prioritized claims for Who, What, and Why; one short Where claim may name up to three paths in importance order. It makes the evidence readable; it does not summarize every observation. | agent-authored [real] / ranked [speculation]; never [observation] |
 | Who | **Users.** Assignee, reporter, people of interest from ticket config; the session's user from session config. Manually configured for now; tracker API compatibility after manual is solid. Git authors supplement | Direct ticket people first, then git authors from the branches | config + observation |
 | What | **Git diffs and actual code** — not just which region changed but the changed code itself. The diff stage captures patch text as an observation so What can quote and describe real changes | Summarized diff: files, hunks, additions/deletions, work vs. merge churn, with the actual changes characterized | observation |
 | Where | **Other ticket work, git diffs, ticket information, and a little agent speculation** — in that order of authority | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs and prior components of this ticket, with emphasis: the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
@@ -329,11 +334,14 @@ observed git state (merged-back, recency — the pipeline's), never blended.
 (`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
 per-ticket pages organized around completing one ticket. The singular page
 keeps tracker-declared lifecycle beside (never blended with) observed branch
-state; description and optional acceptance criteria lead, a compact
-What/Where/Why/State selection comes verbatim from the newest child, and
-branches link directly to collapsed full reports with verification/freshness
-visible. Details and carried-over comments remain available without turning
-the page into a dashboard. Trust tags render as chips. It is strictly
+state; description and optional acceptance criteria lead. When the newest
+child has a Reader brief, its concise Who/What/Where/Why claims are the primary
+reading surface. The unchanged branch reports sit under one collapsed Evidence
+trail, and branch/brief links open the exact nested report for audit. Legacy
+children fall back to a compact evidence-derived Current state. Verification
+and freshness remain visible. Details and carried-over comments remain
+available without turning the page into a dashboard. Trust tags render as
+chips. It is strictly
 read-only — no write
 endpoint exists, every page renders from `.tb/` on each request, and pages
 poll a database fingerprint so whatever the user is looking at reloads
