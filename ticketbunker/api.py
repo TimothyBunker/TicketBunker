@@ -164,6 +164,7 @@ class ReportSnapshot:
     verified_at: str = ""
     stale_in_master: bool = False
     predates_development: bool = False
+    who: str = ""
     what: str = ""
     where: str = ""
     why: str = ""
@@ -376,6 +377,7 @@ class TicketDatabase:
                             and branch_info
                             and predates(str(stamp["ts"]), branch_info.last_development)
                         ),
+                        who=_section(text, "Who"),
                         what=_section(text, "What"),
                         where=_section(text, "Where"),
                         why=_section(text, "Why"),

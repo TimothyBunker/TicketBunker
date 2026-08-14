@@ -32,12 +32,14 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines += ["### Who", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Who: one or two concise [real]/[speculation] claims naming the people "
-        "most important to this ticket and why; use ticket/authorship evidence, do not merely list everyone"
+        "most important to this ticket and why, highest apparent importance first; use ticket/authorship "
+        "evidence, do not merely list everyone"
     ))
     lines += ["", "### What", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief What: one or two concise [real]/[speculation] claims explaining the most "
-        "important work or result in plain language, grounded in the diff and observations"
+        "important work or result in plain language, highest apparent importance first, grounded in the "
+        "diff and observations"
     ))
     lines += ["", "### Where", ""]
     lines.append(AGENT_AREA.format(
@@ -47,7 +49,8 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines += ["", "### Why", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Why: one or two concise [real]/[speculation] claims explaining the ticket's "
-        "purpose and your best-supported interpretation, grounded in primary ticket and code evidence"
+        "purpose and your best-supported interpretation, highest apparent importance first, grounded in "
+        "primary ticket and code evidence"
     ))
     lines.append("")
 

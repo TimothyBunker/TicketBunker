@@ -47,6 +47,7 @@ class ReaderBriefTests(unittest.TestCase):
 
         self.assertIn("## Reader brief", form)
         self.assertEqual(form.count("reader brief "), 4)
+        self.assertEqual(form.count("highest apparent importance first"), 3)
         filled = fill(form)
         ok, findings = reportlint.gate(filled)
 

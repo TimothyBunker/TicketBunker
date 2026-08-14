@@ -137,6 +137,7 @@ class TicketDatabaseTests(unittest.TestCase):
         self.assertIsNotNone(ticket.reports[0].brief)
         self.assertIn("Ada owns", ticket.reports[0].brief.who)
         self.assertNotIn("Reader brief", ticket.reports[0].evidence_text)
+        self.assertIn("Tim is the assignee", ticket.reports[0].who)
         self.assertIn("## What", ticket.reports[0].evidence_text)
         self.assertIn("Three commits", ticket.reports[0].what)
         self.assertEqual(ticket.validation_errors, ())

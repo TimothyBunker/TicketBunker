@@ -7,12 +7,14 @@
 - Full-view comparison: `/tmp/ticketbunker-option2-comparison-final2.png`
 - Focused ticket-core comparison: `/tmp/ticketbunker-option2-focus-comparison.png`
 - Responsive implementation: `/tmp/ticketbunker-option2-mobile-final2.png`
-- Reader brief desktop: `/tmp/ticketbunker-reader-brief-desktop-final.png`
-- Reader brief expanded evidence on mobile: `/tmp/ticketbunker-reader-brief-mobile.png`
+- Category synthesis desktop: `/tmp/ticketbunker-category-trails-desktop.png`
+- Direct-linked Who trail: `/tmp/ticketbunker-category-trail-expanded.png`
+- Exact-width mobile synthesis: `/tmp/ticketbunker-category-trails-mobile-exact.png`
+- Exact-width expanded Where trail: `/tmp/ticketbunker-category-trail-mobile-expanded.png`
 - Browser: Google Chrome 144.0.7559.59, light theme.
-- State: the selected mock's single in-progress ticket and the real TB-1
-  in-progress dogfood ticket, with the Evidence trail collapsed. The data is not
-  identical: the mock deliberately shows acceptance criteria, two branches,
+- State: the selected mock's single in-progress ticket and the scratch TB-42
+  in-progress ticket, with four category trails and Report state collapsed.
+  The data is not identical: the mock deliberately shows acceptance criteria, two branches,
   and verified reports; current TB-1 has no acceptance criteria, one open
   branch, and an older unverified report. QA compares the page structure and
   behavior without treating those honest data differences as visual drift.
@@ -53,13 +55,16 @@ There are no remaining actionable P0, P1, or P2 findings.
   omitted (P3) because the repository has no icon/avatar system and they are
   unnecessary to identify assignee, owner, or branch.
 - Copy and content: labels are direct and standalone: Description, Acceptance
-  criteria, Reader brief, Evidence trail, Lifecycle, Branches, and Details.
+  criteria, Agent work, Who, What, Where, Why, Full trail, Report state,
+  Lifecycle, Branches, and Details.
   Empty-state copy is brief. No agent prompt, transcript, or helper prose leaks
   into the default ticket page.
-- States and interactions: Current report and branch links open the matching
-  collapsed child report; reports and Details use keyboard-native disclosure;
-  lifecycle exposes `aria-current="step"`; focus has a visible 3px outline.
-  A clean Chrome target reported no runtime or console errors.
+- States and interactions: each Who/What/Where/Why synthesis has its own closed
+  native Full trail disclosure, with Report state separate and closed. Branch
+  links open the matching report's Who trail; Details uses the same familiar
+  disclosure behavior; lifecycle exposes `aria-current="step"`; focus has a
+  visible 3px outline. A clean
+  Chrome target reported no runtime or console errors.
 - Accessibility: semantic headings, lists, definition lists, native details,
   visible focus, reduced-motion handling, color-plus-text states, text wrapping,
   and exact-width mobile verification passed. HTML/report content is escaped
@@ -87,20 +92,27 @@ There are no remaining actionable P0, P1, or P2 findings.
    interaction expands the correct child, keyboard focus is visible, and a
    fresh console inspection is clean.
 4. Reader brief iteration: the user asked for concise agent synthesis without
-   losing the concrete trail. The desktop evidence above shows one open
+   losing the concrete trail. The prior implementation showed one open
    Who/What/Where/Why reading surface and a single native Evidence trail
    disclosure. At an exact 390px viewport, document and body width both remain
    390px. Activating the brief's Evidence link opens both the outer trail and
    exact nested branch report; a clean Chrome target reported no console errors.
+5. Category-trail iteration: each category now places its highest-priority
+   synthesis directly above a category-specific Full trail disclosure. Report
+   state remains separately collapsed because lifecycle and branch state are
+   already visible in the rail. Exact 390px device
+   emulation measured inner, document, and body widths at 390px; all five
+   disclosures were closed by default, the Where trail opened independently,
+   and a branch link opened the exact report inside Who. No console errors.
 
 ## Implementation checklist
 
 - [x] Match the selected single-ticket information hierarchy.
 - [x] Keep tracker lifecycle distinct from observed branch state.
-- [x] Link branches and the Reader brief directly to child reports.
+- [x] Link branches and category trails directly to child reports.
 - [x] Preserve verification, freshness, and provenance labels.
-- [x] Keep concise agent synthesis open and the unchanged evidence trail
-  collapsed by default.
+- [x] Keep concise agent synthesis open and each unchanged category trail
+  independently collapsed by default.
 - [x] Render optional acceptance criteria and extensible metadata.
 - [x] Verify desktop, mobile, keyboard, interaction, console, escaping, and
   long dynamic content.

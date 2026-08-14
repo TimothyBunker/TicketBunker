@@ -96,36 +96,26 @@ p { margin: 0 0 12px; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
 .section-heading h2 { margin: 0; }
 .section-heading a { min-width: 0; flex: 0 1 auto; font-size: 12px; overflow-wrap: anywhere; text-align: right; }
-.current-list { margin: 0 0 12px; }
-.current-item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; min-width: 0; padding: 3px 0; }
-.current-item dt { color: var(--fg); font-weight: 650; }
-.current-item dd { min-width: 0; margin: 0; }
-.current-item p { margin: 0; }
-.current-report { display: inline-block; margin-top: 5px; font-size: 12px; }
-.reader-brief { max-width: 78ch; }
-.brief-item { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; padding: 5px 0; }
-.brief-item h3 { margin: 1px 0 0; }
+.agent-work { max-width: 78ch; }
+.work-category { padding: 19px 0 20px; border-top: 1px solid var(--line); }
+.work-category:first-of-type { padding-top: 0; border-top: 0; }
+.work-category h3 { margin-bottom: 7px; font-size: 15px; }
 .brief-claims { min-width: 0; }
 .brief-claims p { margin: 0 0 7px; }
 .brief-claims p:last-child { margin-bottom: 0; }
-.brief-source { display: inline-block; margin-top: 9px; font-size: 12px; }
-.evidence { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.evidence > summary { display: list-item; cursor: pointer; padding: 13px 2px; color: var(--fg); }
-.evidence-title { font-size: 16px; font-weight: 650; }
-.evidence-count { float: right; margin-left: 16px; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; }
-.evidence-body { padding: 0 0 4px 18px; }
-.reports { border-top: 1px solid var(--line); }
-.report { margin: 0; border-bottom: 1px solid var(--line); }
-.report summary { cursor: pointer; list-style-position: outside; padding: 13px 3px; }
-.report-summary { display: inline-grid; width: calc(100% - 20px); grid-template-columns: minmax(0, 1fr) auto; gap: 15px; vertical-align: top; }
-.report-name { min-width: 0; color: var(--fg); font-weight: 650; }
-.report-meta { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
-.report-state { align-self: center; white-space: nowrap; }
-.report-body { margin: 0 0 17px 19px; padding: 13px 18px 8px; border-top: 1px solid var(--line); }
-.report-body h2 { font-size: 15px; margin: 24px 0 8px; }
-.report-body h3 { margin: 18px 0 7px; }
-.report-body ul { padding-left: 20px; }
-.report-body li { margin: 6px 0; }
+.category-trail { margin-top: 10px; }
+.category-trail > summary { display: list-item; cursor: pointer; padding: 5px 2px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.trail-count { float: right; margin-left: 16px; color: var(--muted); font-weight: 400; text-align: right; }
+.trail-body { margin: 6px 0 0 17px; border-top: 1px solid var(--line); }
+.trail-report { padding: 13px 2px 10px; border-bottom: 1px solid var(--line); }
+.trail-report-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; margin-bottom: 7px; }
+.trail-report-name { min-width: 0; color: var(--fg); font-weight: 650; }
+.trail-report-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.trail-report-state { white-space: nowrap; }
+.trail-copy ul { margin-bottom: 0; padding-left: 20px; }
+.trail-copy li { margin: 6px 0; }
+.trail-copy p:last-child { margin-bottom: 0; }
+.report-state-trail { padding-top: 2px; border-top: 1px solid var(--line); }
 .comments { border-top: 1px solid var(--line); }
 .comment { padding: 14px 2px; border-bottom: 1px solid var(--line); }
 .comment-head { margin-bottom: 5px; color: var(--fg); font-weight: 650; }
@@ -172,15 +162,12 @@ li { margin: 3px 0; }
   .ticket-layout { display: block; }
   .ticket-main { padding: 25px 0 0; }
   .ticket-rail { padding: 28px 0 0; border-left: 0; border-top: 1px solid var(--line); }
-  .current-item { grid-template-columns: 48px minmax(0, 1fr); }
-  .brief-item { display: block; padding: 7px 0; }
-  .brief-item h3 { margin-bottom: 4px; }
-  .evidence-body { padding-left: 0; }
   .section-heading { align-items: flex-start; }
   .section-heading h2 { flex: 0 0 auto; }
   .section-heading a { flex: 1 1 auto; }
-  .report-summary { grid-template-columns: 1fr; gap: 6px; }
-  .report-state { justify-self: start; }
+  .trail-body { margin-left: 0; }
+  .trail-report-head { grid-template-columns: 1fr; gap: 6px; }
+  .trail-report-state { justify-self: start; }
   .ticket-link { grid-template-columns: 74px minmax(0, 1fr); }
   .ticket-link-meta { grid-column: 2; text-align: left; }
 }
@@ -373,58 +360,27 @@ def _brief_claims(text: str) -> str:
     return "".join(f"<p>{_claim(html.escape(claim))}</p>" for claim in claims)
 
 
-def _reader_brief(ticket: TicketSnapshot) -> str:
-    if not ticket.reports or ticket.reports[0].brief is None:
-        return ""
-    report = ticket.reports[0]
-    brief = report.brief
-    assert brief is not None
-    items = (
-        ("Who", brief.who),
-        ("What", brief.what),
-        ("Where", brief.where),
-        ("Why", brief.why),
-    )
-    rows = "".join(
-        f'<div class="brief-item"><h3>{label}</h3>'
-        f'<div class="brief-claims">{_brief_claims(value)}</div></div>'
-        for label, value in items
-    )
-    return (
-        '<section class="section reader-brief"><h2>Reader brief</h2>'
-        f'{rows}<a class="brief-source" href="#{_report_anchor(report)}">Evidence: '
-        f'{html.escape(report.branch)}</a></section>'
-    )
+def _report_section(report: ReportSnapshot, label: str) -> str:
+    return {
+        "Who": report.who,
+        "What": report.what,
+        "Where": report.where,
+        "Why": report.why,
+        "State": report.state_text,
+    }[label]
 
 
-def _current_state(ticket: TicketSnapshot) -> str:
-    if not ticket.reports:
-        return ""
-    report = ticket.reports[0]
-    items = (
-        ("What", report.what),
-        ("Where", report.where),
-        ("Why", report.why),
-        ("State", report.state_text),
-    )
-    cards = []
-    for label, value in items:
-        if value:
-            preview = _summary_markdown(value)
-            claim = preview.removeprefix("- ")
-            cards.append(
-                f'<div class="current-item"><dt>{label}</dt>'
-                f'<dd><p>{_claim(html.escape(claim))}</p></dd></div>'
-            )
-    if not cards:
-        return ""
-    anchor = _report_anchor(report)
-    return (
-        '<section class="section"><h2>Current state</h2>'
-        f'<dl class="current-list">{"".join(cards)}</dl>'
-        f'<a class="current-report" href="#{anchor}">Open current report: '
-        f'{html.escape(report.branch)}</a></section>'
-    )
+def _category_preview(report: ReportSnapshot, label: str) -> str:
+    if report.brief is not None and label != "State":
+        value = {
+            "Who": report.brief.who,
+            "What": report.brief.what,
+            "Where": report.brief.where,
+            "Why": report.brief.why,
+        }[label]
+        return _brief_claims(value)
+    preview = _summary_markdown(_report_section(report, label))
+    return _brief_claims(preview)
 
 
 def _report_state_badge(report: ReportSnapshot) -> str:
@@ -436,34 +392,46 @@ def _report_state_badge(report: ReportSnapshot) -> str:
     return _badge(state.capitalize(), "stale")
 
 
-def _reports(ticket: TicketSnapshot) -> str:
-    if not ticket.reports:
-        return '<p class="empty">No child reports.</p>'
+def _category_trail(ticket: TicketSnapshot, label: str, summary: str = "Full trail") -> str:
+    reports = [report for report in ticket.reports if _report_section(report, label)]
+    count = len(reports)
+    noun = "report" if count == 1 else "reports"
     rows = []
-    for report in ticket.reports:
+    for report in reports:
         owner = f" · {report.owner}" if report.owner else ""
         commit = f" · {report.verified_commit}" if report.verified_commit else ""
+        anchor = f' id="{_report_anchor(report)}"' if label == "Who" else ""
         rows.append(
-            f'<details class="report" id="{_report_anchor(report)}">'
-            '<summary><span class="report-summary">'
-            f'<span class="report-name mono">{html.escape(report.branch)}'
-            f'<span class="report-meta">Child report{html.escape(owner)}{html.escape(commit)}</span></span>'
-            f'<span class="report-state">{_report_state_badge(report)}</span>'
-            f'</span></summary><div class="report-body">{render_report(report.evidence_text)}</div></details>'
+            f'<article class="trail-report"{anchor}>'
+            '<div class="trail-report-head">'
+            f'<div class="trail-report-name mono">{html.escape(report.branch)}'
+            f'<span class="trail-report-meta">Child report{html.escape(owner)}{html.escape(commit)}</span></div>'
+            f'<div class="trail-report-state">{_report_state_badge(report)}</div></div>'
+            f'<div class="trail-copy">{render_report(_report_section(report, label))}</div></article>'
         )
-    return f'<div class="reports">{"".join(rows)}</div>'
-
-
-def _evidence(ticket: TicketSnapshot) -> str:
-    count = len(ticket.reports)
-    if not count:
-        return '<section class="section"><h2>Evidence trail</h2><p class="empty">No child reports.</p></section>'
-    noun = "report" if count == 1 else "reports"
     return (
-        '<section class="section"><details class="evidence">'
-        '<summary><span class="evidence-title">Evidence trail</span>'
-        f'<span class="evidence-count">{count} child {noun}</span></summary>'
-        f'<div class="evidence-body">{_reports(ticket)}</div></details></section>'
+        f'<details class="category-trail" data-category="{label.casefold()}">'
+        f'<summary>{summary}<span class="trail-count">{count} {noun}</span></summary>'
+        f'<div class="trail-body">{"".join(rows)}</div></details>'
+    )
+
+
+def _agent_work(ticket: TicketSnapshot) -> str:
+    if not ticket.reports:
+        return '<section class="section"><h2>Agent work</h2><p class="empty">No child reports.</p></section>'
+    current = ticket.reports[0]
+    categories = []
+    for label in ("Who", "What", "Where", "Why"):
+        preview = _category_preview(current, label)
+        categories.append(
+            f'<section class="work-category"><h3>{label}</h3>'
+            f'<div class="brief-claims">{preview}</div>'
+            f'{_category_trail(ticket, label)}</section>'
+        )
+    return (
+        '<section class="section agent-work"><h2>Agent work</h2>'
+        f'{"".join(categories)}<div class="report-state-trail">'
+        f'{_category_trail(ticket, "State", "Report state")}</div></section>'
     )
 
 
@@ -654,14 +622,7 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         main_sections.append(
             f'<section class="section"><h2>Acceptance criteria</h2><ul class="criteria">{items}</ul></section>'
         )
-    brief_html = _reader_brief(ticket)
-    if brief_html:
-        main_sections.append(brief_html)
-    else:
-        state_html = _current_state(ticket)
-        if state_html:
-            main_sections.append(state_html)
-    main_sections.append(_evidence(ticket))
+    main_sections.append(_agent_work(ticket))
     comments = _comments(ticket)
     if comments:
         main_sections.append(comments)

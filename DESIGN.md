@@ -301,7 +301,7 @@ this schema; every newly scaffolded session must fill it.
 
 | Section | Determined by | Content | Stratum |
 |---|---|---|---|
-| Reader brief | **The agent, bounded by the evidence below.** Ticket fields, git observations, and verified finds determine what may be emphasized | `### Who`, `### What`, `### Where`, `### Why`: one or two short prioritized claims for Who, What, and Why; one short Where claim may name up to three paths in importance order. It makes the evidence readable; it does not summarize every observation. | agent-authored [real] / ranked [speculation]; never [observation] |
+| Reader brief | **The agent, bounded by the evidence below.** Ticket fields, git observations, and verified finds determine what may be emphasized | `### Who`, `### What`, `### Where`, `### Why`: one or two short claims for Who, What, and Why in descending apparent importance; one short Where claim may name up to three paths in importance order. It makes the evidence readable; it does not summarize every observation. | agent-authored [real] / ranked [speculation]; never [observation] |
 | Who | **Users.** Assignee, reporter, people of interest from ticket config; the session's user from session config. Manually configured for now; tracker API compatibility after manual is solid. Git authors supplement | Direct ticket people first, then git authors from the branches | config + observation |
 | What | **Git diffs and actual code** — not just which region changed but the changed code itself. The diff stage captures patch text as an observation so What can quote and describe real changes | Summarized diff: files, hunks, additions/deletions, work vs. merge churn, with the actual changes characterized | observation |
 | Where | **Other ticket work, git diffs, ticket information, and a little agent speculation** — in that order of authority | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs and prior components of this ticket, with emphasis: the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
@@ -336,11 +336,14 @@ per-ticket pages organized around completing one ticket. The singular page
 keeps tracker-declared lifecycle beside (never blended with) observed branch
 state; description and optional acceptance criteria lead. When the newest
 child has a Reader brief, its concise Who/What/Where/Why claims are the primary
-reading surface. The unchanged branch reports sit under one collapsed Evidence
-trail, and branch/brief links open the exact nested report for audit. Legacy
-children fall back to a compact evidence-derived Current state. Verification
-and freshness remain visible. Details and carried-over comments remain
-available without turning the page into a dashboard. Trust tags render as
+reading surface. Each category immediately follows its synthesis with a native
+disclosure for that category's unchanged evidence, grouped by child report in
+development-recency order. State remains a separate collapsed report trail,
+because tracker lifecycle and observed branch state are already visible in the
+ticket rail. Direct branch links open the exact report's Who trail;
+legacy children derive compact previews from their evidence without inventing
+synthesis. Verification and freshness remain visible. Details and carried-over
+comments remain available without turning the page into a dashboard. Trust tags render as
 chips. It is strictly
 read-only — no write
 endpoint exists, every page renders from `.tb/` on each request, and pages

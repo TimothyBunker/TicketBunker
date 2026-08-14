@@ -99,19 +99,26 @@ class ViewerTests(unittest.TestCase):
 
         self.assertIn("Description", page)
         self.assertIn("Acceptance criteria", page)
-        self.assertIn("Reader brief", page)
+        self.assertIn("Agent work", page)
         self.assertIn("The viewer now reads one composed snapshot", page)
-        self.assertIn("Evidence trail", page)
-        self.assertIn("1 child report", page)
+        self.assertEqual(page.count("Full trail"), 4)
+        self.assertIn("Report state", page)
+        self.assertEqual(page.count('<details class="category-trail"'), 5)
+        self.assertIn('data-category="who"', page)
+        self.assertIn('data-category="what"', page)
+        self.assertIn('data-category="where"', page)
+        self.assertIn('data-category="why"', page)
+        self.assertIn('data-category="state"', page)
+        self.assertIn("Grace authored the branch", page)
+        self.assertIn("The report is published", page)
         self.assertIn("Lifecycle", page)
         self.assertIn("Branches", page)
         self.assertIn("Details", page)
         self.assertIn('aria-current="step"', page)
         self.assertIn('<link rel="icon" href="data:,">', page)
         self.assertIn('href="#report-grace__TB-9-a-very-long-branch-name-that-must-wrap"', page)
-        self.assertIn('<details class="evidence">', page)
-        self.assertNotIn('<details class="evidence" open', page)
-        self.assertNotIn("<h2>Reader brief</h2><h3>Who</h3>", page)
+        self.assertNotIn('<details class="category-trail" open', page)
+        self.assertNotIn("Reader brief", page)
         self.assertIn("&lt;script&gt;alert(&#x27;no&#x27;)&lt;/script&gt;", page)
         self.assertNotIn("<script>alert('no')</script>", page)
         self.assertNotIn("<form", page)
@@ -129,6 +136,22 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('<span class="tag real">real</span>', rendered)
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", rendered)
         self.assertNotIn("<img", rendered)
+
+    def test_legacy_report_gets_category_previews_without_inventing_a_brief(self) -> None:
+        report = next(layout.paths(self.bunker)["children"].glob("*.md"))
+        text = report.read_text(encoding="utf-8")
+        legacy = "## Who\n" + text.split("## Who\n", 1)[1]
+        report.write_text(legacy, encoding="utf-8")
+
+        rendered = page_ticket(self.root, "TB-9", "fingerprint")
+        self.assertIsNotNone(rendered)
+        page = rendered.decode("utf-8")
+
+        self.assertIn("Agent work", page)
+        self.assertIn("Grace authored the branch", page)
+        self.assertEqual(page.count("Full trail"), 4)
+        self.assertIn("Report state", page)
+        self.assertNotIn("Reader brief", page)
 
 
 if __name__ == "__main__":

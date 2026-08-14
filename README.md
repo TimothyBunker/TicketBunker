@@ -18,8 +18,8 @@ TicketBunker closes that gap. Given a ticket's context, it:
 3. Lets an agent search the base branch for related code and context.
 4. Reports back **who / what / where / why** for the ticket. A compact
    agent-written Reader brief prioritizes the people, work, paths, and purpose
-   that matter most; the full tagged observation and inference trail remains
-   unchanged beneath it for audit.
+   that matter most. The ticket viewer pairs each category's synthesis with a
+   disclosure for its full tagged observation and inference trail.
 
 Sessions are organized **by ticket**. Each session stores the session name and the
 ticket information, retrievable on request by an authorized user.

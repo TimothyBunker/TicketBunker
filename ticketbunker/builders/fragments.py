@@ -130,9 +130,9 @@ Your stages, in order:
    Prefix each claim line with `[observation]`, `[real]`, or
    `[speculation]`. Section rules:
    - **Reader brief**: prioritize instead of inventorying. Write one or two
-     short claims for Who, What, and Why. Where gets one short claim that may
-     name up to three paths, ordered by importance. Make observations readable
-     without rewriting them all.
+     short claims for Who, What, and Why in descending apparent importance.
+     Where gets one short claim that may name up to three paths, also ordered
+     by importance. Make observations readable without rewriting them all.
      The brief is agent-authored, so never label its claims [observation]:
      use anchored [real] for verified facts and ranked [speculation] for
      synthesis. The complete trail remains unchanged below it.
