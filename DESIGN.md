@@ -395,7 +395,9 @@ compact previews from their evidence without inventing synthesis. Verification
 and freshness remain visible. Each child trail labels work authors separately
 from the harness/provider/model that generated the report; a selected branch also
 shows its known generator beside its branch identity. Unknown generator fields
-stay absent instead of being guessed. Trust tags render as chips. Ticket,
+stay absent instead of being guessed. Before the first report, Agent work shows
+only its empty state rather than a meaningless Master selector. Trust tags render
+as chips. Ticket,
 Project, and Agent reading remains strictly read-only. The one exception is an
 explicit local **Work** control: a small plus beside Branches opens a form for a
 short branch name and a real base-branch choice. Its CSRF-protected POST
@@ -409,7 +411,8 @@ bind option and no auth surface — remote viewing (phone, another machine)
 is SSH port-forwarding's job, which already carries the repo's own access
 control. The Work endpoint accepts a per-server unguessable transport token
 embedded only in same-origin pages and remains bound to localhost. Do not add
-network exposure to the viewer.
+network exposure to the viewer. Viewer responses disable caching, framing,
+referrer propagation, and MIME sniffing.
 
 **There is one Python read model.** `ticketbunker/api.py` exposes the public,
 read-only `TicketCatalog`, `TicketDatabase`, query/page types, and typed
@@ -723,7 +726,9 @@ directories are ordinary checkouts of the locator's canonical branches.
 Ticket IDs resolve under
 `.tb/data/projects/<PROJECT>/tickets/`. A second `tb init` is refused; other
 clones run `tb setup`, which reads the committed locator and fast-forwards both
-local checkouts. A fresh setup checks out configuration normally but uses a
+local checkouts. Refresh failures are typed rejections that name the affected
+branch and direct the user through `tb doctor` back to `tb setup`; raw Git
+exceptions are not a user interface. A fresh setup checks out configuration normally but uses a
 sparse data checkout containing only project ticket indexes. Listing, search,
 facets, and pagination therefore work without copying every bunker. Opening or
 mutating one indexed ticket expands only that ticket's canonical path in the

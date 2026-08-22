@@ -459,6 +459,7 @@ viewTabs.forEach((tab, index) => {
     activateView(tab.dataset.viewTab);
     if (tab.dataset.viewTab === 'ticket') history.replaceState(null, '', '#ticket');
     else if (reportSelect) selectReport(reportSelect.value, true);
+    else history.replaceState(null, '', '#agent');
   });
   tab.addEventListener('keydown', (event) => {
     let next = null;
@@ -475,6 +476,7 @@ viewTabs.forEach((tab, index) => {
 
 if (reportSelect) reportSelect.addEventListener('change', () => selectReport(reportSelect.value, true));
 if (location.hash === '#ticket') activateView('ticket');
+else if (location.hash === '#agent') activateView('agent');
 else openLinkedReport(location.hash);
 document.addEventListener('click', (event) => {
   const link = event.target.closest('a[href^="#report-"]');
@@ -528,11 +530,19 @@ async function loadWorkState() {
 if (workToggle && workPanel) workToggle.addEventListener('click', () => {
   workPanel.hidden = !workPanel.hidden;
   workToggle.setAttribute('aria-expanded', String(!workPanel.hidden));
+  history.replaceState(null, '', workPanel.hidden ? '#agent' : '#work');
   if (!workPanel.hidden) {
     loadWorkState();
     workForm.querySelector('input[name="name"]').focus();
   }
 });
+
+if (location.hash === '#work' && workToggle && workPanel) {
+  activateView('agent');
+  workPanel.hidden = false;
+  workToggle.setAttribute('aria-expanded', 'true');
+  loadWorkState();
+}
 
 if (workForm) workForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -917,6 +927,11 @@ def _agent_report_panel(reports: tuple[ReportSnapshot, ...], value: str, *, mast
 
 
 def _agent_work(ticket: TicketSnapshot) -> str:
+    if not ticket.reports:
+        return (
+            '<section class="section agent-work"><div class="section-heading agent-heading">'
+            '<h2>Agent work</h2></div><p class="empty">No agent reports yet.</p></section>'
+        )
     options = ['<option value="master">Master</option>']
     panels = [_agent_report_panel(ticket.reports, "master", master=True)]
     for report in ticket.reports:
@@ -1091,11 +1106,17 @@ def _branches(ticket: TicketSnapshot, work_token: str = "") -> str:
         behind = "?" if branch.behind is None else branch.behind
         development = _date(branch.last_development)
         date_text = f" · {development}" if development else ""
+        if branch.state == "unobserved":
+            branch_meta = "Awaiting first refresh"
+        elif branch.state == "missing":
+            branch_meta = "Branch not found"
+        else:
+            branch_meta = f"ahead {ahead} · behind {behind}{date_text}"
         rows.append(
             f'<{tag} class="branch-row"{href}><span class="branch-top">'
             f'<span class="branch-name mono">{html.escape(branch.name)}</span>'
             f'{_branch_badge(branch.state)}</span>'
-            f'<span class="branch-meta">ahead {ahead} · behind {behind}{html.escape(date_text)}</span></{tag}>'
+            f'<span class="branch-meta">{html.escape(branch_meta)}</span></{tag}>'
         )
     return (
         f'<section class="section">{heading}'
@@ -1778,6 +1799,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(body)
 

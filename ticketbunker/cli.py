@@ -1731,7 +1731,10 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--uninstall", action="store_true")
     s.set_defaults(fn=cmd_hooks)
 
-    s = sub.add_parser("view", help="serve a read-only local ticket viewer (auto-refreshes as the database changes)")
+    s = sub.add_parser(
+        "view",
+        help="serve the local ticket viewer with guarded branch Work (auto-refreshes as data changes)",
+    )
     s.add_argument("--port", type=int, default=8377, help="localhost port (default: 8377)")
     s.add_argument("--open", action="store_true", help="open the viewer in your browser")
     s.set_defaults(fn=cmd_view)

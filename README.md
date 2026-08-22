@@ -30,6 +30,8 @@ inferences** (agent conclusions built on those facts). A reader should always be
 able to tell which is which.
 
 See [DESIGN.md](DESIGN.md) for the architecture.
+The disposable [15-ticket, two-user product loop](docs/mock-product-loop.md)
+records the current end-to-end behavior and measurements.
 
 ## Layout of a bunker
 

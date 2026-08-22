@@ -606,21 +606,29 @@ def setup(source_root: Path) -> dict[str, Any]:
     ledger = _init_ledger(source_root)
     identity = _identity(source_root, ledger)
     for branch, target in ((config_branch, config_checkout(source_root)), (data_branch, data_checkout(source_root))):
-        if (target / ".git").exists():
-            git(target, ["fetch", "--prune", "origin"], ledger, "companion_refresh")
-            git(target, ["pull", "--ff-only", "origin", branch], ledger, "companion_refresh")
-        else:
-            if not _branch_exists(source_root, remote, branch, ledger):
-                raise ProjectError("remote_branch_missing", f"The companion repository has no {branch!r} branch.")
-            _checkout_branch(
-                source_root,
-                remote,
-                branch,
-                target,
-                identity,
-                ledger,
-                sparse=target == data_checkout(source_root),
-            )
+        try:
+            if (target / ".git").exists():
+                git(target, ["fetch", "--prune", "origin"], ledger, "companion_refresh")
+                git(target, ["pull", "--ff-only", "origin", branch], ledger, "companion_refresh")
+            else:
+                if not _branch_exists(source_root, remote, branch, ledger):
+                    raise ProjectError("remote_branch_missing", f"The companion repository has no {branch!r} branch.")
+                _checkout_branch(
+                    source_root,
+                    remote,
+                    branch,
+                    target,
+                    identity,
+                    ledger,
+                    sparse=target == data_checkout(source_root),
+                )
+        except GitError as exc:
+            raise ProjectError(
+                "companion_refresh_failed",
+                f"TicketBunker could not fast-forward the local {branch!r} checkout. "
+                "Preserve or discard any local companion edits, run 'tb doctor', then retry 'tb setup'.\n"
+                f"Git said: {exc.stderr.strip() or 'companion refresh failed'}",
+            ) from exc
 
     current_index = layout.ticket_index(tickets_dir(source_root, project_key))
     if not current_index.exists():
@@ -633,12 +641,20 @@ def setup(source_root: Path) -> dict[str, Any]:
         ).strip()
         if sparse_value == "true":
             # Compatibility for data branches created before committed indexes.
-            git(
-                data_checkout(source_root),
-                ["sparse-checkout", "disable"],
-                ledger,
-                "companion_sparse",
-            )
+            try:
+                git(
+                    data_checkout(source_root),
+                    ["sparse-checkout", "disable"],
+                    ledger,
+                    "companion_sparse",
+                )
+            except GitError as exc:
+                raise ProjectError(
+                    "companion_refresh_failed",
+                    "TicketBunker could not restore the legacy full data checkout. "
+                    "Run 'tb doctor', then retry 'tb setup'.\n"
+                    f"Git said: {exc.stderr.strip() or 'sparse checkout failed'}",
+                ) from exc
 
     if not (project_config_dir(source_root, project_key) / "project.json").exists():
         raise ProjectError("project_missing", f"The companion configuration does not contain project {project_key}.")

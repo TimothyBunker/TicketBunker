@@ -83,6 +83,18 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertEqual(first["project"], "ECS")
         self.assertEqual(second["project"], "ECS")
 
+    def test_setup_translates_companion_git_failure_into_actionable_rejection(self) -> None:
+        self.initialize()
+        missing = Path(self.tmp.name) / "moved-companion.git"
+        run_git(project.config_checkout(self.source), "remote", "set-url", "origin", str(missing))
+
+        with self.assertRaises(commands.CommandRejected) as caught:
+            project.setup(self.source)
+
+        self.assertEqual(caught.exception.code, "companion_refresh_failed")
+        self.assertIn("tb doctor", str(caught.exception))
+        self.assertIn("tb setup", str(caught.exception))
+
     def test_data_publication_commits_and_pushes_companion_changes(self) -> None:
         self.initialize()
         ticket = project.tickets_dir(self.source) / "ECS-4"

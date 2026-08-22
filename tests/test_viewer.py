@@ -338,7 +338,9 @@ class ViewerTests(unittest.TestCase):
             tickets = urlopen(f"{base}/?assignee=*&label=viewer").read().decode("utf-8")
             projects = urlopen(f"{base}/projects?assignee=*").read().decode("utf-8")
             project_page = urlopen(f"{base}/project/TB?assignee=*").read().decode("utf-8")
-            ticket = urlopen(f"{base}/project/TB/ticket/TB-9").read().decode("utf-8")
+            with urlopen(f"{base}/project/TB/ticket/TB-9") as response:
+                ticket_headers = response.headers
+                ticket = response.read().decode("utf-8")
         finally:
             server.shutdown()
             server.server_close()
@@ -349,6 +351,9 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('href="/project/TB?', projects)
         self.assertIn("TB tickets", project_page)
         self.assertIn("Agent work", ticket)
+        self.assertEqual(ticket_headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(ticket_headers["X-Frame-Options"], "DENY")
+        self.assertEqual(ticket_headers["Referrer-Policy"], "no-referrer")
 
     def test_report_markup_is_escaped_before_tags_are_reintroduced(self) -> None:
         rendered = render_report("- [real] Safe `<img src=x onerror=alert(1)>`")
