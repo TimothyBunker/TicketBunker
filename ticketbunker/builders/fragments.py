@@ -346,6 +346,18 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
             lines.append(f"- **{c['author']}**{f' ({when})' if when else ''}{source}:")
             for text_line in c["text"].splitlines():
                 lines.append(f"  {text_line}")
+    activity = ticket.get("activity") or []
+    if activity:
+        lines.append("")
+        lines += ["## Mirrored tracker activity (read-only primary sources)", ""]
+        for entry in activity:
+            kind = str(entry.get("kind") or "activity").replace("-", " ").capitalize()
+            author = f" by {entry['author']}" if entry.get("author") else ""
+            when = f" ({str(entry['when'])[:10]})" if entry.get("when") else ""
+            source = f"; source: {entry['source']}" if entry.get("source") else ""
+            lines.append(f"- **{kind}{author}**{when}{source}:")
+            for text_line in str(entry.get("text") or "").splitlines():
+                lines.append(f"  {text_line}")
     metadata = ticket.get("metadata")
     if metadata:
         import json

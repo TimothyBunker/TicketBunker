@@ -338,15 +338,25 @@ observed git state (merged-back, recency — the pipeline's), never blended.
 `tb view` serves the same data as a minimal local viewer
 (`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
 per-ticket pages organized around completing one ticket. The singular page has
-an explicit **Ticket / Agent** contract. Ticket is the default view and owns the
-Jira-like issue surface: its description and optional acceptance criteria read
-as constrained rich text in the primary column, carried-over comments form its
-Activity, and every populated tracker, project, and integration field remains
-visible in one **Details** section at the bottom of the same reading column.
-Nested provider metadata is flattened into readable field paths instead of
-exposed as a JSON blob. Agent owns Agent work and never mixes those fields into
-its report surface; declared lifecycle and the persistent Branches rail appear
-there beside the observed work, not on the ticket's tracker surface.
+an explicit **Ticket / Agent** contract. Ticket is the default Jira-like issue
+surface. The header names the source project before the ticket, then presents
+the mapped status as the sole lifecycle ground truth beside labels and the
+source's updated time. Description and optional acceptance criteria read as
+constrained rich text. **Activity is mirrored and read-only**: legacy comments
+plus provider-neutral `activity` entries (`comment`, `history`, `worklog`, `log`,
+`note`, or an integration-defined kind) retain author, text, time, and source;
+the viewer has no authoring control.
+
+One **Details** section follows the reading flow. Base ticket fields and useful
+custom/source fields stay in that list. Transport IDs, provider flags, and raw
+source state move into a native Metadata disclosure; duplicated source titles,
+timestamps already promoted into the header/details, mapped status fields, and
+project ordinals are omitted. Classification is semantic (project, timestamp,
+status, ID, URL), never a GitHub/Jira/GitLab-specific view branch. Nested provider
+metadata is flattened into readable field paths instead of exposed as a JSON
+blob. Agent owns Agent work and never mixes those fields into its report surface;
+declared lifecycle and the persistent Branches rail appear there beside the
+observed work, not on the ticket's tracker surface.
 
 Agent work defaults to **Master** and provides one native report selector at the
 right of its heading: Master followed by each branch report. Master presents each

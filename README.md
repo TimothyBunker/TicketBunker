@@ -174,9 +174,11 @@ for branch in ticket.branches:
 This query API is deliberately read-only. Mutations use shared command
 envelopes—the CLI and localhost editor call the same handlers—so validation,
 Git publication, and the ledger cannot be bypassed. Optional
-`acceptance_criteria` and `metadata`
-fields preserve tracker-shaped and project-specific information in
-`ticket.json` without making the tracker authoritative.
+`acceptance_criteria`, `metadata`, and provider-neutral `activity` entries
+preserve tracker-shaped and project-specific information in `ticket.json`.
+Activity kinds such as comments, history, work logs, logs, and notes are
+mirrored from the configured source; the read-only viewer offers no parallel
+comment or note authoring path.
 
 ### GitHub Projects example
 

@@ -217,6 +217,15 @@ def normalize_issue(
         github_metadata["milestone"] = {"title": milestone.get("title"), "url": milestone.get("html_url")}
     if project:
         github_metadata["project"] = project
+    metadata = {
+        "tracker": "github",
+        "source_url": issue.get("html_url"),
+        "source_created": issue.get("created_at"),
+        "source_updated": issue.get("updated_at"),
+        "github": github_metadata,
+    }
+    if project:
+        metadata["project"] = {"name": project.get("title"), "url": project.get("url")}
     return {
         "id": resolved_id,
         "key": resolved_id,
@@ -230,11 +239,7 @@ def normalize_issue(
         "people_of_interest": assignees[1:],
         "references": [],
         "comments": carried_comments,
-        "metadata": {
-            "tracker": "github",
-            "source_url": issue.get("html_url"),
-            "github": github_metadata,
-        },
+        "metadata": metadata,
     }
 
 

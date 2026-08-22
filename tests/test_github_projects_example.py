@@ -50,6 +50,9 @@ class GitHubProjectsExampleTests(unittest.TestCase):
         self.assertEqual(ticket["assignee"], "TimothyBunker")
         self.assertEqual(ticket["people_of_interest"], ["Ada"])
         self.assertEqual(ticket["comments"][0]["author"], "Ada")
+        self.assertEqual(ticket["metadata"]["project"]["name"], "@TimothyBunker's ECS")
+        self.assertEqual(ticket["metadata"]["source_created"], "2026-08-20T12:00:00Z")
+        self.assertEqual(ticket["metadata"]["source_updated"], "2026-08-21T12:00:00Z")
         self.assertEqual(ticket["metadata"]["github"]["project"]["number"], 8)
 
     def test_issue_reference_forms_are_direct(self) -> None:

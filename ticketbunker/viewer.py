@@ -61,7 +61,8 @@ main { max-width: 1320px; margin: 0 auto; padding: 30px 34px 72px; }
 .crumbs { color: var(--muted); font-size: 12px; margin: 0 0 17px; }
 .crumbs a { color: inherit; }
 .ticket-head { padding-bottom: 18px; }
-.ticket-key { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.ticket-key { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.ticket-project { color: var(--body); }
 h1, h2, h3 { color: var(--fg); }
 h1 { font-size: 26px; line-height: 1.25; letter-spacing: -.018em; margin: 5px 0 15px; max-width: 920px; }
 h2 { font-size: 16px; line-height: 1.3; margin: 0 0 14px; }
@@ -69,6 +70,8 @@ h3 { font-size: 13px; line-height: 1.35; margin: 0 0 8px; }
 p { margin: 0 0 12px; }
 .head-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; }
 .head-facts div { display: flex; align-items: center; gap: 7px; }
+.head-badges { flex-wrap: wrap; }
+.head-updated { color: var(--muted); font-size: 12px; }
 .badge {
   display: inline-flex;
   align-items: center;
@@ -82,6 +85,7 @@ p { margin: 0 0 12px; }
   line-height: 1.25;
 }
 .badge.status { color: #0055cc; background: var(--accent-soft); }
+.badge.label { font-weight: 500; }
 .badge.done, .badge.closed, .badge.verified, .badge.merged { color: var(--success); background: var(--success-soft); }
 .badge.stale, .badge.open { color: var(--warning); background: var(--warning-soft); }
 .badge.unverified, .badge.missing { color: var(--danger); background: var(--danger-soft); }
@@ -163,7 +167,8 @@ p { margin: 0 0 12px; }
 .report-state-trail { padding-top: 2px; border-top: 1px solid var(--line); }
 .comments { border-top: 1px solid var(--line); }
 .comment { padding: 14px 2px; border-bottom: 1px solid var(--line); }
-.comment-head { margin-bottom: 5px; color: var(--fg); font-weight: 650; }
+.comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin-bottom: 5px; color: var(--fg); font-weight: 650; }
+.activity-kind { color: var(--muted); font-size: 12px; font-weight: 600; }
 .comment-meta { margin-left: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .comment-text { color: var(--body); }
 .lifecycle { margin: 0; padding: 0; list-style: none; }
@@ -176,6 +181,8 @@ p { margin: 0 0 12px; }
 .branch-name { min-width: 0; color: var(--fg); font-weight: 650; }
 .branch-meta { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
 .issue-details { margin: 6px 0 34px; padding-top: 28px; border-top: 1px solid var(--line); }
+.details-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.details-heading h2 { margin: 0; }
 .issue-details dl {
   display: grid;
   grid-template-columns: 144px minmax(0, 1fr);
@@ -186,6 +193,31 @@ p { margin: 0 0 12px; }
 }
 .issue-details dt { color: var(--muted); }
 .issue-details dd { min-width: 0; margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.metadata-disclosure { position: relative; flex: 0 0 auto; }
+.metadata-disclosure > summary {
+  min-height: 44px;
+  margin: -11px 0;
+  padding: 11px 2px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.metadata-menu {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(480px, calc(100vw - 48px));
+  max-height: min(620px, 70vh);
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(23, 43, 77, .14);
+}
+.metadata-menu dl { grid-template-columns: 170px minmax(0, 1fr); padding: 0; }
 .field-values { display: flex; flex-wrap: wrap; gap: 5px; }
 .field-token {
   display: inline-block;
@@ -239,6 +271,8 @@ li { margin: 3px 0; }
   .trail-body { margin-left: 0; }
   .trail-report-head { grid-template-columns: 1fr; gap: 6px; }
   .trail-report-state { justify-self: start; }
+  .metadata-menu { width: calc(100vw - 36px); }
+  .metadata-menu dl { grid-template-columns: 112px minmax(0, 1fr); }
   .ticket-link { grid-template-columns: 74px minmax(0, 1fr); }
   .ticket-link-meta { grid-column: 2; text-align: left; }
 }
@@ -680,27 +714,103 @@ def _agent_work(ticket: TicketSnapshot) -> str:
     )
 
 
-def _comments(ticket: TicketSnapshot) -> str:
+def _ticket_metadata(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = data.get("metadata")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _provider_metadata(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    metadata = _ticket_metadata(data)
+    tracker = str(metadata.get("tracker") or "").casefold()
+    for key, value in metadata.items():
+        if str(key).casefold() == tracker and isinstance(value, Mapping):
+            return value
+    for key, value in metadata.items():
+        if key not in {"project"} and isinstance(value, Mapping):
+            return value
+    return {}
+
+
+def _source_timestamp(data: Mapping[str, Any], name: str) -> str:
+    metadata = _ticket_metadata(data)
+    provider = _provider_metadata(data)
+    value = metadata.get(f"source_{name}") or provider.get(f"{name}_at")
+    return str(value or data.get(name) or "")
+
+
+def _project_context(data: Mapping[str, Any]) -> tuple[str, str]:
+    metadata = _ticket_metadata(data)
+    provider = _provider_metadata(data)
+    candidates = (data.get("project"), metadata.get("project"), provider.get("project"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip(), ""
+        if isinstance(candidate, Mapping):
+            name = str(candidate.get("name") or candidate.get("title") or "").strip()
+            if name:
+                return name, str(candidate.get("url") or "")
+    name = str(data.get("project_name") or "").strip()
+    return name, ""
+
+
+_ACTIVITY_LABELS = {
+    "comment": "Comment",
+    "history": "History",
+    "log": "Log",
+    "note": "Note",
+    "worklog": "Work log",
+}
+
+
+def _activity(ticket: TicketSnapshot) -> str:
+    entries: list[dict[str, Any]] = []
     comments = ticket.data.get("comments") or []
-    if not isinstance(comments, list) or not comments:
-        return ""
+    if isinstance(comments, list):
+        for comment in comments:
+            if isinstance(comment, Mapping):
+                entries.append({**comment, "kind": "comment"})
+    activity = ticket.data.get("activity") or []
+    if isinstance(activity, list):
+        entries.extend(dict(item) for item in activity if isinstance(item, Mapping))
+    for key, kind in (("work_history", "history"), ("worklogs", "worklog"), ("logs", "log"), ("notes", "note")):
+        values = ticket.data.get(key) or []
+        if isinstance(values, list):
+            for value in values:
+                if isinstance(value, Mapping):
+                    entries.append({"kind": kind, **value})
+                elif isinstance(value, str) and value.strip():
+                    entries.append({"kind": kind, "text": value})
+    entries.sort(key=lambda item: str(item.get("when") or item.get("timestamp") or ""), reverse=True)
+
     rows = []
-    for comment in comments:
-        if not isinstance(comment, dict):
+    for entry in entries:
+        text = str(
+            entry.get("text")
+            or entry.get("body")
+            or entry.get("message")
+            or entry.get("summary")
+            or entry.get("action")
+            or ""
+        ).strip()
+        if not text:
             continue
-        author = html.escape(str(comment.get("author") or ""))
-        when = html.escape(_date(comment.get("when")))
-        source = str(comment.get("source") or "")
+        kind = str(entry.get("kind") or "activity").casefold()
+        label = _ACTIVITY_LABELS.get(kind, kind.replace("-", " ").capitalize())
+        author = html.escape(str(entry.get("author") or entry.get("actor") or ""))
+        when = html.escape(_datetime(entry.get("when") or entry.get("timestamp")))
+        source = str(entry.get("source") or "")
         source_html = ""
         if source.startswith(("https://", "http://")):
             source_html = (
-                f' · <a href="{html.escape(source, quote=True)}" rel="noreferrer">source</a>'
+                f' · <a href="{html.escape(source, quote=True)}" rel="noreferrer">Open source</a>'
             )
+        author_html = f"<strong>{author}</strong>" if author else ""
         rows.append(
-            f'<article class="comment"><div class="comment-head">{author}'
+            f'<article class="comment"><div class="comment-head">'
+            f'<span class="activity-kind">{html.escape(label)}</span>{author_html}'
             f'<span class="comment-meta">{when}{source_html}</span></div>'
             f'<div class="comment-text rich-text">'
-            f'{render_ticket_text(str(comment.get("text") or ""))}</div></article>'
+            f'{render_ticket_text(text)}</div></article>'
         )
     if not rows:
         return ""
@@ -766,6 +876,7 @@ _FIELD_LABELS = {
     "references": "Linked tickets",
     "repo": "Repository",
     "reporter": "Reporter",
+    "source_repository": "Source repository",
     "source_url": "Source",
     "type": "Type",
     "updated": "Updated",
@@ -789,6 +900,35 @@ def _flatten_value(path: tuple[str, ...], value: Any) -> list[tuple[tuple[str, .
     if value in (None, "") or value == [] or value == ():
         return []
     return [(path, value)]
+
+
+def _field_role(path: tuple[str, ...]) -> str:
+    """Classify source fields by meaning, independent of any provider name."""
+    lowered = tuple(part.casefold() for part in path)
+    leaf = lowered[-1]
+    in_project = "project" in lowered[:-1]
+    if leaf in {"source_title", "source_created", "source_updated", "created_at", "updated_at"}:
+        return "hidden"
+    if in_project and leaf in {"name", "number", "title", "url"}:
+        return "hidden"
+    if in_project and "fields" in lowered and leaf == "status":
+        return "hidden"
+    if leaf.endswith("_id") or leaf in {
+        "author_association", "closed_at", "issue_number", "issue_state", "locked",
+        "node_id", "state_reason",
+    }:
+        return "metadata"
+    if in_project and leaf == "owner":
+        return "metadata"
+    if len(lowered) > 1 and leaf in {"state", "status"}:
+        return "metadata"
+    return "detail"
+
+
+def _display_path(path: tuple[str, ...]) -> tuple[str, ...]:
+    if len(path) > 1 and path[-1].casefold() == "repository":
+        return ("source_repository",)
+    return path
 
 
 def _field_value(path: tuple[str, ...], value: Any) -> str:
@@ -833,15 +973,17 @@ def _details(ticket: TicketSnapshot) -> str:
     data = ticket.data
     fields: list[tuple[tuple[str, ...], Any]] = []
     ordered = (
-        "type", "assignee", "reporter", "priority", "labels", "created", "updated",
-        "people_of_interest", "references",
+        "type", "assignee", "reporter", "priority", "created", "people_of_interest",
+        "references",
     )
     for key in ordered:
-        fields.extend(_flatten_value((key,), data.get(key)))
+        value = _source_timestamp(data, "created") if key == "created" else data.get(key)
+        fields.extend(_flatten_value((key,), value))
 
     reserved = {
         "id", "key", "title", "description", "status", "acceptance_criteria",
-        "comments", "metadata", "assigned_branches", *ordered,
+        "activity", "comments", "labels", "logs", "metadata", "notes", "updated",
+        "work_history", "worklogs", "assigned_branches", *ordered,
     }
     for key in sorted((key for key in data if key not in reserved), key=str.casefold):
         fields.extend(_flatten_value((str(key),), data[key]))
@@ -849,18 +991,45 @@ def _details(ticket: TicketSnapshot) -> str:
     metadata = data.get("metadata")
     if isinstance(metadata, Mapping):
         preferred = [key for key in ("tracker", "source_url") if key in metadata]
-        remaining = sorted((key for key in metadata if key not in preferred), key=str.casefold)
+        remaining = sorted(
+            (
+                key for key in metadata
+                if key not in {*preferred, "project", "source_created", "source_updated"}
+            ),
+            key=str.casefold,
+        )
         for key in (*preferred, *remaining):
             metadata_fields.extend(_flatten_value((str(key),), metadata[key]))
 
-    all_fields = fields + metadata_fields
-    rows = "".join(
-        f"<dt>{html.escape(_field_label(path))}</dt><dd>{_field_value(path, value)}</dd>"
-        for path, value in all_fields
-    )
-    if not rows:
+    details: list[tuple[tuple[str, ...], Any]] = list(fields)
+    technical: list[tuple[tuple[str, ...], Any]] = []
+    for path, value in metadata_fields:
+        role = _field_role(path)
+        if role == "detail":
+            details.append((_display_path(path), value))
+        elif role == "metadata":
+            technical.append((path, value))
+
+    def rows(selected: list[tuple[tuple[str, ...], Any]]) -> str:
+        return "".join(
+            f"<dt>{html.escape(_field_label(path))}</dt><dd>{_field_value(path, value)}</dd>"
+            for path, value in selected
+        )
+
+    detail_rows = rows(details)
+    metadata_rows = rows(technical)
+    if not detail_rows and not metadata_rows:
         return ""
-    return f'<section class="issue-details"><h2>Details</h2><dl>{rows}</dl></section>'
+    disclosure = ""
+    if metadata_rows:
+        disclosure = (
+            '<details class="metadata-disclosure"><summary>Metadata</summary>'
+            f'<div class="metadata-menu"><dl>{metadata_rows}</dl></div></details>'
+        )
+    return (
+        '<section class="issue-details"><div class="details-heading"><h2>Details</h2>'
+        f'{disclosure}</div><dl>{detail_rows}</dl></section>'
+    )
 
 
 def _validation(ticket: TicketSnapshot) -> str:
@@ -915,10 +1084,30 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
     if status:
         kind = "done" if status in {"done", "closed"} else "status"
         head_badges.append(_badge(_status_label(status), kind))
+    labels = ticket.data.get("labels") or []
+    if isinstance(labels, list):
+        head_badges.extend(_badge(str(label), "label") for label in labels if str(label).strip())
     facts = []
     if head_badges:
         facts.append(f'<div class="head-badges">{"".join(head_badges)}</div>')
+    updated = _source_timestamp(ticket.data, "updated")
+    if updated:
+        facts.append(f'<span class="head-updated">Updated {html.escape(_datetime(updated))}</span>')
     head_facts = f'<div class="head-facts">{"".join(facts)}</div>' if facts else ""
+
+    project_name, project_url = _project_context(ticket.data)
+    project_html = ""
+    if project_name:
+        if project_url.startswith(("https://", "http://")):
+            project_html = (
+                f'<a class="ticket-project" href="{html.escape(project_url, quote=True)}" '
+                f'rel="noreferrer">{html.escape(project_name)}</a><span aria-hidden="true">/</span>'
+            )
+        else:
+            project_html = (
+                f'<span class="ticket-project">{html.escape(project_name)}</span>'
+                '<span aria-hidden="true">/</span>'
+            )
 
     ticket_sections = [
         '<section class="section"><h2>Description</h2>'
@@ -932,9 +1121,9 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         ticket_sections.append(
             f'<section class="section"><h2>Acceptance criteria</h2><ul class="criteria">{items}</ul></section>'
         )
-    comments = _comments(ticket)
-    if comments:
-        ticket_sections.append(comments)
+    activity = _activity(ticket)
+    if activity:
+        ticket_sections.append(activity)
     details = _details(ticket)
 
     tabs = (
@@ -959,7 +1148,7 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         '<div class="crumbs"><a href="/">Tickets</a></div>'
         f'{_validation(ticket)}'
         '<header class="ticket-head">'
-        f'<div class="ticket-key">{html.escape(ticket.id)}</div>'
+        f'<div class="ticket-key">{project_html}<span class="mono">{html.escape(ticket.id)}</span></div>'
         f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}</header>'
         f'{tabs}{panels}'
     )

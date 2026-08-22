@@ -43,10 +43,46 @@ class ViewerTests(unittest.TestCase):
                             "text": "Please check `viewer.py` first.",
                         }
                     ],
+                    "activity": [
+                        {
+                            "kind": "history",
+                            "author": "Grace",
+                            "when": "2026-08-12T09:30:00+00:00",
+                            "text": "Moved the ticket from To do to In progress.",
+                        },
+                        {
+                            "kind": "worklog",
+                            "author": "Ada",
+                            "when": "2026-08-12T09:15:00+00:00",
+                            "text": "Investigated the viewer layout.",
+                        },
+                        {
+                            "kind": "note",
+                            "text": "Mirrored from the source; editing is disabled here.",
+                        },
+                    ],
                     "metadata": {
-                        "tracker": "Jira",
-                        "source_url": "https://jira.example/TB-9",
-                        "github": {"project": {"number": 8}},
+                        "tracker": "github",
+                        "source_url": "https://github.example/acme/repo/issues/9",
+                        "github": {
+                            "author_association": "OWNER",
+                            "created_at": "2026-08-10T08:00:00+00:00",
+                            "issue_node_id": "NODE_9",
+                            "issue_number": 9,
+                            "issue_state": "open",
+                            "locked": False,
+                            "repository": "acme/repo",
+                            "source_title": "Duplicate source title",
+                            "updated_at": "2026-08-12T08:15:00+00:00",
+                            "project": {
+                                "fields": {"Charge code": "C100", "Status": "In progress"},
+                                "item_id": "ITEM_9",
+                                "number": 77,
+                                "owner": "acme",
+                                "title": "Nine Board",
+                                "url": "https://github.example/acme/projects/77",
+                            },
+                        },
                     },
                 }
             ),
@@ -121,6 +157,16 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('role="tablist" aria-label="Ticket view"', page)
         self.assertIn('data-view-tab="ticket">Ticket</button>', page)
         self.assertIn('data-view-tab="agent">Agent</button>', page)
+        self.assertIn(
+            '<a class="ticket-project" href="https://github.example/acme/projects/77" '
+            'rel="noreferrer">Nine Board</a>',
+            page,
+        )
+        self.assertLess(page.index("Nine Board"), page.index("A single, complete ticket"))
+        self.assertIn('<span class="badge status">In progress</span>', page)
+        self.assertIn('<span class="badge label">viewer</span>', page)
+        self.assertIn('<span class="badge label">jira</span>', page)
+        self.assertIn('<span class="head-updated">Updated 12 Aug 2026, 08:15</span>', page)
         self.assertIn('id="ticket-panel" role="tabpanel"', page)
         self.assertIn('data-view-panel="ticket"><article class="ticket-main ticket-page">', page)
         self.assertIn('id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" data-view-panel="agent" hidden', page)
@@ -147,14 +193,14 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("Details", page)
         ticket_panel = page.split('id="ticket-panel"', 1)[1].split('id="agent-panel"', 1)[0]
         agent_panel = page.split('id="agent-panel"', 1)[1]
-        self.assertIn('<section class="issue-details"><h2>Details</h2>', ticket_panel)
+        self.assertIn('<section class="issue-details"><div class="details-heading"><h2>Details</h2>', ticket_panel)
         self.assertEqual(ticket_panel.count('<section class="issue-details">'), 1)
         self.assertNotIn("More fields", ticket_panel)
         self.assertNotIn('class="ticket-rail', ticket_panel)
         self.assertLess(ticket_panel.index("Description"), ticket_panel.index("Activity"))
         self.assertLess(ticket_panel.index("Activity"), ticket_panel.index("Details"))
         self.assertIn('<dt>Type</dt><dd><span>Task</span></dd>', ticket_panel)
-        self.assertIn('<dt>Created</dt><dd><span>11 Aug 2026, 09:30</span></dd>', ticket_panel)
+        self.assertIn('<dt>Created</dt><dd><span>10 Aug 2026, 08:00</span></dd>', ticket_panel)
         self.assertNotIn('<details class="details">', ticket_panel)
         self.assertNotIn("Lifecycle", ticket_panel)
         self.assertNotIn("Branches", ticket_panel)
@@ -162,11 +208,24 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("Branches", agent_panel)
         self.assertIn("Activity", ticket_panel)
         self.assertIn("Please check <code>viewer.py</code> first.", ticket_panel)
-        self.assertIn('<span class="field-token">viewer</span>', ticket_panel)
+        self.assertIn('<span class="activity-kind">Comment</span>', ticket_panel)
+        self.assertIn('<span class="activity-kind">History</span>', ticket_panel)
+        self.assertIn('<span class="activity-kind">Work log</span>', ticket_panel)
+        self.assertIn('<span class="activity-kind">Note</span>', ticket_panel)
+        self.assertNotIn('<span class="field-token">viewer</span>', ticket_panel)
         self.assertIn('<a class="field-token mono" href="/ticket/TB-8">TB-8</a>', ticket_panel)
-        self.assertIn("GitHub · Project · Number", ticket_panel)
-        self.assertIn('<dt>Tracker</dt><dd><span>Jira</span></dd>', ticket_panel)
-        self.assertIn('href="https://jira.example/TB-9" rel="noreferrer">Open source</a>', ticket_panel)
+        self.assertIn('<dt>Tracker</dt><dd><span>GitHub</span></dd>', ticket_panel)
+        self.assertIn('<dt>Source repository</dt><dd><span>acme/repo</span></dd>', ticket_panel)
+        self.assertIn('<dt>GitHub · Project · Fields · Charge code</dt><dd><span>C100</span></dd>', ticket_panel)
+        self.assertIn('href="https://github.example/acme/repo/issues/9" rel="noreferrer">Open source</a>', ticket_panel)
+        self.assertNotIn("GitHub · Project · Number", ticket_panel)
+        self.assertNotIn("GitHub · Source title", ticket_panel)
+        self.assertNotIn("GitHub · Updated at", ticket_panel)
+        self.assertNotIn("GitHub · Project · Fields · Status", ticket_panel)
+        self.assertIn('<details class="metadata-disclosure"><summary>Metadata</summary>', ticket_panel)
+        self.assertIn("GitHub · Issue node ID", ticket_panel)
+        self.assertIn("GitHub · Locked", ticket_panel)
+        self.assertIn("GitHub · Project · Item ID", ticket_panel)
         self.assertIn('aria-current="step"', page)
         self.assertIn('<link rel="icon" href="data:,">', page)
         self.assertIn('href="#report-grace__TB-9-a-very-long-branch-name-that-must-wrap"', page)

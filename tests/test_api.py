@@ -181,6 +181,24 @@ class TicketDatabaseTests(unittest.TestCase):
                 {"id": "TB-7", "key": "seven", "comments": [{"author": "Ada", "text": "Hi", "when": 7}]},
             ),
         )
+        self.assertIn(
+            "activity 0: requires non-empty 'kind' and 'text' fields",
+            types.validate(
+                "ticket",
+                {"id": "TB-7", "key": "seven", "activity": [{"kind": "history"}]},
+            ),
+        )
+        self.assertEqual(
+            types.validate(
+                "ticket",
+                {
+                    "id": "TB-7",
+                    "key": "seven",
+                    "activity": [{"kind": "note", "text": "Mirrored note"}],
+                },
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

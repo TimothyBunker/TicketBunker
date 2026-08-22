@@ -13,7 +13,8 @@ python3 examples/github_projects/import_issue.py \
 
 For a public issue without Project metadata, the token is optional. The
 adapter preserves the issue URL, source timestamps, labels, assignment,
-milestone, comments, and Project identity/status in `ticket.json`; TicketBunker
+milestone, comments, and Project identity/status in provider-neutral metadata
+plus the raw GitHub audit fields in `ticket.json`; TicketBunker
 maps only lifecycle (`Todo`, `In Progress`, `Done`) into its own status.
 
 The JSON boundary is intentionally boring. A different tracker only needs to

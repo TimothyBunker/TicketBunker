@@ -41,6 +41,15 @@ class TicketJsonIntakeTests(unittest.TestCase):
                     "source": "https://github.com/TimothyBunker/coal/issues/4#issuecomment-1",
                 }
             ],
+            "activity": [
+                {
+                    "kind": "history",
+                    "author": "GitHub",
+                    "text": "Status changed to In progress.",
+                    "when": "2026-08-21T12:30:00Z",
+                    "source": "https://github.com/TimothyBunker/coal/issues/4",
+                }
+            ],
             "metadata": {
                 "tracker": "github",
                 "source_url": "https://github.com/TimothyBunker/coal/issues/4",
@@ -63,6 +72,8 @@ class TicketJsonIntakeTests(unittest.TestCase):
         context = (layout.paths(bunker)["context"] / "20_ticket.md").read_text(encoding="utf-8")
         self.assertIn("Position updates are deterministic", context)
         self.assertIn("issuecomment-1", context)
+        self.assertIn("Mirrored tracker activity", context)
+        self.assertIn("Status changed to In progress", context)
         self.assertIn('"tracker": "github"', context)
         ledger = layout.paths(bunker)["ledger"].read_text(encoding="utf-8")
         self.assertIn('"intake": "json"', ledger)

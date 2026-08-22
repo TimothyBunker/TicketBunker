@@ -192,6 +192,26 @@ def _validate_ticket(payload: dict) -> list[str]:
                 for field in ("when", "source"):
                     if c.get(field) is not None and not isinstance(c[field], str):
                         errors.append(f"comment {i}: optional '{field}' must be a string")
+    activity = payload.get("activity")
+    if activity is not None:
+        if not isinstance(activity, list):
+            errors.append("'activity' must be a list")
+        else:
+            for i, entry in enumerate(activity):
+                if (
+                    not isinstance(entry, dict)
+                    or not isinstance(entry.get("kind"), str)
+                    or not entry["kind"].strip()
+                    or not isinstance(entry.get("text"), str)
+                    or not entry["text"].strip()
+                ):
+                    errors.append(
+                        f"activity {i}: requires non-empty 'kind' and 'text' fields"
+                    )
+                    continue
+                for field in ("author", "when", "source"):
+                    if entry.get(field) is not None and not isinstance(entry[field], str):
+                        errors.append(f"activity {i}: optional '{field}' must be a string")
     refs = payload.get("references")
     if refs is not None:
         if not isinstance(refs, list):
