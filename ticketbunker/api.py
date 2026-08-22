@@ -13,11 +13,12 @@ module read-only makes that boundary explicit for API users and the viewer.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import config, layout, types
+from . import config, layout, project, types
 from .builders import master as master_mod
 from .processors.anchorcheck import predates, verified_stamp
 
@@ -203,6 +204,56 @@ class TicketSummary:
     branch_count: int
     report_count: int
     last_development: str
+    reporter: str = ""
+    labels: tuple[str, ...] = ()
+    project: str = ""
+    project_name: str = ""
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class ProjectSummary:
+    """One project in the companion repository's ticket catalog."""
+
+    key: str
+    name: str
+    source_remote: str
+    ticket_count: int
+    active_ticket_count: int
+
+
+@dataclass(frozen=True)
+class TicketQuery:
+    """Provider-neutral filters for a page of ticket references."""
+
+    search: str = ""
+    status: str = "active"
+    assignee: str = ""
+    reporter: str = ""
+    label: str = ""
+    project: str = ""
+    page: int = 1
+    per_page: int = 20
+
+
+@dataclass(frozen=True)
+class TicketPage:
+    """A bounded result page; ticket bodies and reports are not composed."""
+
+    tickets: tuple[TicketSummary, ...]
+    total: int
+    page: int
+    per_page: int
+    page_count: int
+
+
+@dataclass(frozen=True)
+class TicketFacets:
+    statuses: tuple[str, ...]
+    assignees: tuple[str, ...]
+    reporters: tuple[str, ...]
+    labels: tuple[str, ...]
+    projects: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -243,9 +294,18 @@ class TicketDatabase:
     immediately visible.
     """
 
-    def __init__(self, project_root: Path | str):
+    def __init__(self, project_root: Path | str, project_key: str | None = None):
         self.project_root = Path(project_root).resolve()
-        if not layout.bunkers_dir(self.project_root).is_dir():
+        locator = project.load_locator(self.project_root)
+        if project_key is not None and not project.PROJECT_KEY_RE.fullmatch(project_key):
+            raise ValueError(f"invalid project key: {project_key!r}")
+        if locator is not None:
+            self.project_key = project_key or str(locator.get("project") or "")
+            self.bunkers = project.tickets_dir(self.project_root, self.project_key)
+        else:
+            self.project_key = project_key or ""
+            self.bunkers = layout.bunkers_dir(self.project_root)
+        if not self.bunkers.is_dir():
             raise FileNotFoundError(f"no {layout.TB_DIR}/ database under {self.project_root}")
 
     @classmethod
@@ -257,7 +317,7 @@ class TicketDatabase:
 
     def ticket_ids(self) -> tuple[str, ...]:
         ids = []
-        for bunker in layout.ticket_dirs(layout.bunkers_dir(self.project_root)):
+        for bunker in layout.ticket_dirs(self.bunkers):
             ticket_id = _read_json(layout.paths(bunker)["ticket"]).get("id")
             if isinstance(ticket_id, str) and ticket_id:
                 ids.append(ticket_id)
@@ -282,6 +342,15 @@ class TicketDatabase:
                     branch_count=len(ticket.branches),
                     report_count=len(ticket.reports),
                     last_development=last_development,
+                    reporter=str(ticket.data.get("reporter") or ""),
+                    labels=tuple(
+                        str(value)
+                        for value in ticket.data.get("labels", [])
+                        if isinstance(value, (str, int, float)) and str(value).strip()
+                    ) if isinstance(ticket.data.get("labels"), list) else (),
+                    project=self.project_key,
+                    project_name=self.project_key,
+                    description=ticket.description,
                 )
             )
         return tuple(summaries)
@@ -289,7 +358,11 @@ class TicketDatabase:
     def get_ticket(self, ticket_id: str) -> TicketSnapshot:
         if not config.validate_ticket_id(ticket_id):
             raise KeyError(ticket_id)
-        bunker = layout.bunker_path(self.project_root, ticket_id)
+        bunker = (
+            layout.companion_bunker_path(self.bunkers, ticket_id)
+            if project.load_locator(self.project_root) is not None
+            else layout.bunker_path(self.project_root, ticket_id)
+        )
         paths = layout.paths(bunker)
         data = _read_json(paths["ticket"])
         if data.get("id") != ticket_id:
@@ -420,12 +493,262 @@ class TicketDatabase:
         )
 
 
+_ACTIVE_STATUSES = frozenset({"backlog", "open", "todo", "in-progress", "in-review"})
+_STATUS_ORDER = {
+    "backlog": 0,
+    "open": 1,
+    "todo": 2,
+    "in-progress": 3,
+    "in-review": 4,
+    "done": 5,
+    "closed": 6,
+}
+
+
+def _normalized_status(value: str) -> str:
+    return value.strip().casefold().replace("_", "-").replace(" ", "-")
+
+
+def _string_values(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        str(item).strip()
+        for item in value
+        if isinstance(item, (str, int, float)) and str(item).strip()
+    )
+
+
+class TicketCatalog:
+    """Query lightweight ticket references across a companion repository.
+
+    Catalog calls read ``ticket.json`` plus small mechanical counters only.
+    They never compose report bodies or copy/claim a bunker, so a rendered
+    page contains only the bounded result slice requested by the caller.
+    """
+
+    def __init__(self, source_root: Path | str):
+        self.source_root = Path(source_root).resolve()
+        self.locator = project.load_locator(self.source_root)
+        if self.locator is not None:
+            data = project.data_checkout(self.source_root)
+            if not data.is_dir():
+                raise FileNotFoundError(
+                    "local companion data is missing; run 'tb setup' and retry"
+                )
+        elif not layout.bunkers_dir(self.source_root).is_dir():
+            raise FileNotFoundError(f"no {layout.TB_DIR}/ database under {self.source_root}")
+
+    @property
+    def current_project(self) -> str:
+        if self.locator is not None:
+            return str(self.locator.get("project") or "")
+        tickets = layout.ticket_dirs(layout.bunkers_dir(self.source_root))
+        prefixes = {
+            str(_read_json(layout.paths(path)["ticket"]).get("id") or "").split("-", 1)[0]
+            for path in tickets
+        }
+        prefixes.discard("")
+        return next(iter(prefixes)) if len(prefixes) == 1 else self.source_root.name
+
+    def project_keys(self) -> tuple[str, ...]:
+        if self.locator is None:
+            return (self.current_project,)
+        keys: set[str] = set()
+        for root in (
+            project.config_projects_dir(self.source_root),
+            project.data_projects_dir(self.source_root),
+        ):
+            if root.is_dir():
+                keys.update(
+                    path.name
+                    for path in root.iterdir()
+                    if path.is_dir() and project.PROJECT_KEY_RE.fullmatch(path.name)
+                )
+        return tuple(sorted(keys, key=str.casefold))
+
+    def _tickets_dir(self, project_key: str) -> Path:
+        if project_key not in self.project_keys():
+            raise KeyError(project_key)
+        if self.locator is not None:
+            return project.tickets_dir(self.source_root, project_key)
+        return layout.bunkers_dir(self.source_root)
+
+    def _project_document(self, project_key: str) -> dict[str, Any]:
+        if self.locator is None:
+            return {"key": project_key, "name": project_key, "source_remote": ""}
+        return _read_json(project.project_config_dir(self.source_root, project_key) / "project.json")
+
+    def list_tickets(self, project_key: str = "") -> tuple[TicketSummary, ...]:
+        """Return summary references without constructing ``TicketSnapshot`` objects."""
+        keys = (project_key,) if project_key else self.project_keys()
+        summaries: list[TicketSummary] = []
+        for key in keys:
+            tickets_dir = self._tickets_dir(key)
+            project_doc = self._project_document(key)
+            project_name = str(project_doc.get("name") or key)
+            for bunker in layout.ticket_dirs(tickets_dir):
+                paths = layout.paths(bunker)
+                data = _read_json(paths["ticket"])
+                ticket_id = str(data.get("id") or "")
+                if not ticket_id:
+                    continue
+                resolution = _read_json(paths["branch_resolution"])
+                branch_names = {
+                    str(value)
+                    for field in ("branches", "assigned_missing")
+                    for value in resolution.get(field, [])
+                    if isinstance(value, str) and value
+                }
+                if not branch_names:
+                    branch_names.update(_string_values(data.get("assigned_branches")))
+                reports = paths["children"]
+                report_count = len(tuple(reports.glob("*.md"))) if reports.is_dir() else 0
+                author_per = _read_json(paths["authorship"]).get("per_branch", {})
+                development = ""
+                if isinstance(author_per, dict):
+                    development = max(
+                        (
+                            str(value.get("recency_of_development") or "")
+                            for value in author_per.values()
+                            if isinstance(value, dict)
+                        ),
+                        default="",
+                    )
+                summaries.append(
+                    TicketSummary(
+                        id=ticket_id,
+                        title=str(data.get("title") or ""),
+                        status=str(data.get("status") or ""),
+                        type=str(data.get("type") or ""),
+                        priority=str(data.get("priority") or ""),
+                        assignee=str(data.get("assignee") or ""),
+                        updated=str(data.get("updated") or ""),
+                        branch_count=len(branch_names),
+                        report_count=report_count,
+                        last_development=development,
+                        reporter=str(data.get("reporter") or ""),
+                        labels=_string_values(data.get("labels")),
+                        project=key,
+                        project_name=project_name,
+                        description=str(data.get("description") or ""),
+                    )
+                )
+        return tuple(summaries)
+
+    @staticmethod
+    def _matches(ticket: TicketSummary, query: TicketQuery) -> bool:
+        status = _normalized_status(ticket.status)
+        requested_status = _normalized_status(query.status)
+        if requested_status in {"", "active"}:
+            if status not in _ACTIVE_STATUSES:
+                return False
+        elif requested_status != "all" and status != requested_status:
+            return False
+        if query.project and ticket.project.casefold() != query.project.casefold():
+            return False
+        if query.assignee and query.assignee != "*" and ticket.assignee.casefold() != query.assignee.casefold():
+            return False
+        if query.reporter and ticket.reporter.casefold() != query.reporter.casefold():
+            return False
+        if query.label and query.label.casefold() not in {value.casefold() for value in ticket.labels}:
+            return False
+        needle = query.search.strip().casefold()
+        if needle:
+            haystack = "\n".join(
+                (
+                    ticket.id,
+                    ticket.title,
+                    ticket.description,
+                    ticket.project,
+                    ticket.project_name,
+                    ticket.assignee,
+                    ticket.reporter,
+                    *ticket.labels,
+                )
+            ).casefold()
+            if needle not in haystack:
+                return False
+        return True
+
+    def _filtered(self, query: TicketQuery) -> list[TicketSummary]:
+        selected = [ticket for ticket in self.list_tickets(query.project) if self._matches(ticket, query)]
+        selected.sort(key=lambda ticket: ticket.id.casefold())
+        selected.sort(key=lambda ticket: ticket.updated, reverse=True)
+        selected.sort(
+            key=lambda ticket: _STATUS_ORDER.get(_normalized_status(ticket.status), len(_STATUS_ORDER))
+        )
+        return selected
+
+    def query(self, query: TicketQuery) -> TicketPage:
+        selected = self._filtered(query)
+        per_page = min(100, max(1, query.per_page))
+        page_count = max(1, math.ceil(len(selected) / per_page))
+        page = min(page_count, max(1, query.page))
+        start = (page - 1) * per_page
+        return TicketPage(
+            tickets=tuple(selected[start:start + per_page]),
+            total=len(selected),
+            page=page,
+            per_page=per_page,
+            page_count=page_count,
+        )
+
+    def facets(self, project_key: str = "") -> TicketFacets:
+        tickets = self.list_tickets(project_key)
+
+        def values(items: Any) -> tuple[str, ...]:
+            return tuple(sorted({value for value in items if value}, key=str.casefold))
+
+        return TicketFacets(
+            statuses=values(ticket.status for ticket in tickets),
+            assignees=values(ticket.assignee for ticket in tickets),
+            reporters=values(ticket.reporter for ticket in tickets),
+            labels=values(label for ticket in tickets for label in ticket.labels),
+            projects=values(ticket.project for ticket in tickets),
+        )
+
+    def projects(self, query: TicketQuery | None = None) -> tuple[ProjectSummary, ...]:
+        selected = self._filtered(query or TicketQuery(assignee="*"))
+        selected_by_project: dict[str, list[TicketSummary]] = {}
+        for ticket in selected:
+            selected_by_project.setdefault(ticket.project, []).append(ticket)
+        projects: list[ProjectSummary] = []
+        for key in self.project_keys():
+            document = self._project_document(key)
+            all_tickets = self.list_tickets(key)
+            if query is not None and key not in selected_by_project:
+                continue
+            projects.append(
+                ProjectSummary(
+                    key=key,
+                    name=str(document.get("name") or key),
+                    source_remote=str(document.get("source_remote") or ""),
+                    ticket_count=(len(selected_by_project.get(key, ())) if query is not None else len(all_tickets)),
+                    active_ticket_count=sum(
+                        _normalized_status(ticket.status) in _ACTIVE_STATUSES
+                        for ticket in all_tickets
+                    ),
+                )
+            )
+        return tuple(projects)
+
+    def database(self, project_key: str) -> TicketDatabase:
+        self._tickets_dir(project_key)
+        return TicketDatabase(self.source_root, project_key if self.locator is not None else None)
+
+
 __all__ = [
     "ActivityEntry",
     "BranchSnapshot",
     "ReaderBrief",
     "ReportSnapshot",
     "TicketDatabase",
+    "TicketCatalog",
+    "TicketFacets",
+    "TicketPage",
+    "TicketQuery",
     "TicketSnapshot",
     "TicketSummary",
+    "ProjectSummary",
 ]

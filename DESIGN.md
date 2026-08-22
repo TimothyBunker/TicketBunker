@@ -336,8 +336,25 @@ from the observations, report state, and the ledger tail as the activity
 log. Declared workflow state (status, ours) is always shown *beside*
 observed git state (merged-back, recency — the pipeline's), never blended.
 `tb view` serves the same data as a minimal local viewer
-(`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
-per-ticket pages organized around completing one ticket. The singular page has
+(`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1). **Tickets is the landing
+surface.** It defaults to tickets assigned to the current Git identity, groups
+them by declared status, and includes backlog/open/to-do/in-progress/in-review
+while done and closed stay out of the way until selected. One persistent,
+provider-neutral filter bar searches ticket key, title, description, project,
+people, and labels; status, assignee, reporter, label, and project are explicit
+facets. Filters and the current page live in the URL. Results are server-side
+pages of twenty lightweight ticket references, so the browser receives only the
+requested summaries and never composes every ticket/report to build a list.
+
+**Projects is the companion catalog surface.** It lists projects known to the
+companion config/data branches; selecting one applies the same search and
+facets within that project. A project row and a ticket result are references to
+canonical companion data, not a claim operation and not a copy of bunker
+contents into the source repository. Opening a result is the deliberate point
+where the full ticket snapshot is composed. Standalone and legacy databases
+present their one inferred project through the same query contract.
+
+Per-ticket pages remain organized around completing one ticket. The singular page has
 an explicit **Ticket / Agent** contract. Ticket is the default Jira-like issue
 surface. The header names the source project before the ticket, then presents
 the mapped status as the sole lifecycle ground truth beside labels and the
@@ -385,8 +402,11 @@ is SSH port-forwarding's job, which already carries the repo's own access
 control. Do not add network exposure to the viewer.
 
 **There is one Python read model.** `ticketbunker/api.py` exposes the public,
-read-only `TicketDatabase` and typed ticket/branch/report snapshots. It
-composes ticket fields, deterministic branch observations, report ownership,
+read-only `TicketCatalog`, `TicketDatabase`, query/page types, and typed
+ticket/branch/report snapshots. `TicketCatalog` reads lightweight summaries
+across projects, applies the viewer's provider-neutral filters, and returns a
+bounded page without reading report bodies. `TicketDatabase` composes one
+opened ticket's fields, deterministic branch observations, report ownership,
 verification/freshness, the master digest, and activity straight from layout-
 defined bunker paths on every query; it holds no cache or second database.
 Both the viewer and future non-CLI integrations consume this boundary. Writes

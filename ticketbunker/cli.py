@@ -1414,7 +1414,12 @@ def cmd_view(args: argparse.Namespace) -> int:
               f"try another port: tb view --port {args.port + 1}", file=sys.stderr)
         return 1
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    print(f"viewing {layout.bunkers_dir(root)} at {url} — Ctrl-C stops it")
+    scope = (
+        project_mod.data_checkout(root)
+        if project_mod.load_locator(root) is not None
+        else layout.bunkers_dir(root)
+    )
+    print(f"viewing ticket catalog {scope} at {url} — Ctrl-C stops it")
     if args.open:
         import webbrowser
 

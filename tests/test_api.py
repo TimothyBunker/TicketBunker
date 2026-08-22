@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ticketbunker import layout, types
-from ticketbunker.api import TicketDatabase
+from ticketbunker import layout, project, types
+from ticketbunker.api import TicketCatalog, TicketDatabase, TicketQuery
 
 
 class TicketDatabaseTests(unittest.TestCase):
@@ -152,6 +152,7 @@ class TicketDatabaseTests(unittest.TestCase):
         self.assertEqual(summary.branch_count, 2)
         self.assertEqual(summary.report_count, 1)
         self.assertEqual(summary.last_development, "2026-08-12T08:30:00+00:00")
+        self.assertEqual(summary.reporter, "Ada")
 
     def test_discover_walks_up_to_repository_database(self) -> None:
         nested = self.root / "src" / "package"
@@ -199,6 +200,93 @@ class TicketDatabaseTests(unittest.TestCase):
             ),
             [],
         )
+
+
+class TicketCatalogTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / project.LOCATOR_FILE).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "project": "ECS",
+                    "bunker_repository": "example.invalid/tickets.git",
+                    "config_branch": project.DEFAULT_CONFIG_BRANCH,
+                    "data_branch": project.DEFAULT_DATA_BRANCH,
+                }
+            ),
+            encoding="utf-8",
+        )
+        for key, name in (("ECS", "Engine"), ("WEB", "Website")):
+            config_dir = project.project_config_dir(self.root, key)
+            config_dir.mkdir(parents=True)
+            (config_dir / "project.json").write_text(
+                json.dumps({"key": key, "name": name, "source_remote": f"git@example/{key}.git"}),
+                encoding="utf-8",
+            )
+            project.tickets_dir(self.root, key).mkdir(parents=True)
+        self._ticket(
+            "ECS",
+            "ECS-1",
+            title="Position system",
+            status="todo",
+            assignee="TimothyBunker",
+            reporter="Ada",
+            labels=["ECSF", "C0"],
+        )
+        self._ticket(
+            "ECS",
+            "ECS-2",
+            title="Chunk loading",
+            status="done",
+            assignee="Grace",
+            reporter="TimothyBunker",
+            labels=["world"],
+        )
+        self._ticket(
+            "WEB",
+            "WEB-1",
+            title="Documentation shell",
+            status="open",
+            assignee="TimothyBunker",
+            reporter="Grace",
+            labels=["docs"],
+        )
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _ticket(self, project_key: str, ticket_id: str, **values: object) -> None:
+        bunker = project.tickets_dir(self.root, project_key) / ticket_id
+        layout.init_dirs(bunker)
+        data = {
+            "id": ticket_id,
+            "key": ticket_id.casefold(),
+            "description": f"Work for {ticket_id}",
+            "updated": f"2026-08-{10 + len(ticket_id)}T09:00:00+00:00",
+            **values,
+        }
+        layout.paths(bunker)["ticket"].write_text(json.dumps(data), encoding="utf-8")
+
+    def test_filters_and_pages_lightweight_ticket_references(self) -> None:
+        catalog = TicketCatalog(self.root)
+        results = catalog.query(TicketQuery(assignee="TimothyBunker", per_page=1))
+
+        self.assertEqual(results.total, 2)
+        self.assertEqual(results.page_count, 2)
+        self.assertEqual(len(results.tickets), 1)
+        self.assertNotEqual(results.tickets[0].status, "done")
+        self.assertEqual(catalog.query(TicketQuery(status="all", label="world")).tickets[0].id, "ECS-2")
+        self.assertEqual(catalog.query(TicketQuery(search="documentation")).tickets[0].project, "WEB")
+
+    def test_project_catalog_and_cross_project_database_are_explicit(self) -> None:
+        catalog = TicketCatalog(self.root)
+
+        self.assertEqual(catalog.project_keys(), ("ECS", "WEB"))
+        self.assertEqual([item.name for item in catalog.projects()], ["Engine", "Website"])
+        self.assertEqual(catalog.database("WEB").get_ticket("WEB-1").title, "Documentation shell")
+        self.assertEqual(catalog.facets("ECS").labels, ("C0", "ECSF", "world"))
 
 
 if __name__ == "__main__":

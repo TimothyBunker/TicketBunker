@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from urllib.request import urlopen
 
 from ticketbunker import layout
-from ticketbunker.viewer import page_index, page_ticket, render_report, render_ticket_text
+from ticketbunker.viewer import (
+    page_index,
+    page_project,
+    page_projects,
+    page_ticket,
+    render_report,
+    render_ticket_text,
+    serve,
+)
 
 
 class ViewerTests(unittest.TestCase):
@@ -239,11 +249,106 @@ class ViewerTests(unittest.TestCase):
         self.assertNotIn("<form", page)
 
     def test_index_uses_the_same_ticket_database(self) -> None:
-        page = page_index(self.root, "fingerprint").decode("utf-8")
+        page = page_index(self.root, "fingerprint", {"assignee": "*"}).decode("utf-8")
 
         self.assertIn("TB-9", page)
         self.assertIn("A single, complete ticket", page)
-        self.assertIn("1 branches · 1 reports", page)
+        self.assertIn('aria-current="page">Tickets</a>', page)
+        self.assertIn('<a href="/projects">Projects</a>', page)
+        self.assertIn('name="q" type="search"', page)
+        self.assertIn('<span>Status</span><select name="status">', page)
+        self.assertIn('<span>Assignee</span><select name="assignee">', page)
+        self.assertIn('<span>Reporter</span><select name="reporter">', page)
+        self.assertIn('<span>Label</span><select name="label">', page)
+        self.assertIn('<span>Project</span><select name="project">', page)
+        self.assertIn("Assigned to Tim", page)
+        self.assertIn('<span class="ticket-label">viewer</span>', page)
+
+    def test_completed_tickets_are_hidden_until_status_filter_changes(self) -> None:
+        bunker = layout.bunker_path(self.root, "TB-10")
+        layout.init_dirs(bunker)
+        layout.paths(bunker)["ticket"].write_text(
+            json.dumps(
+                {
+                    "id": "TB-10",
+                    "key": "ten",
+                    "title": "Already shipped",
+                    "status": "done",
+                    "assignee": "Tim",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        active = page_index(self.root, "fingerprint", {"assignee": "*"}).decode("utf-8")
+        complete = page_index(
+            self.root, "fingerprint", {"assignee": "*", "status": "all"}
+        ).decode("utf-8")
+
+        self.assertNotIn("Already shipped", active)
+        self.assertIn("Already shipped", complete)
+
+    def test_projects_link_to_filtered_project_ticket_views(self) -> None:
+        projects = page_projects(self.root, "fingerprint", {"assignee": "*"}).decode("utf-8")
+        selected = page_project(
+            self.root, "TB", "fingerprint", {"assignee": "*", "label": "viewer"}
+        )
+
+        self.assertIn("Projects", projects)
+        self.assertIn('href="/project/TB?', projects)
+        self.assertIsNotNone(selected)
+        selected_page = selected.decode("utf-8")
+        self.assertIn("TB tickets", selected_page)
+        self.assertIn("TB-9", selected_page)
+        self.assertIn('action="/project/TB"', selected_page)
+
+    def test_ticket_results_are_paginated(self) -> None:
+        for number in range(10, 31):
+            bunker = layout.bunker_path(self.root, f"TB-{number}")
+            layout.init_dirs(bunker)
+            layout.paths(bunker)["ticket"].write_text(
+                json.dumps(
+                    {
+                        "id": f"TB-{number}",
+                        "key": str(number),
+                        "title": f"Ticket {number}",
+                        "status": "todo",
+                        "assignee": "Tim",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+        first = page_index(self.root, "fingerprint", {"assignee": "*"}).decode("utf-8")
+        second = page_index(
+            self.root, "fingerprint", {"assignee": "*", "page": "2"}
+        ).decode("utf-8")
+
+        self.assertIn("Page 1 of 2", first)
+        self.assertIn(">Next</a>", first)
+        self.assertIn("Page 2 of 2", second)
+        self.assertIn(">Previous</a>", second)
+
+    def test_http_routes_preserve_filters_and_open_project_tickets(self) -> None:
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            tickets = urlopen(f"{base}/?assignee=*&label=viewer").read().decode("utf-8")
+            projects = urlopen(f"{base}/projects?assignee=*").read().decode("utf-8")
+            project_page = urlopen(f"{base}/project/TB?assignee=*").read().decode("utf-8")
+            ticket = urlopen(f"{base}/project/TB/ticket/TB-9").read().decode("utf-8")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertIn("A single, complete ticket", tickets)
+        self.assertIn('value="viewer" selected', tickets)
+        self.assertIn('href="/project/TB?', projects)
+        self.assertIn("TB tickets", project_page)
+        self.assertIn("Agent work", ticket)
 
     def test_report_markup_is_escaped_before_tags_are_reintroduced(self) -> None:
         rendered = render_report("- [real] Safe `<img src=x onerror=alert(1)>`")

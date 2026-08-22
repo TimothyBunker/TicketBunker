@@ -50,6 +50,22 @@ def get_user() -> tuple[str | None, str]:
     return None, "unset"
 
 
+def get_identity_name(repo: Path | str | None = None) -> str | None:
+    """Return the Git display identity used by tracker assignee fields.
+
+    This is distinct from ``get_user()``, whose sanitized value is the branch
+    identifier and may intentionally be shorter than a GitHub/Jira username.
+    """
+    command = ["git"]
+    if repo is not None:
+        command.extend(["-C", str(Path(repo).resolve())])
+    command.extend(["config", "--get", "user.name"])
+    proc = subprocess.run(command, capture_output=True, text=True)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    return None
+
+
 def ticket_pattern() -> str:
     return os.environ.get("TB_TICKET_PATTERN") or load().get("ticket_pattern") or DEFAULT_TICKET_PATTERN
 

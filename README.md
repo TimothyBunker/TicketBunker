@@ -86,7 +86,7 @@ tb set TB-1267 --status in-review                  # move ticket fields through 
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
-tb view                                            # read-only Jira-style Ticket / Agent viewer at http://127.0.0.1:8377
+tb view                                            # read-only Tickets / Projects / Ticket / Agent viewer at http://127.0.0.1:8377
 tb hooks --install                                 # git hooks: observations + master refresh on every commit/merge
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
@@ -159,16 +159,28 @@ ticketbunker/
 └── cli.py         # thin orchestration over the above
 ```
 
+The viewer lands on the current Git user's active tickets. Search and the
+status/assignee/reporter/label/project filters persist in the URL; done and
+closed tickets appear only when requested. Projects uses the same controls and
+pages through lightweight ticket references before a specific ticket is
+opened. Listing never composes report bodies or claims a ticket into the source
+repository.
+
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:
 
 ```python
-from ticketbunker.api import TicketDatabase
+from ticketbunker.api import TicketCatalog, TicketDatabase, TicketQuery
 
 tickets = TicketDatabase.discover(".")
 ticket = tickets.get_ticket("TB-1267")
 for branch in ticket.branches:
     print(branch.name, branch.state)
+
+catalog = TicketCatalog(".")
+page = catalog.query(TicketQuery(status="active", assignee="Tim", page=1))
+for reference in page.tickets:
+    print(reference.project, reference.id, reference.title)
 ```
 
 This query API is deliberately read-only. Mutations use shared command

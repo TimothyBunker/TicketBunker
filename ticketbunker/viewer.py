@@ -15,9 +15,19 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import layout
-from .api import ReportSnapshot, TicketDatabase, TicketSnapshot
+from . import config, layout
+from .api import (
+    ReportSnapshot,
+    TicketCatalog,
+    TicketDatabase,
+    TicketFacets,
+    TicketPage,
+    TicketQuery,
+    TicketSnapshot,
+    TicketSummary,
+)
 
 
 _STYLE = """
@@ -49,10 +59,10 @@ body {
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-rendering: optimizeLegibility;
 }
-button, select { font: inherit; }
+button, input, select { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible {
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
   outline: 3px solid rgba(12, 102, 228, .28);
   outline-offset: 3px;
   border-radius: 2px;
@@ -240,20 +250,100 @@ code { padding: 1px 3px; border-radius: 3px; background: var(--panel); color: va
 hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
 ul { margin: 6px 0 12px; padding-left: 21px; }
 li { margin: 3px 0; }
-.index { max-width: 930px; }
-.index h1 { margin-bottom: 26px; }
-.ticket-group { margin-bottom: 30px; }
-.ticket-link { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 14px; padding: 13px 2px; border-bottom: 1px solid var(--line); color: inherit; }
+.catalog { max-width: 1120px; }
+.catalog-nav { display: flex; gap: 22px; margin: 0 0 26px; border-bottom: 1px solid var(--line); }
+.catalog-nav a {
+  min-height: 44px;
+  padding: 11px 2px 9px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-weight: 650;
+}
+.catalog-nav a:hover { color: var(--fg); text-decoration: none; }
+.catalog-nav a[aria-current="page"] { color: var(--accent); border-color: var(--accent); }
+.catalog-title { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
+.catalog-title h1 { margin-bottom: 18px; }
+.catalog-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.catalog-tools {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 28px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .97);
+}
+.ticket-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.7fr) repeat(4, minmax(118px, 1fr)) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+.ticket-filters.with-project { grid-template-columns: minmax(180px, 1.4fr) 132px 166px 132px 132px 132px auto auto; }
+.filter-field { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 650; }
+.filter-field input, .filter-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+}
+.filter-field input::placeholder { color: var(--muted); font-weight: 400; }
+.filter-action, .filter-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 13px;
+  border-radius: var(--radius);
+  font-weight: 650;
+}
+.filter-action { border: 1px solid var(--accent); color: #fff; background: var(--accent); cursor: pointer; }
+.filter-clear { border: 1px solid transparent; color: var(--muted); }
+.filter-clear:hover { color: var(--fg); text-decoration: none; }
+.ticket-group { margin-bottom: 32px; }
+.ticket-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 2px; }
+.ticket-group-head h2 { margin: 0; }
+.ticket-group-count { color: var(--muted); font-size: 12px; }
+.ticket-link { display: grid; grid-template-columns: 94px minmax(0, 1fr) minmax(150px, auto); gap: 14px; padding: 13px 8px 13px 2px; border-bottom: 1px solid var(--line); color: inherit; }
 .ticket-link:hover { background: var(--panel); text-decoration: none; }
 .ticket-id { color: var(--accent); font-weight: 650; }
-.ticket-title { color: var(--fg); font-weight: 600; }
-.ticket-link-meta { color: var(--muted); font-size: 12px; text-align: right; }
+.ticket-summary { min-width: 0; }
+.ticket-title { display: block; color: var(--fg); font-weight: 600; }
+.ticket-context { display: flex; flex-wrap: wrap; gap: 5px 11px; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.ticket-label { padding: 0 5px; border-radius: 3px; color: var(--body); background: var(--panel); }
+.ticket-link-meta { align-self: center; color: var(--muted); font-size: 12px; text-align: right; }
+.project-list { margin-top: 4px; border-top: 1px solid var(--line); }
+.project-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; min-height: 62px; padding: 12px 4px; border-bottom: 1px solid var(--line); color: inherit; }
+.project-link:hover { background: var(--panel); text-decoration: none; }
+.project-name { display: block; color: var(--fg); font-size: 15px; font-weight: 650; }
+.project-key, .project-meta { color: var(--muted); font-size: 12px; }
+.project-meta { align-self: center; text-align: right; }
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 26px; }
+.pagination a, .pagination span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.pagination a:hover { background: var(--panel); text-decoration: none; }
+.pagination .page-position { min-width: auto; border-color: transparent; color: var(--muted); }
+.pagination .disabled { color: var(--line-strong); }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
   .ticket-main { padding-right: 24px; }
   .ticket-page { padding-right: 0; }
   .ticket-rail { padding-left: 20px; }
   .report-picker select { min-width: min(210px, 30vw); }
+  .ticket-filters, .ticket-filters.with-project { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .filter-field.search { grid-column: span 2; }
 }
 @media (max-width: 760px) {
   main { padding: 20px 18px 55px; }
@@ -273,8 +363,19 @@ li { margin: 3px 0; }
   .trail-report-state { justify-self: start; }
   .metadata-menu { width: calc(100vw - 36px); }
   .metadata-menu dl { grid-template-columns: 112px minmax(0, 1fr); }
-  .ticket-link { grid-template-columns: 74px minmax(0, 1fr); }
+  .catalog-title { display: block; }
+  .catalog-count { display: block; margin: -10px 0 16px; }
+  .catalog-tools { position: static; }
+  .ticket-filters { grid-template-columns: 1fr 1fr; }
+  .ticket-filters.with-project { grid-template-columns: 1fr 1fr; }
+  .filter-field.search { grid-column: 1 / -1; }
+  .filter-field.status, .filter-field.assignee, .filter-field.project { grid-column: 1 / -1; }
+  .filter-action, .filter-clear { width: 100%; }
+  .ticket-link { grid-template-columns: 74px minmax(0, 1fr); padding-right: 2px; }
   .ticket-link-meta { grid-column: 2; text-align: left; }
+  .project-link { grid-template-columns: 1fr; gap: 3px; }
+  .project-meta { text-align: left; }
+  .pagination { justify-content: space-between; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 """
@@ -357,9 +458,10 @@ setInterval(async () => {
 
 _TAG_RE = re.compile(r"^\[(observation|real|speculation)\]\s*")
 _TAG_CLASS = {"observation": "obs", "real": "real", "speculation": "spec"}
-_STATUS_ORDER = ("backlog", "todo", "in-progress", "in-review", "done", "closed")
+_STATUS_ORDER = ("backlog", "open", "todo", "in-progress", "in-review", "done", "closed")
 _STATUS_LABELS = {
     "backlog": "Backlog",
+    "open": "Open",
     "todo": "To do",
     "in-progress": "In progress",
     "in-review": "In review",
@@ -371,16 +473,21 @@ _STATUS_LABELS = {
 def fingerprint(root: Path) -> str:
     """A cheap data-file fingerprint used only to trigger browser reloads."""
     digest = hashlib.sha256()
-    base = layout.bunkers_dir(root)
     patterns = ("ticket.json", "ledger.jsonl", "observations/*.json", "reports/*.md", "reports/branches/*.md")
-    for bunker in layout.ticket_dirs(base):
-        for pattern in patterns:
-            for path in sorted(bunker.glob(pattern)):
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+    try:
+        catalog = TicketCatalog(root)
+        bases = [catalog.database(key).bunkers for key in catalog.project_keys()]
+    except (FileNotFoundError, KeyError, ValueError):
+        bases = [layout.bunkers_dir(root)]
+    for base in bases:
+        for bunker in layout.ticket_dirs(base):
+            for pattern in patterns:
+                for path in sorted(bunker.glob(pattern)):
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size};".encode())
     return digest.hexdigest()[:16]
 
 
@@ -1042,38 +1149,290 @@ def _validation(ticket: TicketSnapshot) -> str:
     )
 
 
-def page_index(root: Path, fp: str) -> bytes:
-    database = TicketDatabase(root)
-    groups: dict[str, list] = {}
-    for ticket in database.list_tickets():
-        groups.setdefault(ticket.status or "(no status)", []).append(ticket)
-    body = [
-        f'<div class="index"><div class="crumbs">{html.escape(root.name)} / Tickets</div>',
-        "<h1>Tickets</h1>",
+def _catalog_nav(active: str) -> str:
+    return (
+        '<nav class="catalog-nav" aria-label="Ticket database">'
+        f'<a href="/"{(" aria-current=\"page\"" if active == "tickets" else "")}>Tickets</a>'
+        f'<a href="/projects"{(" aria-current=\"page\"" if active == "projects" else "")}>Projects</a>'
+        '</nav>'
+    )
+
+
+def _query_value(params: Mapping[str, str], key: str, default: str = "") -> str:
+    value = params.get(key, default)
+    return str(value).strip()
+
+
+def _ticket_query(
+    params: Mapping[str, str], *, default_assignee: str, project_key: str = ""
+) -> TicketQuery:
+    try:
+        page = int(_query_value(params, "page", "1"))
+    except ValueError:
+        page = 1
+    assignee = _query_value(params, "assignee", default_assignee)
+    return TicketQuery(
+        search=_query_value(params, "q"),
+        status=_query_value(params, "status", "active"),
+        assignee=assignee or "*",
+        reporter=_query_value(params, "reporter"),
+        label=_query_value(params, "label"),
+        project=project_key or _query_value(params, "project"),
+        page=page,
+        per_page=20,
+    )
+
+
+def _option(value: str, label: str, selected: str) -> str:
+    current = ' selected' if value.casefold() == selected.casefold() else ''
+    return (
+        f'<option value="{html.escape(value, quote=True)}"{current}>'
+        f'{html.escape(label)}</option>'
+    )
+
+
+def _ticket_filters(
+    action: str,
+    query: TicketQuery,
+    facets: TicketFacets,
+    *,
+    current_user: str,
+    show_project: bool,
+) -> str:
+    actual_statuses = tuple(
+        value for value in facets.statuses if value.casefold() not in {item.casefold() for item in _STATUS_ORDER}
+    )
+    status_options = [_option("active", "Open / active", query.status), _option("all", "All", query.status)]
+    status_options.extend(
+        _option(value, _status_label(value), query.status)
+        for value in (*_STATUS_ORDER, *actual_statuses)
+    )
+
+    assignee_options = [_option("*", "Anyone", query.assignee)]
+    if current_user:
+        assignee_options.append(_option(current_user, f"Me — {current_user}", query.assignee))
+    assignee_options.extend(
+        _option(value, value, query.assignee)
+        for value in facets.assignees
+        if value.casefold() != current_user.casefold()
+    )
+    reporter_options = [_option("", "Anyone", query.reporter)] + [
+        _option(value, value, query.reporter) for value in facets.reporters
     ]
-    if not groups:
-        body.append('<p class="empty">No tickets.</p>')
-    statuses = [*(_STATUS_ORDER), "(no status)"]
-    for status in [value for value in statuses if value in groups]:
-        tickets = groups[status]
-        tickets.sort(key=lambda item: item.updated, reverse=True)
+    label_options = [_option("", "Any label", query.label)] + [
+        _option(value, value, query.label) for value in facets.labels
+    ]
+    project_field = ""
+    if show_project:
+        project_options = [_option("", "All projects", query.project)] + [
+            _option(value, value, query.project) for value in facets.projects
+        ]
+        project_field = (
+            '<label class="filter-field project"><span>Project</span><select name="project">'
+            f'{"".join(project_options)}</select></label>'
+        )
+    classes = "ticket-filters with-project" if show_project else "ticket-filters"
+    return (
+        '<div class="catalog-tools">'
+        f'<form class="{classes}" method="get" action="{html.escape(action, quote=True)}">'
+        '<label class="filter-field search"><span>Search</span>'
+        f'<input name="q" type="search" value="{html.escape(query.search, quote=True)}" '
+        'placeholder="Key, title, description"></label>'
+        '<label class="filter-field status"><span>Status</span><select name="status">'
+        f'{"".join(status_options)}</select></label>'
+        '<label class="filter-field assignee"><span>Assignee</span><select name="assignee">'
+        f'{"".join(assignee_options)}</select></label>'
+        '<label class="filter-field"><span>Reporter</span><select name="reporter">'
+        f'{"".join(reporter_options)}</select></label>'
+        '<label class="filter-field"><span>Label</span><select name="label">'
+        f'{"".join(label_options)}</select></label>'
+        f'{project_field}<button class="filter-action" type="submit">Apply</button>'
+        f'<a class="filter-clear" href="{html.escape(action, quote=True)}">Clear</a>'
+        '</form></div>'
+    )
+
+
+def _query_string(query: TicketQuery, page: int, *, include_project: bool) -> str:
+    params = {
+        "q": query.search,
+        "status": query.status,
+        "assignee": query.assignee,
+        "reporter": query.reporter,
+        "label": query.label,
+        "page": str(page),
+    }
+    if include_project:
+        params["project"] = query.project
+    return urlencode({key: value for key, value in params.items() if value})
+
+
+def _pagination(action: str, results: TicketPage, query: TicketQuery, *, include_project: bool) -> str:
+    if results.page_count <= 1:
+        return ""
+
+    def link(label: str, page: int, disabled: bool) -> str:
+        if disabled:
+            return f'<span class="disabled" aria-disabled="true">{label}</span>'
+        href = f'{action}?{_query_string(query, page, include_project=include_project)}'
+        return f'<a href="{html.escape(href, quote=True)}">{label}</a>'
+
+    return (
+        '<nav class="pagination" aria-label="Ticket pages">'
+        f'{link("Previous", results.page - 1, results.page == 1)}'
+        f'<span class="page-position">Page {results.page} of {results.page_count}</span>'
+        f'{link("Next", results.page + 1, results.page == results.page_count)}'
+        '</nav>'
+    )
+
+
+def _ticket_href(ticket: TicketSummary, companion: bool) -> str:
+    if companion:
+        return f'/project/{html.escape(ticket.project, quote=True)}/ticket/{html.escape(ticket.id, quote=True)}'
+    return f'/ticket/{html.escape(ticket.id, quote=True)}'
+
+
+def _ticket_results(results: TicketPage, *, companion: bool, show_project: bool) -> str:
+    if not results.tickets:
+        return '<p class="empty">No tickets match these filters.</p>'
+    groups: dict[str, list[TicketSummary]] = {}
+    for ticket in results.tickets:
+        groups.setdefault(ticket.status or "(no status)", []).append(ticket)
+    body: list[str] = []
+    for status, tickets in groups.items():
         heading = _status_label(status) if status != "(no status)" else status
-        body.append(f'<section class="ticket-group"><h2>{html.escape(heading)} ({len(tickets)})</h2>')
+        body.append(
+            '<section class="ticket-group">'
+            f'<div class="ticket-group-head"><h2>{html.escape(heading)}</h2>'
+            f'<span class="ticket-group-count">{len(tickets)}</span></div>'
+        )
         for ticket in tickets:
+            context: list[str] = []
+            if show_project and ticket.project:
+                context.append(html.escape(ticket.project_name or ticket.project))
+            if ticket.assignee:
+                context.append(f'Assigned to {html.escape(ticket.assignee)}')
+            context.extend(
+                f'<span class="ticket-label">{html.escape(label)}</span>' for label in ticket.labels
+            )
+            updated = f'Updated {html.escape(_datetime(ticket.updated))}' if ticket.updated else ""
             body.append(
-                f'<a class="ticket-link" href="/ticket/{html.escape(ticket.id, quote=True)}">'
+                f'<a class="ticket-link" href="{_ticket_href(ticket, companion)}">'
                 f'<span class="ticket-id mono">{html.escape(ticket.id)}</span>'
+                '<span class="ticket-summary">'
                 f'<span class="ticket-title">{html.escape(ticket.title or "Untitled")}</span>'
-                f'<span class="ticket-link-meta">{ticket.branch_count} branches · '
-                f'{ticket.report_count} reports</span></a>'
+                f'<span class="ticket-context">{"".join(f"<span>{item}</span>" for item in context)}</span>'
+                f'</span><span class="ticket-link-meta">{updated}</span></a>'
             )
         body.append("</section>")
-    body.append("</div>")
-    return _page("TicketBunker", "".join(body), fp)
+    return "".join(body)
 
 
-def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
-    database = TicketDatabase(root)
+def _current_user(root: Path) -> str:
+    identity = config.get_identity_name(root)
+    if identity:
+        return identity
+    user, _source = config.get_user()
+    return user or ""
+
+
+def page_index(root: Path, fp: str, params: Mapping[str, str] | None = None) -> bytes:
+    catalog = TicketCatalog(root)
+    current_user = _current_user(root)
+    query = _ticket_query(params or {}, default_assignee=current_user or "*")
+    results = catalog.query(query)
+    facets = catalog.facets()
+    body = (
+        '<div class="catalog">'
+        f'{_catalog_nav("tickets")}'
+        '<div class="catalog-title"><h1>Tickets</h1>'
+        f'<span class="catalog-count">{results.total} ticket{"" if results.total == 1 else "s"}</span></div>'
+        f'{_ticket_filters("/", query, facets, current_user=current_user, show_project=True)}'
+        f'{_ticket_results(results, companion=catalog.locator is not None, show_project=True)}'
+        f'{_pagination("/", results, query, include_project=True)}'
+        '</div>'
+    )
+    return _page("Tickets — TicketBunker", body, fp)
+
+
+def page_projects(root: Path, fp: str, params: Mapping[str, str] | None = None) -> bytes:
+    catalog = TicketCatalog(root)
+    current_user = _current_user(root)
+    query = _ticket_query(params or {}, default_assignee="*")
+    facets = catalog.facets()
+    projects = catalog.projects(query)
+    has_specific_filters = bool(
+        query.search
+        or query.status not in {"", "active"}
+        or query.assignee != "*"
+        or query.reporter
+        or query.label
+    )
+    project_rows = []
+    for item in projects:
+        key = (
+            f'<span class="project-key mono">{html.escape(item.key)}</span>'
+            if item.name.casefold() != item.key.casefold()
+            else ""
+        )
+        if has_specific_filters:
+            meta = f"{item.ticket_count} matching · {item.active_ticket_count} active"
+        else:
+            meta = f'{item.active_ticket_count} active ticket{"" if item.active_ticket_count == 1 else "s"}'
+        project_rows.append(
+            '<a class="project-link" '
+            f'href="/project/{html.escape(item.key, quote=True)}?{_query_string(query, 1, include_project=False)}">'
+            '<span><span class="project-name">'
+            f'{html.escape(item.name)}</span>{key}</span>'
+            f'<span class="project-meta">{html.escape(meta)}</span></a>'
+        )
+    project_rows_html = "".join(project_rows)
+    if not project_rows_html:
+        project_rows_html = '<p class="empty">No projects match these filters.</p>'
+    body = (
+        '<div class="catalog">'
+        f'{_catalog_nav("projects")}'
+        '<div class="catalog-title"><h1>Projects</h1>'
+        f'<span class="catalog-count">{len(projects)} project{"" if len(projects) == 1 else "s"}</span></div>'
+        f'{_ticket_filters("/projects", query, facets, current_user=current_user, show_project=False)}'
+        f'<div class="project-list">{project_rows_html}</div></div>'
+    )
+    return _page("Projects — TicketBunker", body, fp)
+
+
+def page_project(
+    root: Path, project_key: str, fp: str, params: Mapping[str, str] | None = None
+) -> bytes | None:
+    catalog = TicketCatalog(root)
+    if project_key not in catalog.project_keys():
+        return None
+    current_user = _current_user(root)
+    query = _ticket_query(params or {}, default_assignee="*", project_key=project_key)
+    results = catalog.query(query)
+    facets = catalog.facets(project_key)
+    project_summary = next(item for item in catalog.projects() if item.key == project_key)
+    action = f'/project/{project_key}'
+    body = (
+        '<div class="catalog">'
+        f'{_catalog_nav("projects")}'
+        f'<div class="crumbs"><a href="/projects">Projects</a> / {html.escape(project_key)}</div>'
+        '<div class="catalog-title">'
+        f'<h1>{html.escape(project_summary.name)} tickets</h1>'
+        f'<span class="catalog-count">{results.total} ticket{"" if results.total == 1 else "s"}</span></div>'
+        f'{_ticket_filters(action, query, facets, current_user=current_user, show_project=False)}'
+        f'{_ticket_results(results, companion=catalog.locator is not None, show_project=False)}'
+        f'{_pagination(action, results, query, include_project=False)}'
+        '</div>'
+    )
+    return _page(f"{project_summary.name} tickets — TicketBunker", body, fp)
+
+
+def page_ticket(
+    root: Path, ticket_id: str, fp: str, project_key: str | None = None
+) -> bytes | None:
+    try:
+        database = TicketDatabase(root, project_key)
+    except (FileNotFoundError, ValueError):
+        return None
     try:
         ticket = database.get_ticket(ticket_id)
     except KeyError:
@@ -1144,8 +1503,16 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         f'<aside class="ticket-rail">{_lifecycle(ticket)}{_branches(ticket)}</aside></div></div>'
     )
 
+    if project_key:
+        crumbs = (
+            '<div class="crumbs"><a href="/projects">Projects</a> / '
+            f'<a href="/project/{html.escape(project_key, quote=True)}">{html.escape(project_key)}</a>'
+            f' / {html.escape(ticket.id)}</div>'
+        )
+    else:
+        crumbs = '<div class="crumbs"><a href="/">Tickets</a></div>'
     body = (
-        '<div class="crumbs"><a href="/">Tickets</a></div>'
+        f'{crumbs}'
         f'{_validation(ticket)}'
         '<header class="ticket-head">'
         f'<div class="ticket-key">{project_html}<span class="mono">{html.escape(ticket.id)}</span></div>'
@@ -1161,13 +1528,37 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         root = self.root
         fp = fingerprint(root)
-        if self.path == "/poll":
+        request = urlsplit(self.path)
+        path = request.path
+        params = {
+            key: values[-1]
+            for key, values in parse_qs(request.query, keep_blank_values=True).items()
+            if values
+        }
+        if path == "/poll":
             self._send(200, fp.encode(), "text/plain; charset=utf-8")
             return
-        if self.path == "/":
-            self._send(200, page_index(root, fp))
+        if path == "/":
+            self._send(200, page_index(root, fp, params))
             return
-        match = re.fullmatch(r"/ticket/([A-Za-z0-9._-]+)", self.path)
+        if path == "/projects":
+            self._send(200, page_projects(root, fp, params))
+            return
+        match = re.fullmatch(r"/project/([A-Z][A-Z0-9]*)", path)
+        if match:
+            page = page_project(root, match.group(1), fp, params)
+            if page is not None:
+                self._send(200, page)
+                return
+        match = re.fullmatch(
+            r"/project/([A-Z][A-Z0-9]*)/ticket/([A-Za-z0-9._-]+)", path
+        )
+        if match:
+            page = page_ticket(root, match.group(2), fp, match.group(1))
+            if page is not None:
+                self._send(200, page)
+                return
+        match = re.fullmatch(r"/ticket/([A-Za-z0-9._-]+)", path)
         if match:
             page = page_ticket(root, match.group(1), fp)
             if page is not None:

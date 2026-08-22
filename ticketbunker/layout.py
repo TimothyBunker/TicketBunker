@@ -73,6 +73,11 @@ def bunker_path(project_root: Path, ticket_id: str) -> Path:
     return bunkers_dir(root) / name
 
 
+def companion_bunker_path(tickets_scope: Path, ticket_id: str) -> Path:
+    """Resolve one canonical companion ticket below a project's tickets dir."""
+    return Path(tickets_scope) / ticket_id
+
+
 def ticket_dirs(scope: Path) -> list[Path]:
     """Return current ticket records, including legacy ``*_bunker`` names."""
     scope = Path(scope)

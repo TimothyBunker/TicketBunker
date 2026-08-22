@@ -81,16 +81,24 @@ def data_checkout(source_root: Path) -> Path:
     return local_root(source_root) / "data"
 
 
+def config_projects_dir(source_root: Path) -> Path:
+    return config_checkout(source_root) / "projects"
+
+
+def data_projects_dir(source_root: Path) -> Path:
+    return data_checkout(source_root) / "projects"
+
+
 def project_config_dir(source_root: Path, project_key: str | None = None) -> Path:
     locator = load_locator(source_root) or {}
     key = project_key or str(locator.get("project") or "")
-    return config_checkout(source_root) / "projects" / key
+    return config_projects_dir(source_root) / key
 
 
 def project_data_dir(source_root: Path, project_key: str | None = None) -> Path:
     locator = load_locator(source_root) or {}
     key = project_key or str(locator.get("project") or "")
-    return data_checkout(source_root) / "projects" / key
+    return data_projects_dir(source_root) / key
 
 
 def tickets_dir(source_root: Path, project_key: str | None = None) -> Path:

@@ -85,7 +85,14 @@ Trust model, non-negotiable:
   updated`, `--reverse`, `--fetch` includes remote-only tickets),
   `tb show` (fields, comments, development panel, report state, ledger
   tail), `tb view` (localhost web viewer, auto-reloads via database
-  fingerprint polling). Per-ticket pages split ticket-owned and agent-owned
+  fingerprint polling). Tickets lands on the current Git user's active work,
+  grouped by status with done/closed hidden by default; search plus
+  status/assignee/reporter/label/project facets persist in the URL and results
+  are server-side pages of twenty summary references. Projects lists the
+  companion's project catalog and applies the same ticket filters inside a
+  selected project. `TicketCatalog` is the shared lightweight read boundary;
+  it does not compose report bodies or claim/copy bunkers while listing.
+  Per-ticket pages split ticket-owned and agent-owned
   content into Ticket/Agent tabs. Ticket is the Jira-like default: rich-text
   description, acceptance criteria, and mirrored read-only activity in the main
   column. Project, mapped status, labels, and source-updated time lead the page;
