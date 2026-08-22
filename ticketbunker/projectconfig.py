@@ -135,18 +135,7 @@ def _credential_variable(provider: str) -> str:
 
 
 def credential_state(providers: tuple[str, ...] = ("github", "gitlab", "jira")) -> dict[str, bool]:
-    path = credential_file()
-    names = set()
-    if path.exists():
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if line and not line.startswith("#") and "=" in line:
-                names.add(line.split("=", 1)[0].strip())
-    return {
-        provider: _credential_variable(provider) in names
-        or bool(os.environ.get(_credential_variable(provider)))
-        for provider in providers
-    }
+    return {provider: bool(credential_value(provider)) for provider in providers}
 
 
 def credential_value(provider: str) -> str | None:

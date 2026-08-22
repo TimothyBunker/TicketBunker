@@ -67,7 +67,26 @@ class ConfigViewerTests(unittest.TestCase):
         self.assertIn("Connect repository", text)
         self.assertIn("TicketBunker never creates this repository", text)
         self.assertIn("ticketbunker/config", text)
+        self.assertIn("Create an empty companion repository", text)
+        self.assertIn("Commit the locator", text)
+        self.assertIn("tb doctor", text)
         self.assertNotIn("GITHUB_ACCESS_TOKEN=", text)
+
+    def test_connected_repository_page_shows_shared_readiness_checks(self) -> None:
+        commands.dispatch(
+            "project.initialize",
+            {"project": "ECS", "bunker_repo": str(self.remote), "base_branch": "ecs"},
+            commands.CommandContext(self.root),
+        )
+
+        status, _content_type, body = self.request("GET", "/repository")
+        text = body.decode("utf-8")
+
+        self.assertEqual(status, 200)
+        self.assertIn("Needs setup", text)
+        self.assertIn("Source contract", text)
+        self.assertIn("git add .ticketbunker.json .gitignore", text)
+        self.assertIn("Run <span class=\"mono\">tb doctor</span> for remote access", text)
 
     def test_http_and_cli_share_identity_command(self) -> None:
         token = self.server.RequestHandlerClass.token

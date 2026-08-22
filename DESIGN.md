@@ -855,6 +855,18 @@ Repository, Ticket fields, and Integrations. The CLI, editor HTTP transport,
 and programmatic callers dispatch the same command envelopes; transports do
 not reimplement mutations.
 
+Repository setup is a three-step contract, not a wizard that owns external
+state: create an empty companion repository, connect it, then commit the source
+locator. Before connection the Repository page shows those three steps; after
+connection it renders the same local readiness checks as `tb doctor`. The
+doctor validates Git identity, the committed/ignored source contract, companion
+checkouts and canonical remote heads, resolved configuration, ticket index,
+local integration credential presence, refresh hooks, and worktree cleanliness.
+Every failure includes a concrete next command or Git action, `--json` exposes
+the same result to automation, and `--offline` skips only remote access. Remote
+probing disables terminal prompts and times out; diagnostics write only a local
+execution ledger below `.git` and never mutate companion data.
+
 Configuration is composition, not runtime inheritance. Versioned global field
 sets form the default composition copied and pinned when a project is created.
 A project composes those exact versions with project fields, field overrides,

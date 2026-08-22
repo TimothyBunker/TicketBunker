@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import commands, config, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
+from . import commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -184,7 +184,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"initialized {result['project']} in {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
-    print("next: commit .ticketbunker.json and .gitignore, then create or import a ticket")
+    print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
     return 0
 
 
@@ -203,7 +203,30 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return 1
     print(f"connected {result['project']} to {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
+    print("next: tb doctor")
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    source_root = project_mod.find_source_root()
+    root = source_root or Path.cwd()
+    result = doctor_mod.report(root, check_remote=not args.offline)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if result["ready"] else 1
+    title = f"TicketBunker doctor — {result['project']}" if result["project"] else "TicketBunker doctor"
+    print(title)
+    labels = {"pass": "ok", "warn": "note", "fail": "fix", "info": "info"}
+    for value in result["checks"]:
+        print(f"[{labels[value['status']]}] {value['label']}: {value['summary']}")
+        if value.get("action"):
+            print(f"       next: {value['action']}")
+    if result["ready"]:
+        suffix = f" ({result['warnings']} note{'s' if result['warnings'] != 1 else ''})" if result["warnings"] else ""
+        print(f"ready{suffix}")
+        return 0
+    print(f"not ready — {result['failures']} required fix{'es' if result['failures'] != 1 else ''}")
+    return 1
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
@@ -1624,6 +1647,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("setup", help="connect this checkout to its existing companion TicketBunker repository")
     s.set_defaults(fn=cmd_setup)
 
+    s = sub.add_parser("doctor", help="check setup, Git state, companion access, indexes, credentials, and hooks")
+    s.add_argument("--offline", action="store_true", help="skip the companion remote access check")
+    s.add_argument("--json", action="store_true", help="emit the structured diagnostic report")
+    s.set_defaults(fn=cmd_doctor)
+
     s = sub.add_parser("migrate", help="move an embedded .tb database into a companion repository")
     s.add_argument("--project", required=True, help="project key, for example ECS")
     s.add_argument("--project-name", default=None, help="display name (default: legacy project name or key)")
@@ -1854,7 +1882,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = args.fn(args)
     source_root = project_mod.find_source_root()
-    if source_root is not None and project_mod.load_locator(source_root) is not None:
+    if args.cmd != "doctor" and source_root is not None and project_mod.load_locator(source_root) is not None:
         try:
             project_mod.publish_data(source_root, f"TicketBunker: tb {args.cmd}")
         except commands.CommandRejected as exc:

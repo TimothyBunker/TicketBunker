@@ -7,9 +7,11 @@ construction. The agent never calls the logging itself.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Mapping
 
 from ..ledger import Ledger
 
@@ -42,6 +44,9 @@ def git_status(
     ledger: Ledger,
     stage: str,
     initiator: str = "auto",
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout: float | None = None,
 ) -> tuple[str, int]:
     """Like git(), but never raises; returns (stdout, exit_status).
 
@@ -50,15 +55,31 @@ def git_status(
     """
     argv = ["git", "-C", str(repo), *args]
     start = time.monotonic()
-    proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    process_env = None
+    if env is not None:
+        process_env = {**os.environ, **env}
+    try:
+        proc = subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=process_env,
+            timeout=timeout,
+        )
+        output = proc.stdout
+        status = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        prior = exc.stdout if isinstance(exc.stdout, bytes) else str(exc.stdout or "").encode()
+        output = prior + f"\nGit command timed out after {timeout:g} seconds".encode()
+        status = 124
     duration_ms = int((time.monotonic() - start) * 1000)
     ledger.command(
         stage=stage,
         argv=argv,
         cwd=str(repo),
         initiator=initiator,
-        exit_status=proc.returncode,
-        stdout=proc.stdout,
+        exit_status=status,
+        stdout=output,
         duration_ms=duration_ms,
     )
-    return proc.stdout.decode(errors="replace"), proc.returncode
+    return output.decode(errors="replace"), status

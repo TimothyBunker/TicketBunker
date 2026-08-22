@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import commands, project, projectconfig, types
+from . import commands, doctor, project, projectconfig, types
 
 
 _PAGES = ("identity", "repository", "fields", "integrations")
@@ -144,6 +144,15 @@ button:disabled { opacity: .55; cursor: wait; }
 .mapping-arrow { color: var(--muted); text-align: center; }
 .custom-integration { max-width: 600px; }
 .notice { margin: 20px 0 0; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--fg); }
+.setup-steps, .readiness { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.setup-steps li, .readiness li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 12px 2px; border-bottom: 1px solid var(--line); }
+.step-number, .readiness-mark { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; color: var(--muted); background: var(--panel); font-size: 11px; font-weight: 700; }
+.readiness-mark.pass { color: var(--success); background: var(--success-soft); }
+.readiness-mark.fail { color: var(--danger); background: var(--danger-soft); }
+.readiness-mark.warn { color: #7f5f01; background: #fff7d6; }
+.readiness-label { display: block; color: var(--fg); font-weight: 650; }
+.readiness-summary { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.readiness-action { display: block; margin-top: 5px; color: var(--fg); font-size: 12px; }
 .empty { color: var(--muted); }
 @media (max-width: 760px) {
   .shell { display: block; }
@@ -181,7 +190,11 @@ def _e(value: object) -> str:
 def _initial_state(root: Path) -> dict[str, Any]:
     locator = project.load_locator(root)
     if locator is not None:
-        return {"initialized": True, **projectconfig.state(root)}
+        return {
+            "initialized": True,
+            **projectconfig.state(root),
+            "diagnostics": doctor.report(root, check_remote=False),
+        }
     fields = []
     for field_set in project.STANDARD_FIELD_SETS.values():
         fields.extend({**field, "source": field_set["id"]} for field in field_set["fields"])
@@ -196,6 +209,7 @@ def _initial_state(root: Path) -> dict[str, Any]:
         "fields": fields,
         "global_fields": fields,
         "mappings": {"providers": {}},
+        "diagnostics": doctor.report(root, check_remote=False),
     }
 
 
@@ -226,8 +240,34 @@ def _repository_page(state: dict[str, Any], root: Path) -> str:
     if state["initialized"]:
         locator = state["locator"]
         details = state["project"]
+        diagnostic_rows = []
+        for value in state["diagnostics"]["checks"]:
+            if value["status"] == "info":
+                continue
+            mark = {"pass": "✓", "warn": "!", "fail": "×"}[value["status"]]
+            action = (
+                f'<code class="readiness-action">{_e(value["action"])}</code>'
+                if value.get("action")
+                else ""
+            )
+            diagnostic_rows.append(
+                f'<li><span class="readiness-mark {_e(value["status"])}">{mark}</span><span>'
+                f'<span class="readiness-label">{_e(value["label"])}</span>'
+                f'<span class="readiness-summary">{_e(value["summary"])}</span>{action}</span></li>'
+            )
+        readiness = (
+            "Needs setup"
+            if not state["diagnostics"]["ready"]
+            else "Ready with notes"
+            if state["diagnostics"]["warnings"]
+            else "Ready"
+        )
         return f"""
         <header class="page-head"><h1>Repository</h1><p class="lede">Canonical TicketBunker storage for this project.</p></header>
+        <section class="section">
+          <div class="section-head"><h2>{readiness}</h2><span class="meta">Run <span class="mono">tb doctor</span> for remote access</span></div>
+          <ul class="readiness">{''.join(diagnostic_rows)}</ul>
+        </section>
         <section class="section">
           <dl class="readonly">
             <dt>Project</dt><dd>{_e(details.get('key'))} · {_e(details.get('name'))}</dd>
@@ -241,6 +281,13 @@ def _repository_page(state: dict[str, Any], root: Path) -> str:
     branch = _current_branch(root)
     return f"""
     <header class="page-head"><h1>Connect TicketBunker</h1><p class="lede">Create a Git repository wherever you want, then connect it here.</p></header>
+    <section class="section">
+      <ol class="setup-steps">
+        <li><span class="step-number">1</span><span><span class="readiness-label">Create an empty companion repository</span><span class="readiness-summary">Use any Git host or local bare repository.</span></span></li>
+        <li><span class="step-number">2</span><span><span class="readiness-label">Connect it below</span><span class="readiness-summary">TicketBunker publishes only its configuration and data branches.</span></span></li>
+        <li><span class="step-number">3</span><span><span class="readiness-label">Commit the locator</span><span class="readiness-summary">Then run <span class="mono">tb doctor</span>.</span></span></li>
+      </ol>
+    </section>
     <section class="section">
       <form data-command="project.initialize" data-reload="repository">
         <div class="form-grid">

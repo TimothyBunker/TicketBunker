@@ -76,6 +76,7 @@ cd your-repo && tb init             # once: opens companion repository setup
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
 tb setup                            # every later clone: connect from .ticketbunker.json
 tb config                           # remote-backed identity, storage, fields, integrations editor
+tb doctor                           # readiness checks with exact next commands (--json / --offline available)
 tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
 tb github --project 8 --project-owner OWNER  # or synchronize every Issue in a Project
 
