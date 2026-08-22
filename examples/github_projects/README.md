@@ -1,8 +1,8 @@
 # GitHub Projects example
 
-This optional adapter translates one GitHub issue and its Project status into
-TicketBunker's provider-neutral JSON intake. It lives outside `ticketbunker/`,
-so it is not included in the installed core and adds no GitHub dependency.
+This wrapper prints one GitHub Issue and its Project status as TicketBunker's
+provider-neutral JSON. It is the copy/paste form of the packaged `tb github`
+transport and adds no third-party Python dependency.
 
 ```sh
 export GITHUB_ACCESS_TOKEN=...  # needs read access to the repo and Project
@@ -19,4 +19,6 @@ maps only lifecycle (`Todo`, `In Progress`, `Done`) into its own status.
 
 The JSON boundary is intentionally boring. A different tracker only needs to
 produce the same object and can use the identical `tb ticket --from-json -`
-command; flags, the editor template, and `--from FILE` remain available.
+command; flags, the editor template, and `--from FILE` remain available. For
+idempotent refreshes use `tb github ISSUE` or `tb github --project NUMBER
+--project-owner OWNER`; those commands upsert through the shared ticket gate.

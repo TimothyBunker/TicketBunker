@@ -659,16 +659,29 @@ side channel that writes without the type check. This is the same
 by-construction philosophy as the ledger: validation is structural, not a
 convention the agent is asked to follow.
 
-**Tracker integration ends at a provider-neutral JSON boundary.** `tb ticket
+**Tracker integration ends at a provider-neutral ticket command.** `tb ticket
 --from-json FILE` (or `-` for stdin/copy-paste/pipes) accepts one complete
 ticket object, preserves typed extension metadata and tracker comments, and
 passes it through the ordinary ticket handler. The ticket ID may come from the
 object, so a translator can pipe directly into `tb ticket --from-json -`.
-Provider adapters live outside the installed core — the GitHub Projects example
-under `examples/` reads GitHub and emits this object — keeping the core
-stdlib-only and preventing any tracker from becoming the authority. JSON input
-is a complete source, not an implicit override layer: combining it with field
-flags or the editor-template path is rejected.
+For recurring imports, `ticket.upsert` and atomic-batch `ticket.sync` are the
+same programmatic gate used by installed adapters. Incoming fields refresh the
+source snapshot while absent local extensions survive; TicketBunker's branch
+key, explicit branch assignments, repository path, and mechanical timestamps
+remain locally owned. A semantically identical snapshot performs no write,
+adds no ticket-ledger event, and creates no companion revision.
+
+Adapters remain thin stdlib transports under `ticketbunker/integrations/`; they
+fetch and normalize but cannot write around `ticket.sync`. `tb github` is the
+first complete adapter: it reads one Issue or every Issue item in a GitHub
+Project, mirrors comments and Project fields, applies the project's published
+GitHub field matrix, then submits one typed batch. `--fixture` drives that exact
+normalization and command path without network access. The example under
+`examples/` remains a JSON-only copy/paste wrapper. This packaging does not make
+GitHub authoritative over TicketBunker or introduce a GitHub dependency, and
+there is no tracker write-back. JSON creation remains a complete source, not an
+implicit override layer: combining it with field flags or the editor-template
+path is rejected.
 
 ### 3.13 Code architecture
 
@@ -856,7 +869,9 @@ Tokens are local-only secrets in a mode-0600 credential file outside the
 repository. Built-in environment names remain `GITHUB_ACCESS_TOKEN`,
 `GITLAB_ACCESS_TOKEN`, and `JIRA_API_TOKEN`; custom entries deterministically
 use `TICKETBUNKER_<INTEGRATION>_TOKEN`. Canonical configuration stores labels,
-templates, and field mappings, never token values.
+templates, and field mappings, never token values. Installed transports read an
+environment value first, then the configured local credential file; neither
+path returns secret values in configuration state or command output.
 
 ### 3.16 The project universe boundary
 
@@ -933,8 +948,8 @@ everything a person or agent reads whole — `tb.md`, `reports/`,
 The TicketBunker backend is **a git repository of bunkers** (§2) — pi
 extensions and the CLI are clients of it, never owners of state:
 
-- **Ingest:** ticket context (manual paste or future tracker webhook), remote
-  branch events.
+- **Ingest:** manual ticket context and read-only tracker snapshots through the
+  same provider-neutral upsert/batch command; remote branch events.
 - **Ledger:** stage markers and per-command log entries, written automatically
   by the executing hooks (§3.8). JSONL ledgers are merged with git's union
   strategy so concurrent appenders don't conflict.
@@ -963,7 +978,7 @@ extensions and the CLI are clients of it, never owners of state:
 
 | Drawback | Mitigation |
 |---|---|
-| Agile info must be manually re-entered into the session | Accept for v1; later, tracker webhook/API ingest where the boundary allows. Auto-ingest of new remote branches by ticket key already reduces re-entry. |
+| Tracker APIs and field shapes differ | Normalize at a provider-neutral typed batch boundary; publish editable field-path matrices, retain provider metadata, and keep offline/manual JSON intake available. GitHub Issues/Projects is the first packaged transport. |
 | Branch-per-ticket naming is a convention, not guaranteed | Fuzzy matching + explicit manual branch association as fallback; report "no branches found" honestly rather than guessing. |
 | Reports go stale as branches move | Sessions refresh on branch push events; reports are timestamped against a commit SHA so staleness is visible. |
 

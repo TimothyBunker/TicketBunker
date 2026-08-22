@@ -1558,6 +1558,37 @@ def cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_github(args: argparse.Namespace) -> int:
+    from .integrations import github
+
+    source_root = project_mod.find_source_root()
+    if source_root is None:
+        print("error: not inside a git repository — run tb github from the source repository", file=sys.stderr)
+        return 1
+    try:
+        result = github.sync(
+            source_root,
+            issue_ref=args.issue,
+            project_number=args.project,
+            project_owner=args.project_owner,
+            ticket_id=args.ticket_id,
+            include_comments=not args.no_comments,
+            fixture=Path(args.fixture).resolve() if args.fixture else None,
+        )
+    except (commands.CommandRejected, github.GitHubError, ValueError, KeyError) as exc:
+        message = exc.message if isinstance(exc, commands.CommandRejected) else str(exc)
+        print(f"error: {message}", file=sys.stderr)
+        return 1
+    print(
+        "GitHub sync: "
+        f"{result['created']} created, {result['updated']} updated, "
+        f"{result['unchanged']} unchanged"
+    )
+    for value in result["tickets"]:
+        print(f"  {value['ticket']}: {value['action']}")
+    return 0
+
+
 def cmd_regen_master(args: argparse.Namespace) -> int:
     bunker = _resolve_bunker(args.bunker)
     if bunker is None:
@@ -1821,6 +1852,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--user", default=None, help="override the configured user identifier")
     s.add_argument("--base", default=None, help="ref to branch from (default: HEAD)")
     s.set_defaults(fn=cmd_branch)
+
+    s = sub.add_parser("github", help="synchronize a GitHub issue or Project through the shared ticket gate")
+    s.add_argument("issue", nargs="?", help="issue URL or OWNER/REPO#NUMBER; omit to sync a whole Project")
+    s.add_argument("--project", type=int, help="GitHub Project number (syncs all items when ISSUE is omitted)")
+    s.add_argument("--project-owner", help="GitHub user or organization that owns the Project")
+    s.add_argument("--ticket-id", help="override the ticket ID for one issue")
+    s.add_argument("--no-comments", action="store_true", help="do not mirror GitHub comments")
+    s.add_argument("--fixture", help="offline GitHub snapshot fixture used by the same synchronization path")
+    s.set_defaults(fn=cmd_github)
 
     s = sub.add_parser("sync", help="sync a standalone or legacy bunker database through git")
     s.add_argument("root", help="the bunker database directory (contains *_bunker/)")

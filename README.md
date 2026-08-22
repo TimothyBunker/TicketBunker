@@ -40,14 +40,16 @@ One bunker per ticket lives on the companion data branch:
 .ticketbunker.json
 .tb/
 ├── config/         # local checkout of ticketbunker/config
-└── data/projects/<PROJECT>/tickets/<TICKET-ID>/
-    ├── tb.md            # composed session context — exactly what a session is fed
-    ├── context/         # the fragments tb.md is composed from (modular, auditable)
-    ├── observations/    # atomic git facts from the bootstrap pipeline (JSON)
-    ├── ledger.jsonl     # every command + stage marker, logged structurally
-    └── reports/
-        ├── master.md    # mechanically regenerated from children, digest-pinned
-        └── branches/    # one agent-written component per branch
+└── data/projects/<PROJECT>/tickets/
+    ├── index.json       # bounded committed references; enough for search/listing
+    └── <TICKET-ID>/     # hydrated only when this ticket is opened or changed
+        ├── tb.md        # composed session context — exactly what a session is fed
+        ├── context/     # the fragments tb.md is composed from (modular, auditable)
+        ├── observations/# atomic git facts from the bootstrap pipeline (JSON)
+        ├── ledger.jsonl # every command + stage marker, logged structurally
+        └── reports/
+            ├── master.md # mechanically regenerated from children, digest-pinned
+            └── branches/ # one agent-written component per branch
 ```
 
 The harness (pi) persists its own session data separately; the bunker holds
@@ -74,6 +76,8 @@ cd your-repo && tb init             # once: opens companion repository setup
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
 tb setup                            # every later clone: connect from .ticketbunker.json
 tb config                           # remote-backed identity, storage, fields, integrations editor
+tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
+tb github --project 8 --project-owner OWNER  # or synchronize every Issue in a Project
 
 tb ticket TB-1267                                  # opens $EDITOR on a ticket template (flags and --from FILE also work)
 tb ticket --from-json ticket.json                  # complete provider-neutral object; ID may come from JSON
@@ -104,7 +108,9 @@ tb survey . && tb status TB-1267
 `.ticketbunker.json` is committed with the source. `.tb/` is an ignored local
 checkout/cache; canonical configuration and data live on separate branches of
 the companion repository. A standalone database (`tb ticket --root`, `tb
-sync`) and embedded legacy bunkers remain supported.
+sync`) and embedded legacy bunkers remain supported. A fresh `tb setup` checks
+out only committed ticket indexes; opening or changing a ticket fetches that
+one bunker without copying every ticket and report.
 
 ## The backend is a git repo
 
@@ -151,6 +157,7 @@ ticketbunker/
 ├── api.py         # public read model: ticket + branches + reports, no cache
 ├── types/         # information type registry + validation rules
 ├── handlers/      # typed intake: validate → write → ledger (the only write paths)
+├── integrations/  # thin stdlib tracker transports; all writes dispatch typed commands
 ├── builders/      # artifact construction: tb.md, report form, master, fragments
 ├── processors/    # derivation: bootstrap stages, lint gates
 ├── adapters/      # external boundaries: git (harness + backend next)
@@ -192,22 +199,24 @@ Activity kinds such as comments, history, work logs, logs, and notes are
 mirrored from the configured source; the read-only viewer offers no parallel
 comment or note authoring path.
 
-### GitHub Projects example
+### GitHub Issues and Projects
 
-GitHub support is an example translator, not a core dependency. It reads the
-token from the environment, emits the same JSON that can be pasted by hand, and
-lives outside the installed `ticketbunker/` package:
+`tb github` is a packaged stdlib transport, not a second ticket implementation.
+It reads one Issue or all Issue items in a Project, applies the editable GitHub
+field matrix, and sends the normalized snapshots through the same typed batch
+command used by programmatic callers. Save the token locally on the Integrations
+page opened by `tb config`, or provide `GITHUB_ACCESS_TOKEN` in the environment:
 
 ```sh
-set -a; source ~/.gitenv/.env; set +a
-python3 examples/github_projects/import_issue.py \
-  https://github.com/TimothyBunker/coal/issues/4 --project 8 \
-  | tb ticket --from-json -
+tb github https://github.com/TimothyBunker/coal/issues/4 --project 8
+tb github --project 8 --project-owner TimothyBunker
 ```
 
-The resulting ticket keeps GitHub assignment, labels, lifecycle, comments,
-source timestamps/URL, and Project identity/status as committed repository data.
-See [examples/github_projects/README.md](examples/github_projects/README.md).
+Repeated identical pulls are no-ops: no ticket ledger entry and no companion
+commit. Changed source fields update while TicketBunker's branch assignments and
+local extensions remain intact. `--fixture snapshot.json` uses the same path
+offline for tests and demos. The JSON-only copy/paste wrapper remains under
+[examples/github_projects](examples/github_projects/README.md).
 
 ## Running the agent
 

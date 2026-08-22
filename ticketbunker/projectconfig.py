@@ -149,6 +149,29 @@ def credential_state(providers: tuple[str, ...] = ("github", "gitlab", "jira")) 
     }
 
 
+def credential_value(provider: str) -> str | None:
+    """Read one local credential without exposing it through config state."""
+    variable = _credential_variable(provider)
+    if os.environ.get(variable):
+        return os.environ[variable]
+    path = credential_file()
+    if not path.exists():
+        return None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line.removeprefix("export ").lstrip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == variable:
+            selected = value.strip()
+            if len(selected) >= 2 and selected[0] == selected[-1] and selected[0] in {"'", '"'}:
+                selected = selected[1:-1]
+            return selected or None
+    return None
+
+
 def state(source_root: Path) -> dict[str, Any]:
     locator, composition_path, mappings_path, key = _paths(source_root)
     project_doc = _read_json(project.project_config_dir(source_root, key) / "project.json")
