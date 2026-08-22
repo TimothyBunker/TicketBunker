@@ -217,20 +217,15 @@ def fingerprint(root: Path) -> str:
     """A cheap data-file fingerprint used only to trigger browser reloads."""
     digest = hashlib.sha256()
     base = layout.bunkers_dir(root)
-    patterns = (
-        "*_bunker/ticket.json",
-        "*_bunker/ledger.jsonl",
-        "*_bunker/observations/*.json",
-        "*_bunker/reports/*.md",
-        "*_bunker/reports/branches/*.md",
-    )
-    for pattern in patterns:
-        for path in sorted(base.glob(pattern)):
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+    patterns = ("ticket.json", "ledger.jsonl", "observations/*.json", "reports/*.md", "reports/branches/*.md")
+    for bunker in layout.ticket_dirs(base):
+        for pattern in patterns:
+            for path in sorted(bunker.glob(pattern)):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size};".encode())
     return digest.hexdigest()[:16]
 
 

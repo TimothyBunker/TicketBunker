@@ -50,7 +50,7 @@ def git_status(
     """
     argv = ["git", "-C", str(repo), *args]
     start = time.monotonic()
-    proc = subprocess.run(argv, capture_output=True)
+    proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     duration_ms = int((time.monotonic() - start) * 1000)
     ledger.command(
         stage=stage,

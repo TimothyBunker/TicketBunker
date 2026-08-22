@@ -160,3 +160,18 @@ def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8")
     return dest
+
+
+def intake_config_document(
+    type_name: str,
+    destination: Path,
+    payload: dict,
+    ledger: Ledger,
+    *,
+    project: str,
+) -> Path:
+    """Publish a configuration document through the typed intake boundary."""
+    _gate(type_name, payload, ledger, project=project, destination=str(destination))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return destination

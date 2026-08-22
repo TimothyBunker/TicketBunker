@@ -33,17 +33,21 @@ See [DESIGN.md](DESIGN.md) for the architecture.
 
 ## Layout of a bunker
 
-One bunker per ticket, named by its unique ticket ID:
+The source repo commits a locator and ignores two local companion checkouts.
+One bunker per ticket lives on the companion data branch:
 
 ```
-<ticket_id>_bunker/
-├── tb.md            # composed session context — exactly what a session is fed
-├── context/         # the fragments tb.md is composed from (modular, auditable)
-├── observations/    # atomic git facts from the bootstrap pipeline (JSON)
-├── ledger.jsonl     # every command + stage marker, logged structurally
-└── reports/
-    ├── master.md    # mechanically regenerated from children, digest-pinned
-    └── branches/    # one agent-written component per branch
+.ticketbunker.json
+.tb/
+├── config/         # local checkout of ticketbunker/config
+└── data/projects/<PROJECT>/tickets/<TICKET-ID>/
+    ├── tb.md            # composed session context — exactly what a session is fed
+    ├── context/         # the fragments tb.md is composed from (modular, auditable)
+    ├── observations/    # atomic git facts from the bootstrap pipeline (JSON)
+    ├── ledger.jsonl     # every command + stage marker, logged structurally
+    └── reports/
+        ├── master.md    # mechanically regenerated from children, digest-pinned
+        └── branches/    # one agent-written component per branch
 ```
 
 The harness (pi) persists its own session data separately; the bunker holds
@@ -64,8 +68,10 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ## Usage
 
 ```sh
-cd your-repo && tb init            # once per repo: creates .tb/ at the git root (fails outside a repo)
-tb config --user Tim               # once per machine: team identifier (defaults from git user.name)
+cd your-repo && tb init             # once: opens companion repository setup
+tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
+tb setup                            # every later clone: connect from .ticketbunker.json
+tb config                           # remote-backed identity, storage, fields, integrations editor
 
 tb ticket TB-1267                                  # opens $EDITOR on a ticket template (flags and --from FILE also work)
 tb ticket --from-json ticket.json                  # complete provider-neutral object; ID may come from JSON
@@ -77,7 +83,7 @@ tb branch TB-1267 --assign legacy-fix --repo .     # or adopt an existing branch
 tb set TB-1267 --status in-review                  # move ticket fields through the same gate (status, priority, labels...)
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
-tb checkout TB-1267                                # fetch + collect each branch's report component, compile the master
+tb checkout TB-1267                                # refresh companion data and compile the master
 tb view                                            # read-only local ticket viewer at http://127.0.0.1:8377 (auto-refreshes)
 tb hooks --install                                 # git hooks: observations + master refresh on every commit/merge
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
@@ -93,21 +99,34 @@ tb lint form.md && tb publish TB-1267 --branch Tim/TB-1267-fourier-alg-impl --fi
 tb survey . && tb status TB-1267
 ```
 
-`.tb/` is committed with your repo — the bunker database shares the code's
-remote and access boundary. A separate standalone database (`tb ticket
---root`, `tb sync`) is still supported. Bootstrap code diffs, authorship, and
-development counters pathspec-exclude `.tb/`, so committing the database does
-not make TicketBunker report its own generated files as product work.
+`.ticketbunker.json` is committed with the source. `.tb/` is an ignored local
+checkout/cache; canonical configuration and data live on separate branches of
+the companion repository. A standalone database (`tb ticket --root`, `tb
+sync`) and embedded legacy bunkers remain supported.
 
 ## The backend is a git repo
 
-The team's bunker database lives in a remote git repository and moves
-through ordinary git — no service to stand up. `tb sync` mirrors git:
-init if needed, add what `.tbignore` admits, commit, pull --rebase, push.
-Teammates clone and read any bunker by its fixed layout. The default
-`.tbignore` keeps harness session files and regenerable diff patches
-local; customize it per team. JSONL ledgers are union-merged so
-concurrent appenders never conflict.
+The team's bunker database lives in a companion git repository — no service to
+stand up. `ticketbunker/config` holds field sets and project/provider mapping;
+`ticketbunker/data` holds tickets, observations, ledgers, and reports. Each
+successful data mutation commits, reconciles, and pushes through ordinary Git.
+JSONL ledgers are union-merged; generated masters are regenerated from their
+children. Remote and branch permissions are the authority, including who may
+publish configuration.
+
+The Ticket fields page has separate project and Global defaults views. Global
+changes create a new immutable field-set version for projects initialized in
+the future; existing projects retain their pinned composition.
+
+To move an old embedded database safely:
+
+```sh
+tb migrate --project TB --bunker-repo git@host:team/project-ticketbunker.git
+```
+
+Migration backs up the complete old `.tb/` below `.git/ticketbunker-backups/`,
+publishes both companion branches, and only then removes the tracked legacy
+paths for the source commit.
 
 Every git command any of these run is written to the ledger automatically —
 by the executing wrapper, never by the agent — so an unlogged command is
@@ -143,9 +162,10 @@ for branch in ticket.branches:
     print(branch.name, branch.state)
 ```
 
-This API is deliberately read-only. Ticket changes still enter through the
-typed handlers (or the `tb` commands that call them), so validation and the
-ledger cannot be bypassed. Optional `acceptance_criteria` and `metadata`
+This query API is deliberately read-only. Mutations use shared command
+envelopes—the CLI and localhost editor call the same handlers—so validation,
+Git publication, and the ledger cannot be bypassed. Optional
+`acceptance_criteria` and `metadata`
 fields preserve tracker-shaped and project-specific information in
 `ticket.json` without making the tracker authoritative.
 

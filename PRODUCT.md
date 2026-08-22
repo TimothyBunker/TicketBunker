@@ -13,8 +13,9 @@ work without reconstructing history by hand.
 
 ## Product Purpose
 
-The project's remote repository owns the ticket system and acts as its shared,
-updating database. TicketBunker combines the familiar information anatomy of
+The project's companion Git repository owns the ticket system and acts as its
+shared, updating database; a committed locator connects source checkouts to it.
+TicketBunker combines the familiar information anatomy of
 an agile ticket with repository-owned lifecycle state, branches, verified
 reports, observations, and extensible metadata. Success means a contributor
 can understand and act on a ticket without needing the originating agent
@@ -37,12 +38,12 @@ and report provenance easier to reach. It should disappear into the task.
 
 ## Design Principles
 
-1. The repository is the authority. External trackers are import sources and familiar information models.
+1. The companion repository is the authority. External trackers are import sources and familiar information models.
 2. Design one ticket first. Global search and portfolio views come after the singular ticket works.
 3. Make the next useful object obvious. Branches and child reports stay visible and directly accessible.
 4. Put proof beside claims. Verification, freshness, and provenance are visible without dominating the page.
 5. Reveal depth progressively. Metadata, activity, and full reports remain available without crowding the default view.
-6. Keep one Python model. The CLI and viewer should render the same composed ticket state.
+6. Keep one command model. CLI, HTTP, and viewer actions dispatch the same backend commands.
 7. Separate reading from auditing. In each report category, lead with concise evidence-bounded synthesis and keep that category's unchanged trail one disclosure away.
 
 ## Accessibility & Inclusion

@@ -12,9 +12,10 @@ Per-ticket "bunkers" hold: a deterministic git observation pipeline's output
 (atomic facts), a composed context document (tb.md) fed to an agent, and the
 agent's report — a pre-filled form answering who/what/where/why, with every
 claim tagged [observation] / [real] / [speculation]. Reports are the only
-artifact users read and the only thing that crosses project boundaries. The
-bunker database lives in `.tb/` at the git root, committed with the repo.
-The CLI is `tb` (stdlib-only Python package `ticketbunker/`).
+artifact users read and the only thing that crosses project boundaries. By
+default the canonical database lives in a companion Git repository; the source
+commits `.ticketbunker.json` and ignores its `.tb/config` and `.tb/data`
+checkouts. The CLI is `tb` (stdlib-only Python package `ticketbunker/`).
 
 Trust model, non-negotiable:
 - **observation** = pipeline-produced mechanical git fact
@@ -28,6 +29,20 @@ Trust model, non-negotiable:
   rejections, lint + anchor-verification gates run before publish.
 
 ## Current state (all verified, all pushed)
+
+- **Companion storage is the default**: one-time `tb init` publishes separate
+  `ticketbunker/config` and `ticketbunker/data` branches before writing the
+  source locator; later clones use repeatable `tb setup`. Remote Git and branch
+  permissions are the only authority. `tb migrate` backs up an embedded `.tb`
+  below `.git`, publishes all ticket material, and only then removes legacy
+  tracked paths. Successful companion data mutations reconcile and push on
+  command completion.
+- **Configuration is remote and composable**: `tb config` opens a localhost
+  editor for Identity, Repository, Ticket fields, and GitHub/GitLab/Jira
+  mappings/tokens. Existing projects pin immutable field-set versions; global
+  default edits seed only future projects. Tokens stay local, outside the
+  repository. CLI, editor HTTP, and programmatic callers share
+  `ticketbunker.commands` handlers and stable rejection codes.
 
 - **Full loop green end-to-end**, stub-harness and live: `tb init` →
   `tb ticket` → `tb branch` → `tb bootstrap` → `tb run` (compose → scaffold
@@ -65,13 +80,13 @@ Trust model, non-negotiable:
   collapsed). **Viewer is localhost-only BY DESIGN — no bind option, no
   auth surface, remote viewing is SSH port-forwarding's job. Do not add
   network exposure.**
-- **Git-native merge story**: generated `.tb/.gitattributes` — ledgers and
+- **Git-native merge story**: generated data-branch `.gitattributes` — ledgers and
   inference logs `merge=union`, master `merge=ours` + regenerated;
   `tb hooks --install` adds post-commit/post-merge hooks running
   `tb refresh` (resolve current branch's ticket → re-bootstrap → recompose
-  → regen master; never blocks git). `tb checkout` collects each branch's
-  committed component via `git show`, re-gates every import, and keeps
-  (with a warning) local components that differ from HEAD.
+  → regen master; never blocks git). In companion mode `tb checkout` refreshes
+  the canonical child set and regenerates; embedded legacy mode retains the
+  original branch-collection path.
 - **Agent merge session** (`tb merge`, DESIGN.md §3.13): promoted session
   reconciling report components that may disagree about the same code.
   Mechanical anchor-overlap candidates pre-filled as [observation] lines;
@@ -81,9 +96,16 @@ Trust model, non-negotiable:
   through the same lint + anchor gates, all-or-nothing (pre-checked before
   any write), `merge_reconciled`/`merge_rejected` ledgered, master regen.
   Stub-verified end-to-end incl. adversarial cases (fabricated [real]
-  anchor and broken markers both rejected atomically) — **not yet
-  live-graded with a real agent**; grade the first live merge like the
-  codex report was.
+  anchor and broken markers both rejected atomically). **Live-graded good**
+  (codex gpt-5.6-sol, scratch repo with two mutually exclusive limiter
+  branches): named the real disagreement with branch-qualified anchors
+  that all resolve, cleared the two false overlap candidates by verifying
+  the shared files identical, upgraded verified claims speculation→real
+  (the only allowed direction), and declined to pick a winner — selection
+  stays human. First attempt failed the unfilled check by inserting above
+  the `<!-- agent: -->` marker instead of replacing it; the failure path
+  behaved exactly as designed (atomic, ledgered, form preserved) and the
+  prompts now state that claims replace the marker line.
 - **Root surveyor runner** (`tb survey REPO --run`, DESIGN.md §3.10):
   session home at `.tb/root/` (bunker-shaped, above all tickets), working
   copy seeded from existing tbroot.md or the template, surveyor preamble
@@ -91,16 +113,21 @@ Trust model, non-negotiable:
   installation only through the new typed `intake_tbroot` handler
   (conjecture + anchor gate, ledgered). Untouched fresh template fails;
   unchanged existing tbroot is `survey_no_update`. Stub-verified incl.
-  conjecture rejection — **not yet live-graded**; refresh-triggered
-  surveys stay future work under the re-run cost policy (mission item 4).
+  conjecture rejection. **Live-graded good** (codex gpt-5.6-sol, this
+  repo): zero conjecture, every spot-checked anchor true — including the
+  exact dist/tb zipapp byte size and the 7-test unittest run it performed
+  to earn its Build & test claims — installed as tbroot.md and committed.
+  Refresh-triggered surveys stay future work under the re-run cost policy
+  (mission item 4).
 
 ## Your mission, in priority order
 
 1. **pi harness live verification** past the login wall (`pi /login`
    first; extension `harness/pi/tb.ts` is confirmed loading). Grade the
    report like the codex one was: spot-check every [real] anchor, audit
-   speculation ranks, read Where/Why cold. Grade the first live `tb merge`
-   and `tb survey --run` the same way.
+   speculation ranks, read Where/Why cold. (`tb merge` and `tb survey
+   --run` are already live-graded good on the codex harness; codex runs
+   need node 24 — `nvm use 24` first.)
 2. **Composed-size check**: warn in `tb compose`/`tb run` when tb.md
    exceeds a sane token budget — a 40k-token preamble fails silently.
 3. **Ticket archival**: closed tickets should age out of the default
@@ -111,7 +138,9 @@ Trust model, non-negotiable:
    agent session per commit is too much; per push or on demand may be
    right). Talk to Tim before building this one.
 
-Then: point it at a real work repo — that is the actual next phase.
+The first real work repo is `/mnt/c/Users/Tim/Desktop/voxel-engine-starter`
+(`ECS`, source remote `TimothyBunker/coal`); its companion is
+`TimothyBunker/coal-ticketbunker`.
 
 ## Rules (violating these is worse than any bug)
 
@@ -162,6 +191,9 @@ Then: point it at a real work repo — that is the actual next phase.
 | Observation pipeline + branch relation rule | `ticketbunker/processors/stages.py` |
 | Master regen + digest | `ticketbunker/builders/master.py` |
 | Local web viewer | `ticketbunker/viewer.py` |
+| Shared mutation commands | `ticketbunker/commands.py`, `ticketcommands.py`, `projectconfig.py` |
+| Companion storage + migration | `ticketbunker/project.py` |
+| Local configuration editor | `ticketbunker/config_viewer.py` |
 | Harness adapters | `ticketbunker/adapters/harness.py`, `harness/pi/tb.ts` |
 | Stub agent (credential-free E2E) | `tools/stub_agent.py` |
 | Single-file build | `python3 tools/build_tb.py` → `dist/tb` |

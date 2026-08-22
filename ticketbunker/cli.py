@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import config, handlers, layout, types
+from . import commands, config, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -83,9 +83,9 @@ def _resolve_bunker(arg: str) -> Path | None:
     if cand.is_dir():
         return cand
     for scope in _bunker_scopes():
-        by_id = scope / f"{arg}_bunker"
-        if by_id.is_dir():
-            return by_id
+        for by_id in (scope / arg, scope / f"{arg}_bunker"):
+            if by_id.is_dir():
+                return by_id
     return None
 
 
@@ -138,7 +138,7 @@ def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
     for r in roots:
         if not r.is_dir():
             continue
-        for bunker in sorted(r.glob("*_bunker")):
+        for bunker in layout.ticket_dirs(r):
             try:
                 ticket = _ticket(bunker)
             except Exception:
@@ -149,27 +149,81 @@ def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    import subprocess
-
-    proc = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    if proc.returncode != 0:
+    source_root = project_mod.find_source_root()
+    if source_root is None:
         print("error: not inside a git repository — tb init roots itself in a git repo, like git does",
               file=sys.stderr)
         return 1
-    project = Path(proc.stdout.strip())
-    tb_dir = layout.bunkers_dir(project)
-    if tb_dir.exists():
-        print(f"already initialized: {tb_dir}")
-        return 0
-    tb_dir.mkdir()
-    (tb_dir / ".gitignore").write_text(layout.TB_GITIGNORE, encoding="utf-8")
-    (tb_dir / ".gitattributes").write_text(layout.TB_GITATTRIBUTES, encoding="utf-8")
-    (tb_dir / "config.json").write_text(json.dumps({"project": project.name}, indent=2) + "\n", encoding="utf-8")
-    # The 'ours' merge driver the gitattributes reference — builtin behavior,
-    # but git only honors it when declared in config.
-    subprocess.run(["git", "-C", str(project), "config", "merge.ours.driver", "true"], capture_output=True)
-    print(f"initialized {tb_dir} — ticket bunkers live here and travel with the repo")
-    print("next: tb ticket <TICKET-ID> ...   (optional: 'tb hooks --install' keeps observations fresh)")
+    if not args.bunker_repo:
+        return _open_config_editor(source_root, args.port, not args.no_open, "repository")
+    try:
+        result = commands.dispatch(
+            "project.initialize",
+            {
+                "project": args.project,
+                "project_name": args.project_name,
+                "bunker_repo": args.bunker_repo,
+                "config_branch": args.config_branch,
+                "data_branch": args.data_branch,
+                "base_branch": args.base,
+            },
+            commands.CommandContext(source_root, transport="cli"),
+        )
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 1
+    print(f"initialized {result['project']} in {result['bunker_repository']}")
+    print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
+    print(f"locator: {result['locator']}")
+    print("next: commit .ticketbunker.json and .gitignore, then create or import a ticket")
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    del args
+    source_root = project_mod.find_source_root()
+    if source_root is None:
+        print("error: not inside a git repository — run 'tb setup' from the project checkout", file=sys.stderr)
+        return 1
+    try:
+        result = commands.dispatch(
+            "project.setup", {}, commands.CommandContext(source_root, transport="cli")
+        )
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 1
+    print(f"connected {result['project']} to {result['bunker_repository']}")
+    print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
+    return 0
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    source_root = project_mod.find_source_root()
+    if source_root is None:
+        print("error: not inside a git repository", file=sys.stderr)
+        return 1
+    try:
+        result = commands.dispatch(
+            "project.migrate",
+            {
+                "project": args.project,
+                "project_name": args.project_name,
+                "bunker_repo": args.bunker_repo,
+                "config_branch": args.config_branch,
+                "data_branch": args.data_branch,
+                "base_branch": args.base,
+            },
+            commands.CommandContext(source_root, transport="cli"),
+        )
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 1
+    imported = ", ".join(result.get("imported_tickets", [])) or "none"
+    print(f"migrated {result['project']} to {result['bunker_repository']}")
+    print(f"tickets: {imported}")
+    print(f"backup: {result['backup']}")
+    print("legacy .tb paths were removed from the source checkout after the remote accepted them")
+    print("next: inspect and commit .ticketbunker.json, .gitignore, and the legacy .tb deletions")
     return 0
 
 
@@ -225,11 +279,6 @@ def cmd_ticket(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 1
         root_dir = layout.bunkers_dir(project)
-    bunker = root_dir / f"{ticket_id}_bunker"
-    if bunker.exists():
-        print(f"error: {bunker} already exists — ticket IDs must be unique", file=sys.stderr)
-        return 1
-
     # Four ways in, one gate: normalized JSON (file/stdin), field flags
     # (scripting), a template file (--from), or $EDITOR on the template when
     # no fields were given at all.
@@ -285,31 +334,25 @@ def cmd_ticket(args: argparse.Namespace) -> int:
             "status": args.status or fields.get("status") or "todo",
             "labels": args.label or fields.get("labels") or [],
         }
-    layout.init_dirs(bunker)
-    ledger = _ledger(bunker)
     intake = "json" if json_payload is not None else "template" if args.from_file else "flags" if any(
         v is not None for v in flag_fields
     ) else "editor"
-    ledger.event("bunker_init", ticket_id=ticket_id, ticket_key=payload.get("key"), intake=intake)
     try:
-        handlers.intake_ticket(bunker, payload, ledger)
-    except IntakeRejected as exc:
-        # We created this directory moments ago; a rejected ticket must not
-        # leave a half-initialized bunker squatting on the unique ID.
-        import shutil
-
-        shutil.rmtree(bunker)
+        result = commands.dispatch(
+            "ticket.create",
+            {"ticket": payload, "bunker_root": str(root_dir) if args.root else None, "intake": intake},
+            commands.CommandContext(project_mod.find_source_root() or Path.cwd(), transport="cli"),
+        )
+    except commands.CommandRejected as exc:
         if form_text is not None:
             draft = root_dir / f"{ticket_id}.draft.md"
             draft.write_text(form_text, encoding="utf-8")
-            print(f"error: {exc}\n  your draft is saved — fix it and re-run: "
+            print(f"error: {exc.message}\n  your draft is saved — fix it and re-run: "
                   f"tb ticket {ticket_id} --from {draft}", file=sys.stderr)
         else:
-            print(f"error: {exc}", file=sys.stderr)
+            print(f"error: {exc.message}", file=sys.stderr)
         return 1
-    fragments.seed_static(layout.paths(bunker)["context"])
-    _recompose(bunker, ledger)
-    print(f"initialized {bunker}")
+    print(f"initialized {result['bunker']}")
     return 0
 
 
@@ -862,13 +905,43 @@ def cmd_config(args: argparse.Namespace) -> int:
                 print(f"{key}: {cfg[key]}")
         print(f"({config.GLOBAL_CONFIG})")
         return 0
-    user, source = config.get_user()
-    print(f"user: {user or 'NOT SET'} (source: {source})")
-    if source == "git":
-        print("  taken from git global user.name — change with: tb config --user NAME")
-    print(f"bunker root: {config.bunker_root() or 'not set (tb run looks in the current directory)'}")
-    print(f"ticket pattern: {config.ticket_pattern()}")
-    print(f"branch template: {config.branch_template()}")
+    source_root = project_mod.find_source_root()
+    if source_root is None:
+        print("error: not inside a git repository — run 'tb config' from a project checkout", file=sys.stderr)
+        return 1
+    if project_mod.load_locator(source_root) is not None:
+        try:
+            commands.dispatch("project.setup", {}, commands.CommandContext(source_root, transport="cli"))
+        except commands.CommandRejected as exc:
+            print(f"error: cannot refresh canonical configuration: {exc.message}", file=sys.stderr)
+            return 1
+    return _open_config_editor(source_root, args.port, not args.no_open, "identity")
+
+
+def _open_config_editor(source_root: Path, port: int, open_browser: bool, page: str) -> int:
+    from . import config_viewer
+
+    try:
+        server = config_viewer.serve(source_root, port)
+    except OSError as exc:
+        print(
+            f"error: cannot listen on 127.0.0.1:{port} ({exc.strerror or exc}) — "
+            f"try another port: tb config --port {port + 1}",
+            file=sys.stderr,
+        )
+        return 1
+    url = f"http://127.0.0.1:{server.server_address[1]}/{page}"
+    print(f"configuring {source_root} at {url} — Ctrl-C stops it")
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nconfiguration editor stopped")
+    finally:
+        server.server_close()
     return 0
 
 
@@ -1072,7 +1145,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     entries: list[tuple[dict, Path | None]] = []
     seen: set[str] = set()
     for scope in scopes:
-        for bunker in sorted(scope.glob("*_bunker")):
+        for bunker in layout.ticket_dirs(scope):
             t = _ticket(bunker)
             if t.get("id") and t["id"] not in seen:
                 seen.add(t["id"])
@@ -1364,8 +1437,27 @@ def cmd_checkout(args: argparse.Namespace) -> int:
     if not ticket.get("id"):
         print("error: bunker has no ticket.json", file=sys.stderr)
         return 1
-    ledger = _ledger(bunker)
     repo = Path(args.repo).resolve()
+    source_root = project_mod.find_source_root(repo)
+    if source_root is not None and project_mod.load_locator(source_root) is not None:
+        try:
+            commands.dispatch("project.setup", {}, commands.CommandContext(source_root, transport="cli"))
+        except commands.CommandRejected as exc:
+            print(f"error: cannot refresh companion data: {exc.message}", file=sys.stderr)
+            return 1
+        refreshed = layout.bunker_path(source_root, ticket["id"])
+        if not refreshed.is_dir():
+            print(f"error: companion data no longer contains {ticket['id']}", file=sys.stderr)
+            return 1
+        bunker = refreshed
+        ledger = _ledger(bunker)
+        children = sorted(layout.paths(bunker)["children"].glob("*.md"))
+        out_path = master.regenerate(bunker, ledger)
+        print(f"checkout {ticket['id']}: refreshed {len(children)} canonical report component(s)")
+        print(f"master regenerated at {out_path}")
+        return 0
+
+    ledger = _ledger(bunker)
     from .adapters.gitrun import GitError, git
 
     remotes = git(repo, ["remote"], ledger, "checkout").split()
@@ -1498,10 +1590,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tb", description="TicketBunker — git context layer for tickets")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", help="initialize .tb/ at the root of the current git repo (fails outside one)")
+    s = sub.add_parser("init", help="initialize this project in a companion TicketBunker Git repository")
+    s.add_argument("--project", required=False, help="project key, for example ECS")
+    s.add_argument("--project-name", default=None, help="display name (default: project key)")
+    s.add_argument("--bunker-repo", default=None, help="companion Git repository URL")
+    s.add_argument("--config-branch", default=project_mod.DEFAULT_CONFIG_BRANCH)
+    s.add_argument("--data-branch", default=project_mod.DEFAULT_DATA_BRANCH)
+    s.add_argument("--base", default=None, help="source baseline branch (default: current branch)")
+    s.add_argument("--port", type=int, default=8378, help="setup editor localhost port (default: 8378)")
+    s.add_argument("--no-open", action="store_true", help="do not open the setup editor in a browser")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/ (no field flags: opens $EDITOR on a template)")
+    s = sub.add_parser("setup", help="connect this checkout to its existing companion TicketBunker repository")
+    s.set_defaults(fn=cmd_setup)
+
+    s = sub.add_parser("migrate", help="move an embedded .tb database into a companion repository")
+    s.add_argument("--project", required=True, help="project key, for example ECS")
+    s.add_argument("--project-name", default=None, help="display name (default: legacy project name or key)")
+    s.add_argument("--bunker-repo", required=True, help="companion Git repository URL")
+    s.add_argument("--config-branch", default=project_mod.DEFAULT_CONFIG_BRANCH)
+    s.add_argument("--data-branch", default=project_mod.DEFAULT_DATA_BRANCH)
+    s.add_argument("--base", default=None, help="source baseline branch (default: current branch)")
+    s.set_defaults(fn=cmd_migrate)
+
+    s = sub.add_parser("ticket", help="create a ticket in the project's companion data (no field flags: opens $EDITOR)")
     s.add_argument("ticket_id", nargs="?", help="optional when --from-json contains an id")
     s.add_argument("--key", default=None,
                    help="token matched against branch names (default: the ticket id itself)")
@@ -1576,7 +1688,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--open", action="store_true", help="open the viewer in your browser")
     s.set_defaults(fn=cmd_view)
 
-    s = sub.add_parser("checkout", help="collect the ticket's report components from its branches and compile the master")
+    s = sub.add_parser("checkout", help="refresh the ticket's canonical report components and compile the master")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     s.add_argument("--remote", default="origin", help="remote to fetch before collecting (default: origin)")
@@ -1677,10 +1789,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--model", default=None, help="pi model pattern")
     s.set_defaults(fn=cmd_merge)
 
-    s = sub.add_parser("config", help="show or set global TicketBunker config (user identity, patterns)")
+    s = sub.add_parser("config", help="open the remote-backed project configuration editor")
     s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")
     s.add_argument("--bunker-root", default=None, metavar="DIR",
                    help="set where the bunker database lives, so tb run resolves bunkers from any repo")
+    s.add_argument("--port", type=int, default=8378, help="localhost port (default: 8378)")
+    s.add_argument("--no-open", action="store_true", help="do not open the editor in a browser")
     s.set_defaults(fn=cmd_config)
 
     s = sub.add_parser("branch", help="associate a branch with a ticket: create user/TICKET-name, or --assign an existing branch")
@@ -1694,7 +1808,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--base", default=None, help="ref to branch from (default: HEAD)")
     s.set_defaults(fn=cmd_branch)
 
-    s = sub.add_parser("sync", help="sync the bunker database through git (.tbignore respected)")
+    s = sub.add_parser("sync", help="sync a standalone or legacy bunker database through git")
     s.add_argument("root", help="the bunker database directory (contains *_bunker/)")
     s.add_argument("--remote", default=None, help="set/replace the origin remote URL")
     s.add_argument("--message", default=None, help="commit message (default: 'tb sync')")
@@ -1709,7 +1823,15 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_status)
 
     args = parser.parse_args(argv)
-    return args.fn(args)
+    result = args.fn(args)
+    source_root = project_mod.find_source_root()
+    if source_root is not None and project_mod.load_locator(source_root) is not None:
+        try:
+            project_mod.publish_data(source_root, f"TicketBunker: tb {args.cmd}")
+        except commands.CommandRejected as exc:
+            print(f"error: {exc.message}", file=sys.stderr)
+            return 1
+    return result
 
 
 if __name__ == "__main__":

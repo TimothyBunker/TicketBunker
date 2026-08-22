@@ -5,9 +5,9 @@ The CLI and localhost viewer are two presentations of the same committed
 those presentations: it resolves a whole ticket, its branches, and its child
 reports into one typed snapshot without inventing a second source of truth.
 
-Writes still go through :mod:`ticketbunker.handlers`, where intake is typed,
-validated, and ledgered.  Keeping this module read-only makes that boundary
-explicit for API users as well as the viewer.
+Writes go through :mod:`ticketbunker.commands`; those shared handlers route
+typed information through :mod:`ticketbunker.handlers`. Keeping this query
+module read-only makes that boundary explicit for API users and the viewer.
 """
 
 from __future__ import annotations
@@ -257,7 +257,7 @@ class TicketDatabase:
 
     def ticket_ids(self) -> tuple[str, ...]:
         ids = []
-        for bunker in sorted(layout.bunkers_dir(self.project_root).glob("*_bunker")):
+        for bunker in layout.ticket_dirs(layout.bunkers_dir(self.project_root)):
             ticket_id = _read_json(layout.paths(bunker)["ticket"]).get("id")
             if isinstance(ticket_id, str) and ticket_id:
                 ids.append(ticket_id)

@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 TB_DIR = ".tb"
+LOCATOR_FILE = ".ticketbunker.json"
 
 # Session-local material that must not be committed with the project repo.
 # Patterns with a slash anchor to the .gitignore's own directory, but these
@@ -45,17 +46,45 @@ def find_root(start: Path | None = None) -> Path | None:
     a .tb/ — the same discovery rule git uses for .git."""
     cur = (start or Path.cwd()).resolve()
     for candidate in [cur, *cur.parents]:
-        if (candidate / TB_DIR).is_dir():
+        if (candidate / LOCATOR_FILE).is_file() or (candidate / TB_DIR).is_dir():
             return candidate
     return None
 
 
 def bunkers_dir(project_root: Path) -> Path:
-    return Path(project_root) / TB_DIR
+    root = Path(project_root)
+    locator = root / LOCATOR_FILE
+    if locator.exists():
+        try:
+            import json
+
+            value = json.loads(locator.read_text(encoding="utf-8"))
+            key = value.get("project") if isinstance(value, dict) else None
+        except (OSError, ValueError):
+            key = None
+        if isinstance(key, str) and key:
+            return root / TB_DIR / "data" / "projects" / key / "tickets"
+    return root / TB_DIR
 
 
 def bunker_path(project_root: Path, ticket_id: str) -> Path:
-    return bunkers_dir(project_root) / f"{ticket_id}_bunker"
+    root = Path(project_root)
+    name = ticket_id if (root / LOCATOR_FILE).exists() else f"{ticket_id}_bunker"
+    return bunkers_dir(root) / name
+
+
+def ticket_dirs(scope: Path) -> list[Path]:
+    """Return current ticket records, including legacy ``*_bunker`` names."""
+    scope = Path(scope)
+    if not scope.is_dir():
+        return []
+    found = []
+    for path in sorted(scope.iterdir()):
+        if not path.is_dir() or path.name == ROOT_AREA:
+            continue
+        if (path / "ticket.json").is_file() and (path.name.endswith("_bunker") or "-" in path.name):
+            found.append(path)
+    return found
 
 
 def paths(bunker: Path) -> dict[str, Path]:

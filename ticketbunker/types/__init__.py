@@ -14,6 +14,113 @@ INFERENCE_TAGS = ("real", "speculation")
 GROUNDINGS = ("grounded", "adjacent", "ungrounded")
 TICKET_STATUSES = ("backlog", "todo", "in-progress", "in-review", "done", "closed")
 TICKET_TYPES = ("bug", "task", "story")
+FIELD_TYPES = ("string", "text", "markdown", "number", "boolean", "enum", "date", "datetime", "person", "people", "tags", "link")
+
+
+def _validate_field(field: object, prefix: str) -> list[str]:
+    if not isinstance(field, dict):
+        return [f"{prefix} must be an object"]
+    errors = []
+    key = field.get("key")
+    if not isinstance(key, str) or not key.strip():
+        errors.append(f"{prefix} requires a non-empty 'key'")
+    elif not all(part and part.replace("_", "").isalnum() for part in key.split(".")):
+        errors.append(f"{prefix} key {key!r} may contain letters, numbers, underscores, and namespace dots")
+    if not isinstance(field.get("label"), str) or not field["label"].strip():
+        errors.append(f"{prefix} requires a non-empty 'label'")
+    field_type = field.get("type")
+    if field_type not in FIELD_TYPES:
+        errors.append(f"{prefix} type must be one of {FIELD_TYPES}, got {field_type!r}")
+    values = field.get("values")
+    if field_type == "enum":
+        if not isinstance(values, list) or not values or not all(isinstance(value, str) and value.strip() for value in values):
+            errors.append(f"{prefix} enum requires non-empty string 'values'")
+    elif values is not None:
+        errors.append(f"{prefix} values are only valid for enum fields")
+    if field.get("required") is not None and not isinstance(field["required"], bool):
+        errors.append(f"{prefix} 'required' must be true or false")
+    return errors
+
+
+def _validate_project_composition(payload: dict) -> list[str]:
+    errors = []
+    sets = payload.get("field_sets")
+    if not isinstance(sets, list):
+        errors.append("composition requires a 'field_sets' list")
+    else:
+        for index, item in enumerate(sets):
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("version"), int):
+                errors.append(f"field set {index} requires string 'id' and integer 'version'")
+    project_fields = payload.get("project_fields", [])
+    if not isinstance(project_fields, list):
+        errors.append("'project_fields' must be a list")
+    else:
+        for index, field in enumerate(project_fields):
+            errors.extend(_validate_field(field, f"project field {index}"))
+    removed = payload.get("removed_fields", [])
+    if not isinstance(removed, list) or not all(isinstance(key, str) and key for key in removed):
+        errors.append("'removed_fields' must be a list of field keys")
+    overrides = payload.get("field_overrides", {})
+    if not isinstance(overrides, dict):
+        errors.append("'field_overrides' must be an object keyed by field key")
+    else:
+        for key, value in overrides.items():
+            errors.extend(_validate_field(value, f"field override {key!r}"))
+            if isinstance(value, dict) and value.get("key") != key:
+                errors.append(f"field override {key!r} must preserve its key")
+    return errors
+
+
+def _validate_project_mappings(payload: dict) -> list[str]:
+    providers = payload.get("providers")
+    if not isinstance(providers, dict):
+        return ["mappings require a 'providers' object"]
+    errors = []
+    for provider, settings in providers.items():
+        if not isinstance(provider, str) or not provider:
+            errors.append("provider names must be non-empty strings")
+            continue
+        if not isinstance(settings, dict):
+            errors.append(f"provider {provider!r} must be an object")
+            continue
+        fields = settings.get("fields", {})
+        if not isinstance(fields, dict) or not all(
+            isinstance(ours, str) and ours and isinstance(theirs, str) and theirs
+            for ours, theirs in fields.items()
+        ):
+            errors.append(f"provider {provider!r} fields must map non-empty strings to non-empty strings")
+    return errors
+
+
+def _validate_field_set(payload: dict) -> list[str]:
+    errors = []
+    if not isinstance(payload.get("id"), str) or not payload["id"].strip():
+        errors.append("field set requires a non-empty 'id'")
+    if not isinstance(payload.get("version"), int) or payload["version"] < 1:
+        errors.append("field set requires a positive integer 'version'")
+    fields = payload.get("fields")
+    if not isinstance(fields, list):
+        errors.append("field set requires a 'fields' list")
+    else:
+        seen = set()
+        for index, field in enumerate(fields):
+            errors.extend(_validate_field(field, f"field {index}"))
+            if isinstance(field, dict) and field.get("key") in seen:
+                errors.append(f"field set repeats key {field.get('key')!r}")
+            elif isinstance(field, dict):
+                seen.add(field.get("key"))
+    return errors
+
+
+def _validate_default_composition(payload: dict) -> list[str]:
+    sets = payload.get("field_sets")
+    if not isinstance(sets, list) or not sets:
+        return ["default composition requires at least one field set"]
+    errors = []
+    for index, item in enumerate(sets):
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("version"), int):
+            errors.append(f"field set {index} requires string 'id' and integer 'version'")
+    return errors
 
 
 def _validate_ticket(payload: dict) -> list[str]:
@@ -147,6 +254,10 @@ REGISTRY: dict[str, Callable[[dict], list[str]]] = {
     "report_component": _validate_report_component,
     "tbroot": _validate_tbroot,
     "observation": _validate_observation,
+    "project_composition": _validate_project_composition,
+    "project_mappings": _validate_project_mappings,
+    "field_set": _validate_field_set,
+    "default_composition": _validate_default_composition,
 }
 
 
