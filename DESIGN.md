@@ -339,10 +339,14 @@ observed git state (merged-back, recency — the pipeline's), never blended.
 (`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
 per-ticket pages organized around completing one ticket. The singular page has
 an explicit **Ticket / Agent** contract. Ticket is the default view and owns the
-description, optional acceptance criteria, carried-over comments, and collapsed
-tracker details. Agent owns Agent work and never mixes those fields into its
-report surface. Tracker lifecycle and the persistent Branches rail remain beside
-(never blended with) both views.
+Jira-like issue surface: its description and optional acceptance criteria read
+as constrained rich text in the primary column, carried-over comments form its
+Activity, and every populated tracker, project, and integration field remains
+visible in the right-hand **Details / More fields** rail. Nested provider metadata
+is flattened into readable field paths instead of exposed as a JSON blob. Agent
+owns Agent work and never mixes those fields into its report surface; declared
+lifecycle and the persistent Branches rail appear there beside the observed work,
+not on the ticket's tracker surface.
 
 Agent work defaults to **Master** and provides one native report selector at the
 right of its heading: Master followed by each branch report. Master presents each

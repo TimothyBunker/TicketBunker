@@ -86,9 +86,12 @@ Trust model, non-negotiable:
   `tb show` (fields, comments, development panel, report state, ledger
   tail), `tb view` (localhost web viewer, auto-reloads via database
   fingerprint polling). Per-ticket pages split ticket-owned and agent-owned
-  content into Ticket/Agent tabs. Agent work defaults to a branch-separated
-  Master synthesis; a native selector and the persistent Branches rail switch
-  to any child component while its full evidence stays collapsed by category.
+  content into Ticket/Agent tabs. Ticket is the Jira-like default: rich-text
+  description, acceptance criteria, and comment activity in the main column;
+  all populated base, custom, and provider fields stay visible in a
+  Details/More fields rail. Agent work defaults to a branch-separated Master
+  synthesis; a native selector and its Branches rail switch to any child
+  component while its full evidence stays collapsed by category.
   **Viewer is localhost-only BY DESIGN — no bind option, no
   auth surface, remote viewing is SSH port-forwarding's job. Do not add
   network exposure.**

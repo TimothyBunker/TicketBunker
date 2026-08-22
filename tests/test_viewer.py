@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from ticketbunker import layout
-from ticketbunker.viewer import page_index, page_ticket, render_report
+from ticketbunker.viewer import page_index, page_ticket, render_report, render_ticket_text
 
 
 class ViewerTests(unittest.TestCase):
@@ -24,12 +24,30 @@ class ViewerTests(unittest.TestCase):
                     "key": "nine",
                     "title": "A single, complete ticket",
                     "status": "in-progress",
+                    "type": "task",
                     "priority": "high",
                     "assignee": "Tim",
                     "reporter": "Grace",
-                    "description": "Show <script>alert('no')</script> safely.",
-                    "acceptance_criteria": ["Lifecycle is visible"],
-                    "metadata": {"tracker": "Jira"},
+                    "description": "## Context\n\nShow **important** <script>alert('no')</script> safely.\n\n- Keep the ticket readable",
+                    "acceptance_criteria": ["Ticket details are **visible**"],
+                    "labels": ["viewer", "jira"],
+                    "people_of_interest": ["Ada"],
+                    "references": ["TB-8"],
+                    "created": "2026-08-11T09:30:00+00:00",
+                    "updated": "2026-08-12T10:00:00+00:00",
+                    "comments": [
+                        {
+                            "author": "Ada",
+                            "when": "2026-08-12T09:00:00+00:00",
+                            "source": "https://jira.example/TB-9#comment-1",
+                            "text": "Please check `viewer.py` first.",
+                        }
+                    ],
+                    "metadata": {
+                        "tracker": "Jira",
+                        "source_url": "https://jira.example/TB-9",
+                        "github": {"project": {"number": 8}},
+                    },
                 }
             ),
             encoding="utf-8",
@@ -104,6 +122,7 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-view-tab="ticket">Ticket</button>', page)
         self.assertIn('data-view-tab="agent">Agent</button>', page)
         self.assertIn('id="ticket-panel" role="tabpanel"', page)
+        self.assertIn('data-view-panel="ticket"><div class="ticket-layout issue-layout">', page)
         self.assertIn('id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" data-view-panel="agent" hidden', page)
         self.assertIn("Agent work", page)
         self.assertIn("Work by Grace", page)
@@ -126,13 +145,33 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("Lifecycle", page)
         self.assertIn("Branches", page)
         self.assertIn("Details", page)
-        self.assertIn('<details class="details">', page)
-        self.assertNotIn('<details class="details" open>', page)
+        ticket_panel = page.split('id="ticket-panel"', 1)[1].split('id="agent-panel"', 1)[0]
+        agent_panel = page.split('id="agent-panel"', 1)[1]
+        self.assertIn('aria-label="Ticket details"', ticket_panel)
+        self.assertIn('<section class="issue-details"><h2>Details</h2>', ticket_panel)
+        self.assertIn('<section class="issue-details"><h2>More fields</h2>', ticket_panel)
+        self.assertIn('<dt>Type</dt><dd><span>Task</span></dd>', ticket_panel)
+        self.assertIn('<dt>Created</dt><dd><span>11 Aug 2026, 09:30</span></dd>', ticket_panel)
+        self.assertNotIn('<details class="details">', ticket_panel)
+        self.assertNotIn("Lifecycle", ticket_panel)
+        self.assertNotIn("Branches", ticket_panel)
+        self.assertIn("Lifecycle", agent_panel)
+        self.assertIn("Branches", agent_panel)
+        self.assertIn("Activity", ticket_panel)
+        self.assertIn("Please check <code>viewer.py</code> first.", ticket_panel)
+        self.assertIn('<span class="field-token">viewer</span>', ticket_panel)
+        self.assertIn('<a class="field-token mono" href="/ticket/TB-8">TB-8</a>', ticket_panel)
+        self.assertIn("GitHub · Project · Number", ticket_panel)
+        self.assertIn('<dt>Tracker</dt><dd><span>Jira</span></dd>', ticket_panel)
+        self.assertIn('href="https://jira.example/TB-9" rel="noreferrer">Open source</a>', ticket_panel)
         self.assertIn('aria-current="step"', page)
         self.assertIn('<link rel="icon" href="data:,">', page)
         self.assertIn('href="#report-grace__TB-9-a-very-long-branch-name-that-must-wrap"', page)
         self.assertNotIn('<details class="category-trail" open', page)
         self.assertNotIn("Reader brief", page)
+        self.assertIn("<h3>Context</h3>", ticket_panel)
+        self.assertIn("<strong>important</strong>", ticket_panel)
+        self.assertIn("<strong>visible</strong>", ticket_panel)
         self.assertIn("&lt;script&gt;alert(&#x27;no&#x27;)&lt;/script&gt;", page)
         self.assertNotIn("<script>alert('no')</script>", page)
         self.assertNotIn("<form", page)
@@ -150,6 +189,16 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('<span class="tag real">real</span>', rendered)
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", rendered)
         self.assertNotIn("<img", rendered)
+
+    def test_ticket_markup_is_rich_but_does_not_invent_provenance(self) -> None:
+        rendered = render_ticket_text(
+            "[real] Tracker copy\n\n1. Visit [source](https://example.com)\n\n```\n<script>\n```"
+        )
+
+        self.assertIn("<p>[real] Tracker copy</p>", rendered)
+        self.assertNotIn('<span class="tag real">', rendered)
+        self.assertIn('<ol>\n<li>Visit <a href="https://example.com" rel="noreferrer">source</a></li>\n</ol>', rendered)
+        self.assertIn("<pre><code>&lt;script&gt;</code></pre>", rendered)
 
     def test_legacy_report_gets_category_previews_without_inventing_a_brief(self) -> None:
         report = next(layout.paths(self.bunker)["children"].glob("*.md"))

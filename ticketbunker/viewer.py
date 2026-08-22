@@ -60,7 +60,7 @@ a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visib
 main { max-width: 1320px; margin: 0 auto; padding: 30px 34px 72px; }
 .crumbs { color: var(--muted); font-size: 12px; margin: 0 0 17px; }
 .crumbs a { color: inherit; }
-.ticket-head { padding-bottom: 25px; border-bottom: 1px solid var(--line); }
+.ticket-head { padding-bottom: 18px; }
 .ticket-key { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
 h1, h2, h3 { color: var(--fg); }
 h1 { font-size: 26px; line-height: 1.25; letter-spacing: -.018em; margin: 5px 0 15px; max-width: 920px; }
@@ -69,8 +69,6 @@ h3 { font-size: 13px; line-height: 1.35; margin: 0 0 8px; }
 p { margin: 0 0 12px; }
 .head-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; }
 .head-facts div { display: flex; align-items: center; gap: 7px; }
-.head-facts .fact-label { color: var(--muted); font-size: 12px; }
-.head-facts strong { color: var(--fg); font-weight: 650; }
 .badge {
   display: inline-flex;
   align-items: center;
@@ -88,9 +86,10 @@ p { margin: 0 0 12px; }
 .badge.stale, .badge.open { color: var(--warning); background: var(--warning-soft); }
 .badge.unverified, .badge.missing { color: var(--danger); background: var(--danger-soft); }
 .ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 0; }
+.issue-layout { grid-template-columns: minmax(0, 1fr) 340px; }
 .ticket-main { min-width: 0; padding: 31px 42px 0 0; }
 .ticket-rail { min-width: 0; padding: 31px 0 0 30px; border-left: 1px solid var(--line); }
-.view-tabs { display: flex; gap: 20px; margin: 0 0 30px; border-bottom: 1px solid var(--line); }
+.view-tabs { display: flex; gap: 20px; margin: 0; border-bottom: 1px solid var(--line); }
 .view-tab {
   min-height: 44px;
   padding: 9px 2px 8px;
@@ -106,7 +105,19 @@ p { margin: 0 0 12px; }
 .view-tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
 .view-panel[hidden], .report-panel[hidden] { display: none; }
 .section { margin: 0 0 34px; }
-.description { max-width: 78ch; white-space: pre-wrap; }
+.description, .issue-activity { max-width: 75ch; }
+.rich-text > :last-child { margin-bottom: 0; }
+.rich-text h3 { margin: 22px 0 8px; font-size: 15px; }
+.rich-text h4 { margin: 18px 0 7px; font-size: 13px; }
+.rich-text pre {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.rich-text pre code { padding: 0; background: transparent; white-space: pre; }
 .criteria { margin: 0; padding-left: 21px; }
 .criteria li { padding: 3px 0; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
@@ -154,7 +165,7 @@ p { margin: 0 0 12px; }
 .comment { padding: 14px 2px; border-bottom: 1px solid var(--line); }
 .comment-head { margin-bottom: 5px; color: var(--fg); font-weight: 650; }
 .comment-meta { margin-left: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
-.comment-text { white-space: pre-wrap; }
+.comment-text { color: var(--body); }
 .lifecycle { margin: 0; padding: 0; list-style: none; }
 .lifecycle li { padding: 6px 10px; border-left: 1px solid var(--line); color: var(--muted); }
 .lifecycle li.current { border-color: var(--accent); color: var(--fg); background: var(--accent-soft); font-weight: 650; }
@@ -164,11 +175,27 @@ p { margin: 0 0 12px; }
 .branch-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .branch-name { min-width: 0; color: var(--fg); font-weight: 650; }
 .branch-meta { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
-.details { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.details summary { cursor: pointer; padding: 12px 2px; color: var(--fg); font-weight: 650; }
-.details dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px 11px; margin: 0; padding: 2px 2px 15px; font-size: 12px; }
-.details dt { color: var(--muted); }
-.details dd { min-width: 0; margin: 0; color: var(--fg); }
+.issue-details { margin-bottom: 34px; }
+.issue-details + .issue-details { padding-top: 24px; border-top: 1px solid var(--line); }
+.issue-details dl {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px 14px;
+  margin: 0;
+  padding-top: 3px;
+  font-size: 13px;
+}
+.issue-details dt { color: var(--muted); }
+.issue-details dd { min-width: 0; margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.field-values { display: flex; flex-wrap: wrap; gap: 5px; }
+.field-token {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--panel);
+  font-size: 12px;
+}
 .validation { padding: 11px 13px; margin-bottom: 18px; border: 1px solid var(--danger); border-radius: var(--radius); background: var(--danger-soft); }
 .validation strong { color: var(--danger); }
 .validation ul { margin: 5px 0 0; padding-left: 18px; }
@@ -192,6 +219,7 @@ li { margin: 3px 0; }
 .ticket-link-meta { color: var(--muted); font-size: 12px; text-align: right; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
+  .issue-layout { grid-template-columns: minmax(0, 1fr) 290px; }
   .ticket-main { padding-right: 24px; }
   .ticket-rail { padding-left: 20px; }
   .report-picker select { min-width: min(210px, 30vw); }
@@ -202,6 +230,7 @@ li { margin: 3px 0; }
   .ticket-layout { display: block; }
   .ticket-main { padding: 25px 0 0; }
   .ticket-rail { padding: 28px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .issue-details dl { grid-template-columns: 104px minmax(0, 1fr); }
   .section-heading { align-items: flex-start; }
   .section-heading h2 { flex: 0 0 auto; }
   .section-heading a { flex: 1 1 auto; }
@@ -324,7 +353,18 @@ def fingerprint(root: Path) -> str:
 
 def _inline(escaped: str) -> str:
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
-    return re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"(?<!\*)\*([^*]+)\*", r"<em>\1</em>", escaped)
+
+    def link(match: re.Match[str]) -> str:
+        url = html.unescape(match.group(2))
+        if not url.startswith(("https://", "http://")):
+            return match.group(0)
+        return (
+            f'<a href="{match.group(2)}" rel="noreferrer">{match.group(1)}</a>'
+        )
+
+    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, escaped)
 
 
 def _claim(escaped: str) -> str:
@@ -339,19 +379,43 @@ def _claim(escaped: str) -> str:
     )
 
 
-def render_report(text: str) -> str:
-    """Render the constrained report markdown subset after escaping input."""
+def _render_markdown(text: str, *, claims: bool, issue_copy: bool = False) -> str:
+    """Render TicketBunker's safe markdown subset after escaping input."""
     output: list[str] = []
-    in_list = False
+    list_tag = ""
+    code_lines: list[str] | None = None
 
     def close_list() -> None:
-        nonlocal in_list
-        if in_list:
-            output.append("</ul>")
-            in_list = False
+        nonlocal list_tag
+        if list_tag:
+            output.append(f"</{list_tag}>")
+            list_tag = ""
+
+    def open_list(tag: str) -> None:
+        nonlocal list_tag
+        if list_tag == tag:
+            return
+        close_list()
+        output.append(f"<{tag}>")
+        list_tag = tag
+
+    def inline(value: str) -> str:
+        return _claim(value) if claims else _inline(value)
 
     for raw in text.splitlines():
         line = raw.rstrip()
+        if line.startswith("```"):
+            close_list()
+            if code_lines is None:
+                code_lines = []
+            else:
+                code = "\n".join(html.escape(value) for value in code_lines)
+                output.append(f"<pre><code>{code}</code></pre>")
+                code_lines = None
+            continue
+        if code_lines is not None:
+            code_lines.append(raw)
+            continue
         if line.startswith("<!--"):
             continue
         escaped = html.escape(line)
@@ -359,26 +423,44 @@ def render_report(text: str) -> str:
             close_list()
         elif line.startswith("### "):
             close_list()
-            output.append(f"<h3>{_inline(escaped[4:])}</h3>")
+            tag = "h4" if issue_copy else "h3"
+            output.append(f"<{tag}>{_inline(escaped[4:])}</{tag}>")
         elif line.startswith("## "):
             close_list()
-            output.append(f"<h2>{_inline(escaped[3:])}</h2>")
+            tag = "h3" if issue_copy else "h2"
+            output.append(f"<{tag}>{_inline(escaped[3:])}</{tag}>")
         elif line.startswith("# "):
             close_list()
-            output.append(f"<h2>{_inline(escaped[2:])}</h2>")
+            tag = "h3" if issue_copy else "h2"
+            output.append(f"<{tag}>{_inline(escaped[2:])}</{tag}>")
         elif line.strip() == "---":
             close_list()
             output.append("<hr>")
-        elif line.startswith("- "):
-            if not in_list:
-                output.append("<ul>")
-                in_list = True
-            output.append(f"<li>{_claim(escaped[2:])}</li>")
+        elif line.startswith(("- ", "* ")):
+            open_list("ul")
+            output.append(f"<li>{inline(escaped[2:])}</li>")
+        elif re.match(r"^\d+\.\s", line):
+            open_list("ol")
+            content = re.sub(r"^\d+\.\s", "", escaped, count=1)
+            output.append(f"<li>{inline(content)}</li>")
         else:
             close_list()
-            output.append(f"<p>{_claim(escaped)}</p>")
+            output.append(f"<p>{inline(escaped)}</p>")
+    if code_lines is not None:
+        code = "\n".join(html.escape(value) for value in code_lines)
+        output.append(f"<pre><code>{code}</code></pre>")
     close_list()
     return "\n".join(output)
+
+
+def render_report(text: str) -> str:
+    """Render report markdown with provenance claim chips."""
+    return _render_markdown(text, claims=True)
+
+
+def render_ticket_text(text: str) -> str:
+    """Render tracker-authored rich text without treating claim words as provenance."""
+    return _render_markdown(text, claims=False, issue_copy=True)
 
 
 def _page(title: str, body: str, fp: str) -> bytes:
@@ -618,12 +700,13 @@ def _comments(ticket: TicketSnapshot) -> str:
         rows.append(
             f'<article class="comment"><div class="comment-head">{author}'
             f'<span class="comment-meta">{when}{source_html}</span></div>'
-            f'<div class="comment-text">{html.escape(str(comment.get("text") or ""))}</div></article>'
+            f'<div class="comment-text rich-text">'
+            f'{render_ticket_text(str(comment.get("text") or ""))}</div></article>'
         )
     if not rows:
         return ""
     return (
-        '<section class="section"><h2>Comments</h2>'
+        '<section class="section issue-activity"><h2>Activity</h2>'
         f'<div class="comments">{"".join(rows)}</div></section>'
     )
 
@@ -669,43 +752,118 @@ def _branches(ticket: TicketSnapshot) -> str:
     )
 
 
-def _display_value(value: Any) -> str:
+_FIELD_LABELS = {
+    "assignee": "Assignee",
+    "created": "Created",
+    "github": "GitHub",
+    "gitlab": "GitLab",
+    "id": "ID",
+    "issue_node_id": "Issue node ID",
+    "item_id": "Item ID",
+    "jira": "Jira",
+    "labels": "Labels",
+    "people_of_interest": "People",
+    "priority": "Priority",
+    "references": "Linked tickets",
+    "repo": "Repository",
+    "reporter": "Reporter",
+    "source_url": "Source",
+    "type": "Type",
+    "updated": "Updated",
+    "url": "URL",
+}
+
+
+def _field_label(path: tuple[str, ...]) -> str:
+    labels = []
+    for key in path:
+        labels.append(_FIELD_LABELS.get(key.casefold(), key.replace("_", " ").capitalize()))
+    return " · ".join(labels)
+
+
+def _flatten_value(path: tuple[str, ...], value: Any) -> list[tuple[tuple[str, ...], Any]]:
+    if isinstance(value, Mapping):
+        flattened: list[tuple[tuple[str, ...], Any]] = []
+        for key in sorted(value, key=lambda item: str(item).casefold()):
+            flattened.extend(_flatten_value((*path, str(key)), value[key]))
+        return flattened
+    if value in (None, "") or value == [] or value == ():
+        return []
+    return [(path, value)]
+
+
+def _field_value(path: tuple[str, ...], value: Any) -> str:
+    key = path[-1].casefold()
+    if key in {"created", "updated"} or key.endswith("_at"):
+        value = _datetime(value)
+    if isinstance(value, (list, tuple)):
+        if key == "references":
+            links = (
+                f'<a class="field-token mono" href="/ticket/{html.escape(str(item), quote=True)}">'
+                f'{html.escape(str(item))}</a>'
+                for item in value
+            )
+            return f'<span class="field-values">{"".join(links)}</span>'
+        tokens = "".join(
+            f'<span class="field-token">{html.escape(str(item))}</span>' for item in value
+        )
+        return f'<span class="field-values">{tokens}</span>'
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
     if isinstance(value, (dict, list)):
-        return html.escape(json.dumps(value, ensure_ascii=False, sort_keys=True))
-    return html.escape(str(value))
+        return f'<span class="mono">{html.escape(json.dumps(value, ensure_ascii=False, sort_keys=True))}</span>'
+    text = str(value)
+    if key in {"priority", "type"}:
+        text = text.replace("-", " ").capitalize()
+    if key == "tracker":
+        text = {"github": "GitHub", "gitlab": "GitLab", "jira": "Jira"}.get(
+            text.casefold(), text
+        )
+    if text.startswith(("https://", "http://")):
+        label = "Open source" if key == "source_url" else "Open link"
+        return (
+            f'<a href="{html.escape(text, quote=True)}" rel="noreferrer">'
+            f'{html.escape(label)}</a>'
+        )
+    monospace = key in {"repo", "id", "key"} or key.endswith("_id")
+    class_name = ' class="mono"' if monospace else ""
+    return f"<span{class_name}>{html.escape(text)}</span>"
 
 
 def _details(ticket: TicketSnapshot) -> str:
     data = ticket.data
-    fields: list[tuple[str, Any]] = []
-    for label, key in (
-        ("Type", "type"),
-        ("Reporter", "reporter"),
-        ("Created", "created"),
-        ("Updated", "updated"),
-        ("Labels", "labels"),
-        ("People", "people_of_interest"),
-        ("References", "references"),
-        ("Assigned", "assigned_branches"),
-    ):
-        value = data.get(key)
-        if key in {"created", "updated"}:
-            value = _datetime(value)
-        if isinstance(value, list):
-            value = ", ".join(str(item) for item in value)
-        if value:
-            fields.append((label, value))
+    fields: list[tuple[tuple[str, ...], Any]] = []
+    ordered = (
+        "type", "assignee", "reporter", "priority", "labels", "created", "updated",
+        "people_of_interest", "references",
+    )
+    for key in ordered:
+        fields.extend(_flatten_value((key,), data.get(key)))
+
+    reserved = {
+        "id", "key", "title", "description", "status", "acceptance_criteria",
+        "comments", "metadata", "assigned_branches", *ordered,
+    }
+    for key in sorted((key for key in data if key not in reserved), key=str.casefold):
+        fields.extend(_flatten_value((str(key),), data[key]))
+    metadata_fields: list[tuple[tuple[str, ...], Any]] = []
     metadata = data.get("metadata")
     if isinstance(metadata, Mapping):
-        for key in sorted(metadata):
-            fields.append((str(key), metadata[key]))
-    rows = "".join(
-        f"<dt>{html.escape(label)}</dt><dd class=\"mono\">{_display_value(value)}</dd>"
-        for label, value in fields
-    )
-    if not rows:
-        return ""
-    return f'<details class="details"><summary>Details</summary><dl>{rows}</dl></details>'
+        preferred = [key for key in ("tracker", "source_url") if key in metadata]
+        remaining = sorted((key for key in metadata if key not in preferred), key=str.casefold)
+        for key in (*preferred, *remaining):
+            metadata_fields.extend(_flatten_value((str(key),), metadata[key]))
+
+    def section(title: str, selected: list[tuple[tuple[str, ...], Any]]) -> str:
+        rows = "".join(
+            f"<dt>{html.escape(_field_label(path))}</dt><dd>{_field_value(path, value)}</dd>"
+            for path, value in selected
+        )
+        if not rows:
+            return ""
+        return f'<section class="issue-details"><h2>{title}</h2><dl>{rows}</dl></section>'
+
+    return section("Details", fields) + section("More fields", metadata_fields)
 
 
 def _validation(ticket: TicketSnapshot) -> str:
@@ -760,29 +918,20 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
     if status:
         kind = "done" if status in {"done", "closed"} else "status"
         head_badges.append(_badge(_status_label(status), kind))
-    priority = str(ticket.data.get("priority") or "")
-    if priority:
-        head_badges.append(_badge(priority.capitalize()))
-    assignee = str(ticket.data.get("assignee") or "")
     facts = []
     if head_badges:
         facts.append(f'<div class="head-badges">{"".join(head_badges)}</div>')
-    if assignee:
-        facts.append(
-            '<div><span class="fact-label">Assignee</span>'
-            f'<strong>{html.escape(assignee)}</strong></div>'
-        )
     head_facts = f'<div class="head-facts">{"".join(facts)}</div>' if facts else ""
 
-    ticket_sections = []
-    if ticket.description:
-        ticket_sections.append(
-            '<section class="section"><h2>Description</h2>'
-            f'<div class="description">{html.escape(ticket.description)}</div></section>'
-        )
+    ticket_sections = [
+        '<section class="section"><h2>Description</h2>'
+        f'<div class="description rich-text">'
+        f'{render_ticket_text(ticket.description) if ticket.description else "<p class=\"empty\">No description.</p>"}'
+        '</div></section>'
+    ]
     criteria = ticket.data.get("acceptance_criteria") or []
     if isinstance(criteria, list) and criteria:
-        items = "".join(f"<li>{html.escape(str(item))}</li>" for item in criteria)
+        items = "".join(f"<li>{_inline(html.escape(str(item)))}</li>" for item in criteria)
         ticket_sections.append(
             f'<section class="section"><h2>Acceptance criteria</h2><ul class="criteria">{items}</ul></section>'
         )
@@ -790,10 +939,6 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
     if comments:
         ticket_sections.append(comments)
     details = _details(ticket)
-    if details:
-        ticket_sections.append(f'<section class="section ticket-details">{details}</section>')
-    if not ticket_sections:
-        ticket_sections.append('<p class="empty">No ticket information yet.</p>')
 
     tabs = (
         '<div class="view-tabs" role="tablist" aria-label="Ticket view">'
@@ -804,20 +949,23 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
     )
     panels = (
         '<div class="view-panel" id="ticket-panel" role="tabpanel" aria-labelledby="ticket-tab" '
-        f'data-view-panel="ticket">{"".join(ticket_sections)}</div>'
+        'data-view-panel="ticket">'
+        '<div class="ticket-layout issue-layout"><article class="ticket-main issue-main">'
+        f'{"".join(ticket_sections)}</article><aside class="ticket-rail issue-rail" '
+        f'aria-label="Ticket details">{details}</aside></div></div>'
         '<div class="view-panel" id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" '
-        f'data-view-panel="agent" hidden>{_agent_work(ticket)}</div>'
+        'data-view-panel="agent" hidden><div class="ticket-layout">'
+        f'<div class="ticket-main">{_agent_work(ticket)}</div>'
+        f'<aside class="ticket-rail">{_lifecycle(ticket)}{_branches(ticket)}</aside></div></div>'
     )
 
     body = (
-        '<div class="crumbs"><a href="/">Tickets</a> / '
-        f'{html.escape(ticket.id)}</div>{_validation(ticket)}'
+        '<div class="crumbs"><a href="/">Tickets</a></div>'
+        f'{_validation(ticket)}'
         '<header class="ticket-head">'
         f'<div class="ticket-key">{html.escape(ticket.id)}</div>'
         f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}</header>'
-        '<div class="ticket-layout"><div class="ticket-main">'
-        f'{tabs}{panels}</div><aside class="ticket-rail">'
-        f'{_lifecycle(ticket)}{_branches(ticket)}</aside></div>'
+        f'{tabs}{panels}'
     )
     return _page(f"{ticket.id} — TicketBunker", body, fp)
 
