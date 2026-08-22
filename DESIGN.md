@@ -342,11 +342,11 @@ an explicit **Ticket / Agent** contract. Ticket is the default view and owns the
 Jira-like issue surface: its description and optional acceptance criteria read
 as constrained rich text in the primary column, carried-over comments form its
 Activity, and every populated tracker, project, and integration field remains
-visible in the right-hand **Details / More fields** rail. Nested provider metadata
-is flattened into readable field paths instead of exposed as a JSON blob. Agent
-owns Agent work and never mixes those fields into its report surface; declared
-lifecycle and the persistent Branches rail appear there beside the observed work,
-not on the ticket's tracker surface.
+visible in one **Details** section at the bottom of the same reading column.
+Nested provider metadata is flattened into readable field paths instead of
+exposed as a JSON blob. Agent owns Agent work and never mixes those fields into
+its report surface; declared lifecycle and the persistent Branches rail appear
+there beside the observed work, not on the ticket's tracker surface.
 
 Agent work defaults to **Master** and provides one native report selector at the
 right of its heading: Master followed by each branch report. Master presents each

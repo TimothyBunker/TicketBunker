@@ -122,7 +122,7 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-view-tab="ticket">Ticket</button>', page)
         self.assertIn('data-view-tab="agent">Agent</button>', page)
         self.assertIn('id="ticket-panel" role="tabpanel"', page)
-        self.assertIn('data-view-panel="ticket"><div class="ticket-layout issue-layout">', page)
+        self.assertIn('data-view-panel="ticket"><article class="ticket-main ticket-page">', page)
         self.assertIn('id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" data-view-panel="agent" hidden', page)
         self.assertIn("Agent work", page)
         self.assertIn("Work by Grace", page)
@@ -147,9 +147,12 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("Details", page)
         ticket_panel = page.split('id="ticket-panel"', 1)[1].split('id="agent-panel"', 1)[0]
         agent_panel = page.split('id="agent-panel"', 1)[1]
-        self.assertIn('aria-label="Ticket details"', ticket_panel)
         self.assertIn('<section class="issue-details"><h2>Details</h2>', ticket_panel)
-        self.assertIn('<section class="issue-details"><h2>More fields</h2>', ticket_panel)
+        self.assertEqual(ticket_panel.count('<section class="issue-details">'), 1)
+        self.assertNotIn("More fields", ticket_panel)
+        self.assertNotIn('class="ticket-rail', ticket_panel)
+        self.assertLess(ticket_panel.index("Description"), ticket_panel.index("Activity"))
+        self.assertLess(ticket_panel.index("Activity"), ticket_panel.index("Details"))
         self.assertIn('<dt>Type</dt><dd><span>Task</span></dd>', ticket_panel)
         self.assertIn('<dt>Created</dt><dd><span>11 Aug 2026, 09:30</span></dd>', ticket_panel)
         self.assertNotIn('<details class="details">', ticket_panel)

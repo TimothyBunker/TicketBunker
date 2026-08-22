@@ -86,8 +86,8 @@ p { margin: 0 0 12px; }
 .badge.stale, .badge.open { color: var(--warning); background: var(--warning-soft); }
 .badge.unverified, .badge.missing { color: var(--danger); background: var(--danger-soft); }
 .ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 0; }
-.issue-layout { grid-template-columns: minmax(0, 1fr) 340px; }
 .ticket-main { min-width: 0; padding: 31px 42px 0 0; }
+.ticket-page { max-width: 78ch; padding-right: 0; }
 .ticket-rail { min-width: 0; padding: 31px 0 0 30px; border-left: 1px solid var(--line); }
 .view-tabs { display: flex; gap: 20px; margin: 0; border-bottom: 1px solid var(--line); }
 .view-tab {
@@ -175,11 +175,10 @@ p { margin: 0 0 12px; }
 .branch-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .branch-name { min-width: 0; color: var(--fg); font-weight: 650; }
 .branch-meta { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
-.issue-details { margin-bottom: 34px; }
-.issue-details + .issue-details { padding-top: 24px; border-top: 1px solid var(--line); }
+.issue-details { margin: 6px 0 34px; padding-top: 28px; border-top: 1px solid var(--line); }
 .issue-details dl {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
+  grid-template-columns: 144px minmax(0, 1fr);
   gap: 12px 14px;
   margin: 0;
   padding-top: 3px;
@@ -219,8 +218,8 @@ li { margin: 3px 0; }
 .ticket-link-meta { color: var(--muted); font-size: 12px; text-align: right; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
-  .issue-layout { grid-template-columns: minmax(0, 1fr) 290px; }
   .ticket-main { padding-right: 24px; }
+  .ticket-page { padding-right: 0; }
   .ticket-rail { padding-left: 20px; }
   .report-picker select { min-width: min(210px, 30vw); }
 }
@@ -854,16 +853,14 @@ def _details(ticket: TicketSnapshot) -> str:
         for key in (*preferred, *remaining):
             metadata_fields.extend(_flatten_value((str(key),), metadata[key]))
 
-    def section(title: str, selected: list[tuple[tuple[str, ...], Any]]) -> str:
-        rows = "".join(
-            f"<dt>{html.escape(_field_label(path))}</dt><dd>{_field_value(path, value)}</dd>"
-            for path, value in selected
-        )
-        if not rows:
-            return ""
-        return f'<section class="issue-details"><h2>{title}</h2><dl>{rows}</dl></section>'
-
-    return section("Details", fields) + section("More fields", metadata_fields)
+    all_fields = fields + metadata_fields
+    rows = "".join(
+        f"<dt>{html.escape(_field_label(path))}</dt><dd>{_field_value(path, value)}</dd>"
+        for path, value in all_fields
+    )
+    if not rows:
+        return ""
+    return f'<section class="issue-details"><h2>Details</h2><dl>{rows}</dl></section>'
 
 
 def _validation(ticket: TicketSnapshot) -> str:
@@ -950,9 +947,8 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
     panels = (
         '<div class="view-panel" id="ticket-panel" role="tabpanel" aria-labelledby="ticket-tab" '
         'data-view-panel="ticket">'
-        '<div class="ticket-layout issue-layout"><article class="ticket-main issue-main">'
-        f'{"".join(ticket_sections)}</article><aside class="ticket-rail issue-rail" '
-        f'aria-label="Ticket details">{details}</aside></div></div>'
+        '<article class="ticket-main ticket-page">'
+        f'{"".join(ticket_sections)}{details}</article></div>'
         '<div class="view-panel" id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" '
         'data-view-panel="agent" hidden><div class="ticket-layout">'
         f'<div class="ticket-main">{_agent_work(ticket)}</div>'
