@@ -43,7 +43,7 @@ def _load_builtins() -> None:
     # Importing registers handlers through the decorators below. Keeping this
     # lazy avoids package-import cycles while making commands.dispatch the one
     # complete programmatic mutation entry point.
-    from . import project, projectconfig, ticketcommands  # noqa: F401
+    from . import project, projectconfig, ticketcommands, workflow  # noqa: F401
 
 
 def register(name: str) -> Callable[[CommandHandler], CommandHandler]:

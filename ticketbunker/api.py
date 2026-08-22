@@ -389,12 +389,14 @@ class TicketDatabase:
         # ticket assignments visible instead of making them disappear.
         assigned_value = data.get("assigned_branches")
         assigned = assigned_value if isinstance(assigned_value, list) else []
+        unobserved_names: list[str] = []
         for name in assigned:
             if isinstance(name, str) and name not in branch_names and name not in missing_names:
-                missing_names.append(name)
+                unobserved_names.append(name)
 
         branches: list[BranchSnapshot] = []
         resolved_names = [(name, False) for name in branch_names]
+        resolved_names += [(name, False) for name in unobserved_names]
         resolved_names += [(name, True) for name in missing_names]
         for name, is_missing in resolved_names:
             merge = _branch_value(merge_per, name)

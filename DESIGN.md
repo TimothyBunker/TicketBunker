@@ -395,17 +395,21 @@ compact previews from their evidence without inventing synthesis. Verification
 and freshness remain visible. Each child trail labels work authors separately
 from the harness/provider/model that generated the report; a selected branch also
 shows its known generator beside its branch identity. Unknown generator fields
-stay absent instead of being guessed. Trust tags render as
-chips. It is strictly
-read-only — no write
-endpoint exists, every page renders from `.tb/` on each request, and pages
+stay absent instead of being guessed. Trust tags render as chips. Ticket,
+Project, and Agent reading remains strictly read-only. The one exception is an
+explicit local **Work** control: a small plus beside Branches opens a form for a
+short branch name and a real base-branch choice. Its CSRF-protected POST
+dispatches the same `workflow.start` command as `tb branch`; it is not a ticket,
+comment, report, or lifecycle editor. Every page renders from `.tb/` on each request, and pages
 poll a database fingerprint so whatever the user is looking at reloads
 when the data changes. All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.
 Localhost-only is a decision, not a limitation: there is deliberately no
 bind option and no auth surface — remote viewing (phone, another machine)
 is SSH port-forwarding's job, which already carries the repo's own access
-control. Do not add network exposure to the viewer.
+control. The Work endpoint accepts a per-server unguessable transport token
+embedded only in same-origin pages and remains bound to localhost. Do not add
+network exposure to the viewer.
 
 **There is one Python read model.** `ticketbunker/api.py` exposes the public,
 read-only `TicketCatalog`, `TicketDatabase`, query/page types, and typed
@@ -788,10 +792,14 @@ the reconciled set lands atomically or not at all; the ledger records
 
 **The workflow:** configure identity once → select or locally claim a global
 ticket → input just the short branch name → the system **fills in the rest and
-creates the branch in a relatively normal git fashion** (a ledgered
-`git branch`, nothing exotic). Nobody hand-types the convention, so nobody
-gets it wrong — the pattern is enforced by construction at the same place
-the branch is born.
+performs an ordinary, guarded Git workflow**. It refuses a dirty worktree,
+fetches `origin` when present, switches to the chosen local/tracking base,
+fast-forwards it only, then creates and switches to the convention-named branch.
+Only after Git succeeds does it create the typed session config and publish the
+branch assignment. Nobody hand-types the convention, so nobody gets it wrong —
+the pattern is enforced by construction at the same place the branch is born.
+Failure messages name the state that stopped Git and what the user must do next;
+no reset, forced checkout, auto-stash, or non-fast-forward merge occurs.
 
 **The ticket is the deliberate step, so creating one must not hurt.** A
 ticket mirrors the useful core of a tracker issue — id, title, description,
@@ -815,11 +823,12 @@ is never a hand-edited side channel into ticket.json.
 branch-match key defaults to the ticket ID itself (`--key` overrides it for
 teams whose convention uses a different token), so any branch carrying the
 ID associates automatically — and `tb branch`-created branches carry it by
-construction. For a branch that predates the convention or won't be
-renamed, `tb branch <TICKET> --assign BRANCH` records an explicit
-assignment on the ticket itself (`assigned_branches` in ticket.json — ours
-provenance, travels with the repo, re-entering through the ticket intake
-gate). Branch resolution (§3.2) unions both sources and labels each
+construction. An existing branch may be attached only when its name already
+contains the bounded ticket key; a misnamed branch is rejected with a rename
+instruction instead of silently weakening resolution. `workflow.attach`
+records an accepted branch on the ticket itself (`assigned_branches` in
+ticket.json — ours provenance, travels with the repo, re-entering through the
+ticket intake gate). Branch resolution (§3.2) unions both sources and labels each
 branch's match rule; `tb run` on an assigned branch resolves its ticket
 through the assignment when the branch name carries no ID.
 

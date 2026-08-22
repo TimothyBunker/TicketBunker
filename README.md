@@ -83,14 +83,14 @@ tb ticket TB-1267                                  # opens $EDITOR on a ticket t
 tb ticket --from-json ticket.json                  # complete provider-neutral object; ID may come from JSON
 tb ticket --from-json -                            # paste one JSON object, then Ctrl-D; pipes use the same gate
 tb comment TB-1267 --author ann --when 2026-08-10  # carry a tracker comment over verbatim (paste in $EDITOR or pipe stdin)
-tb branch TB-1267 --name fourier-alg-impl --repo . # creates Tim/TB-1267-fourier-alg-impl
-tb branch TB-1267 --assign legacy-fix --repo .     # or adopt an existing branch whose name carries no ticket ID
+tb branch TB-1267 --name fourier-alg-impl          # refreshes the base, creates, and switches to Tim/TB-1267-fourier-alg-impl
+tb branch TB-1267 --assign Tim/TB-1267-existing    # attach an existing convention-named branch
 
 tb set TB-1267 --status in-review                  # move ticket fields through the same gate (status, priority, labels...)
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
-tb view                                            # read-only Tickets / Projects / Ticket / Agent viewer at http://127.0.0.1:8377
+tb view                                            # Tickets / Projects / Ticket / Agent + guarded local Work at 127.0.0.1:8377
 tb hooks --install                                 # git hooks: observations + master refresh on every commit/merge
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)

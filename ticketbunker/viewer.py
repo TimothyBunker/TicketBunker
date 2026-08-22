@@ -1,9 +1,8 @@
-"""The localhost-only, read-only ticket viewer (DESIGN.md §3.5).
+"""The localhost ticket viewer and explicit local Work action (DESIGN.md §3.5).
 
 Every request renders a fresh :class:`ticketbunker.api.TicketSnapshot` from
-the repository-owned ``.tb/`` database.  The viewer has no write endpoint and
-no parallel state: browser refreshes and the lightweight poll both converge
-on whatever the current checkout contains.
+the repository-owned ``.tb/`` database. Ticket and Agent views remain read-only;
+the isolated Work control dispatches the same guarded command as the CLI.
 """
 
 from __future__ import annotations
@@ -12,12 +11,13 @@ import hashlib
 import html
 import json
 import re
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import config, layout
+from . import commands, config, layout, workflow
 from .api import (
     ReportSnapshot,
     TicketCatalog,
@@ -185,6 +185,43 @@ p { margin: 0 0 12px; }
 .lifecycle li { padding: 6px 10px; border-left: 1px solid var(--line); color: var(--muted); }
 .lifecycle li.current { border-color: var(--accent); color: var(--fg); background: var(--accent-soft); font-weight: 650; }
 .branch-list { border-top: 1px solid var(--line); }
+.branch-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.branch-heading h2 { margin: 0; }
+.branch-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--accent);
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+.branch-add:hover { background: var(--accent-soft); }
+.work-panel { margin: 12px 0 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.work-panel[hidden] { display: none; }
+.work-panel h3 { margin-bottom: 11px; }
+.work-form { display: grid; gap: 11px; }
+.work-field { display: grid; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.work-field input, .work-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+}
+.work-submit { min-height: 42px; border: 1px solid var(--accent); border-radius: var(--radius); color: #fff; background: var(--accent); font-weight: 650; cursor: pointer; }
+.work-submit:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--line); cursor: not-allowed; }
+.work-state { min-height: 20px; margin: 0; color: var(--muted); font-size: 12px; }
+.work-state.error { color: var(--danger); }
+.work-state.success { color: var(--success); }
 .branch-row { display: block; padding: 11px 2px; border-bottom: 1px solid var(--line); color: inherit; }
 .branch-row:hover { background: var(--panel); text-decoration: none; }
 .branch-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -447,6 +484,80 @@ document.addEventListener('click', (event) => {
     document.querySelector(link.getAttribute('href')).scrollIntoView({block: 'start'});
   }
 });
+
+const workToggle = document.querySelector('[data-work-toggle]');
+const workPanel = document.querySelector('[data-work-panel]');
+const workForm = document.querySelector('[data-work-form]');
+const workBase = document.querySelector('[data-work-base]');
+const workStatus = document.querySelector('[data-work-status]');
+const workSubmit = document.querySelector('[data-work-submit]');
+
+function setWorkStatus(message, kind = '') {
+  if (!workStatus) return;
+  workStatus.textContent = message;
+  workStatus.className = `work-state ${kind}`.trim();
+}
+
+async function loadWorkState() {
+  if (!workForm || workForm.dataset.loaded === 'true') return;
+  setWorkStatus('Checking the local repository…');
+  workSubmit.disabled = true;
+  try {
+    const response = await fetch(`/work/state/${encodeURIComponent(workForm.dataset.ticket)}`);
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.message || 'Repository preflight failed.');
+    workBase.replaceChildren(...value.base_branches.map((branch) => {
+      const option = document.createElement('option');
+      option.value = branch;
+      option.textContent = branch;
+      option.selected = branch === value.base_branch;
+      return option;
+    }));
+    workForm.dataset.loaded = 'true';
+    if (value.clean) {
+      setWorkStatus(`Ready on ${value.current_branch || 'detached HEAD'}.`);
+      workSubmit.disabled = value.base_branches.length === 0;
+    } else {
+      setWorkStatus(`Commit or stash first: ${value.dirty_paths.join(', ')}`, 'error');
+    }
+  } catch (error) {
+    setWorkStatus(error.message, 'error');
+  }
+}
+
+if (workToggle && workPanel) workToggle.addEventListener('click', () => {
+  workPanel.hidden = !workPanel.hidden;
+  workToggle.setAttribute('aria-expanded', String(!workPanel.hidden));
+  if (!workPanel.hidden) {
+    loadWorkState();
+    workForm.querySelector('input[name="name"]').focus();
+  }
+});
+
+if (workForm) workForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  workSubmit.disabled = true;
+  setWorkStatus('Refreshing the base and creating the branch…');
+  try {
+    const response = await fetch('/work', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': workForm.dataset.token},
+      body: JSON.stringify({
+        ticket: workForm.dataset.ticket,
+        name: new FormData(workForm).get('name'),
+        base: new FormData(workForm).get('base')
+      })
+    });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.message || 'Branch creation failed.');
+    setWorkStatus(`Created and switched to ${value.branch}.`, 'success');
+    window.setTimeout(() => location.reload(), 900);
+  } catch (error) {
+    setWorkStatus(error.message, 'error');
+    workSubmit.disabled = false;
+  }
+});
+
 setInterval(async () => {
   try {
     const response = await fetch('/poll');
@@ -943,9 +1054,33 @@ def _branch_badge(state: str) -> str:
     return _badge(labels.get(state, state.capitalize()), kind)
 
 
-def _branches(ticket: TicketSnapshot) -> str:
+def _work_controls(ticket: TicketSnapshot, token: str) -> tuple[str, str]:
+    if not token:
+        return "", ""
+    button = (
+        '<button class="branch-add" type="button" aria-label="Start a branch" '
+        'aria-expanded="false" aria-controls="work-panel" data-work-toggle>+</button>'
+    )
+    panel = (
+        '<div class="work-panel" id="work-panel" data-work-panel hidden>'
+        '<h3>Start work</h3>'
+        f'<form class="work-form" data-work-form data-ticket="{html.escape(ticket.id, quote=True)}" '
+        f'data-token="{html.escape(token, quote=True)}">'
+        '<label class="work-field">Short branch name'
+        '<input name="name" autocomplete="off" placeholder="position-system" required></label>'
+        '<label class="work-field">Branch from<select name="base" data-work-base required>'
+        '<option value="">Loading…</option></select></label>'
+        '<button class="work-submit" type="submit" data-work-submit disabled>Create and switch</button>'
+        '<p class="work-state" data-work-status aria-live="polite"></p></form></div>'
+    )
+    return button, panel
+
+
+def _branches(ticket: TicketSnapshot, work_token: str = "") -> str:
+    button, panel = _work_controls(ticket, work_token)
+    heading = f'<div class="branch-heading"><h2>Branches</h2>{button}</div>{panel}'
     if not ticket.branches:
-        return '<section class="section"><h2>Branches</h2><p class="empty">No branches.</p></section>'
+        return f'<section class="section">{heading}<p class="empty">No branches.</p></section>'
     reports = {report.slug: report for report in ticket.reports}
     rows = []
     for branch in ticket.branches:
@@ -963,7 +1098,7 @@ def _branches(ticket: TicketSnapshot) -> str:
             f'<span class="branch-meta">ahead {ahead} · behind {behind}{html.escape(date_text)}</span></{tag}>'
         )
     return (
-        '<section class="section"><h2>Branches</h2>'
+        f'<section class="section">{heading}'
         f'<div class="branch-list">{"".join(rows)}</div></section>'
     )
 
@@ -1427,7 +1562,11 @@ def page_project(
 
 
 def page_ticket(
-    root: Path, ticket_id: str, fp: str, project_key: str | None = None
+    root: Path,
+    ticket_id: str,
+    fp: str,
+    project_key: str | None = None,
+    work_token: str = "",
 ) -> bytes | None:
     try:
         if project_key:
@@ -1499,7 +1638,9 @@ def page_ticket(
         '<div class="view-panel" id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" '
         'data-view-panel="agent" hidden><div class="ticket-layout">'
         f'<div class="ticket-main">{_agent_work(ticket)}</div>'
-        f'<aside class="ticket-rail">{_lifecycle(ticket)}{_branches(ticket)}</aside></div></div>'
+        f'<aside class="ticket-rail">{_lifecycle(ticket)}'
+        f'{_branches(ticket, work_token if project_key and (root / layout.LOCATOR_FILE).exists() else "")}'
+        '</aside></div></div>'
     )
 
     if project_key:
@@ -1523,6 +1664,7 @@ def page_ticket(
 
 class _Handler(BaseHTTPRequestHandler):
     root: Path
+    token: str
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         root = self.root
@@ -1543,6 +1685,15 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/projects":
             self._send(200, page_projects(root, fp, params))
             return
+        match = re.fullmatch(r"/work/state/([A-Za-z0-9._-]+)", path)
+        if match:
+            try:
+                value = workflow.state(root, match.group(1))
+            except commands.CommandRejected as exc:
+                self._send_json(409, exc.as_dict())
+                return
+            self._send_json(200, {"ok": True, **value})
+            return
         match = re.fullmatch(r"/project/([A-Z][A-Z0-9]*)", path)
         if match:
             page = page_project(root, match.group(1), fp, params)
@@ -1553,7 +1704,7 @@ class _Handler(BaseHTTPRequestHandler):
             r"/project/([A-Z][A-Z0-9]*)/ticket/([A-Za-z0-9._-]+)", path
         )
         if match:
-            page = page_ticket(root, match.group(2), fp, match.group(1))
+            page = page_ticket(root, match.group(2), fp, match.group(1), self.token)
             if page is not None:
                 self._send(200, page)
                 return
@@ -1569,6 +1720,59 @@ class _Handler(BaseHTTPRequestHandler):
         )
         self._send(404, _page("Not found", body, fp))
 
+    def do_POST(self) -> None:  # noqa: N802 (http.server API)
+        if urlsplit(self.path).path != "/work":
+            self._send_json(404, {"ok": False, "code": "not_found", "message": "No such action."})
+            return
+        supplied = self.headers.get("X-TicketBunker-Token") or ""
+        if not supplied or not secrets.compare_digest(supplied, self.token):
+            self._send_json(
+                403,
+                {"ok": False, "code": "transport_token_invalid", "message": "Reload the viewer and retry."},
+            )
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 65536:
+            self._send_json(
+                400,
+                {"ok": False, "code": "request_invalid", "message": "The Work request is empty or too large."},
+            )
+            return
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            self._send_json(
+                400,
+                {"ok": False, "code": "request_invalid", "message": "The Work request must be one JSON object."},
+            )
+            return
+        if not isinstance(payload, dict):
+            self._send_json(
+                400,
+                {"ok": False, "code": "request_invalid", "message": "The Work request must be one JSON object."},
+            )
+            return
+        try:
+            result = commands.dispatch(
+                "workflow.start",
+                payload,
+                commands.CommandContext(self.root, transport="http"),
+            )
+        except commands.CommandRejected as exc:
+            self._send_json(409, exc.as_dict())
+            return
+        self._send_json(200, result)
+
+    def _send_json(self, code: int, value: Mapping[str, Any]) -> None:
+        self._send(
+            code,
+            (json.dumps(dict(value), ensure_ascii=False) + "\n").encode("utf-8"),
+            "application/json; charset=utf-8",
+        )
+
     def _send(self, code: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -1582,5 +1786,5 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def serve(root: Path, port: int) -> ThreadingHTTPServer:
-    handler = type("BoundHandler", (_Handler,), {"root": root})
+    handler = type("BoundHandler", (_Handler,), {"root": root, "token": secrets.token_urlsafe(32)})
     return ThreadingHTTPServer(("127.0.0.1", port), handler)

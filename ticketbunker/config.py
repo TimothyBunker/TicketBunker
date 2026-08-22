@@ -36,15 +36,17 @@ def sanitize_user(raw: str) -> str:
     return cleaned
 
 
-def get_user() -> tuple[str | None, str]:
+def get_user(repo: Path | str | None = None) -> tuple[str | None, str]:
     """Resolve the user identifier. Returns (user, source) where source is
     'tbconfig', 'git', or 'unset'."""
     cfg = load()
     if cfg.get("user"):
         return cfg["user"], "tbconfig"
-    proc = subprocess.run(
-        ["git", "config", "--global", "--get", "user.name"], capture_output=True, text=True
-    )
+    argv = ["git"]
+    if repo is not None:
+        argv.extend(["-C", str(Path(repo).resolve())])
+    argv.extend(["config", "--get", "user.name"])
+    proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode == 0 and proc.stdout.strip():
         return sanitize_user(proc.stdout), "git"
     return None, "unset"

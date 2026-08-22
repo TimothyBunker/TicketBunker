@@ -955,50 +955,25 @@ def _open_config_editor(source_root: Path, port: int, open_browser: bool, page: 
 
 
 def cmd_branch(args: argparse.Namespace) -> int:
-    bunker = _resolve_bunker(args.bunker)
-    if bunker is None:
-        print(f"error: no bunker {args.bunker!r} (as a path or ticket ID in this project)", file=sys.stderr)
-        return 1
-    ticket = _ticket(bunker)
-    if not ticket.get("id"):
-        print("error: bunker has no ticket.json", file=sys.stderr)
-        return 1
-    ledger = _ledger(bunker)
     repo = Path(args.repo).resolve()
-    from .adapters.gitrun import git
-
-    user = args.user or config.get_user()[0]
-
-    if args.assign:
-        out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "branch_assign")
-        names = [n.strip() for n in out.splitlines() if n.strip() and not n.strip().endswith("/HEAD")]
-        if args.assign not in names:
-            listing = ", ".join(n for n in names if not n.startswith("origin/")) or "none"
-            print(
-                f"error: {args.assign!r} is not a branch in {repo}\n"
-                f"  branches here: {listing}\n"
-                f"  create it first, or use 'tb branch {ticket['id']} --name SHORT --repo .' for a convention-named one",
-                file=sys.stderr,
-            )
-            return 1
-        already = args.assign in (ticket.get("assigned_branches") or [])
-        handlers.assign_branch(bunker, args.assign, ledger)
-        session_payload = {"branch": args.assign}
-        if user:
-            session_payload["user"] = user
-        handlers.intake_session_config(bunker, session_payload, ledger)
-        verb = "already assigned" if already else "assigned"
-        print(f"{verb}: branch {args.assign} → ticket {ticket['id']}; session config initialized")
-        return 0
-
-    if not user:
-        print("error: no user identifier — set one with 'tb config --user NAME'", file=sys.stderr)
+    command = "workflow.attach" if args.assign else "workflow.start"
+    payload = (
+        {"ticket": args.bunker, "branch": args.assign, "user": args.user}
+        if args.assign
+        else {"ticket": args.bunker, "name": args.name, "user": args.user, "base": args.base}
+    )
+    try:
+        result = commands.dispatch(command, payload, commands.CommandContext(repo, transport="cli"))
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
         return 1
-    full = config.build_branch(user, ticket["id"], args.name)
-    base = args.base or ticket.get("repo_baseline") or "HEAD"
-    git(repo, ["branch", full, base], ledger, "branch_create")
-    handlers.intake_session_config(bunker, {"branch": full, "user": user}, ledger)
-    print(f"created branch {full} (from {base}); session config initialized")
+    if args.assign:
+        print(f"attached {result['branch']} to {result['ticket']}; session config initialized")
+    else:
+        print(
+            f"created and switched to {result['branch']} from refreshed {result['base']}; "
+            "session config initialized"
+        )
     return 0
 
 
@@ -1842,15 +1817,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--no-open", action="store_true", help="do not open the editor in a browser")
     s.set_defaults(fn=cmd_config)
 
-    s = sub.add_parser("branch", help="associate a branch with a ticket: create user/TICKET-name, or --assign an existing branch")
+    s = sub.add_parser("branch", help="start ticket work safely, or attach an existing convention-named branch")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     g = s.add_mutually_exclusive_group(required=True)
-    g.add_argument("--name", help="short branch name to create, e.g. fourier-alg-impl")
+    g.add_argument("--name", help="short branch name to create and switch to, e.g. fourier-alg-impl")
     g.add_argument("--assign", metavar="BRANCH",
-                   help="record an existing branch as this ticket's (for names that don't carry the ticket key)")
-    s.add_argument("--repo", required=True, help="the source repo to create the branch in")
+                   help="attach an existing branch that already carries the ticket key")
+    s.add_argument("--repo", default=".", help="source repo (default: current directory)")
     s.add_argument("--user", default=None, help="override the configured user identifier")
-    s.add_argument("--base", default=None, help="ref to branch from (default: HEAD)")
+    s.add_argument("--base", default=None, help="base branch to refresh first (default: configured project base)")
     s.set_defaults(fn=cmd_branch)
 
     s = sub.add_parser("github", help="synchronize a GitHub issue or Project through the shared ticket gate")
