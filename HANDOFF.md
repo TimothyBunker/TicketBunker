@@ -36,7 +36,11 @@ Trust model, non-negotiable:
   permissions are the only authority. `tb migrate` backs up an embedded `.tb`
   below `.git`, publishes all ticket material, and only then removes legacy
   tracked paths. Successful companion data mutations reconcile and push on
-  command completion.
+  command completion. Live dogfood verified on `TimothyBunker/coal`: ECS-4
+  migrated byte-for-byte to private `TimothyBunker/coal-ticketbunker`; source
+  cleanup is `coal:ecs` commit `8a70b18`. A fresh source clone recovered the
+  complete ticket/report using only its locator plus `tb setup`, with source,
+  config, and data worktrees all clean.
 - **Configuration is remote and composable**: `tb config` opens a localhost
   editor for Identity, Repository, Ticket fields, and GitHub/GitLab/Jira
   mappings/tokens. Existing projects pin immutable field-set versions; global
