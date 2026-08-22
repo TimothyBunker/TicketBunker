@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ticketbunker import commands, layout, project, projectconfig, ticketcommands
+from ticketbunker import api, commands, layout, project, projectconfig, ticketcommands
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -106,6 +106,118 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertTrue(result["publication"]["published"])
         shown = run_git(self.remote, "show", "ticketbunker/data:projects/ECS/tickets/ECS-4/ticket.json")
         self.assertEqual(json.loads(shown)["id"], "ECS-4")
+
+    def test_published_ticket_updates_committed_catalog_index(self) -> None:
+        self.initialize()
+        commands.dispatch(
+            "ticket.create",
+            {
+                "ticket": {
+                    "id": "ECS-4",
+                    "key": "ECS-4",
+                    "title": "Position system",
+                    "description": "Add sparse-set positions.",
+                    "type": "task",
+                    "status": "todo",
+                    "assignee": "Tim",
+                    "labels": ["ecs", "core"],
+                    "metadata": {"source_url": "https://example.invalid/issues/4"},
+                }
+            },
+            commands.CommandContext(self.source),
+        )
+
+        shown = run_git(self.remote, "show", "ticketbunker/data:projects/ECS/tickets/index.json")
+        indexed = json.loads(shown)
+
+        self.assertEqual(indexed["project"], {"key": "ECS", "name": "ECS"})
+        self.assertEqual(len(indexed["tickets"]), 1)
+        entry = indexed["tickets"][0]
+        self.assertEqual(entry["id"], "ECS-4")
+        self.assertEqual(entry["reference"], "projects/ECS/tickets/ECS-4")
+        self.assertEqual(entry["source_url"], "https://example.invalid/issues/4")
+        self.assertEqual(len(entry["ticket_digest"]), 64)
+
+    def test_new_setup_lists_index_then_materializes_only_opened_ticket(self) -> None:
+        self.initialize()
+        for number in (4, 5):
+            commands.dispatch(
+                "ticket.create",
+                {
+                    "ticket": {
+                        "id": f"ECS-{number}",
+                        "key": f"ECS-{number}",
+                        "title": f"Ticket {number}",
+                        "type": "task",
+                        "status": "todo",
+                    }
+                },
+                commands.CommandContext(self.source),
+            )
+
+        collaborator = Path(self.tmp.name) / "collaborator"
+        collaborator.mkdir()
+        run_git(collaborator, "init", "-b", "ecs")
+        run_git(collaborator, "config", "user.name", "Ada")
+        run_git(collaborator, "config", "user.email", "ada@example.com")
+        (collaborator / project.LOCATOR_FILE).write_text(
+            (self.source / project.LOCATOR_FILE).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        project.setup(collaborator)
+
+        scope = project.tickets_dir(collaborator)
+        self.assertTrue(project.sparse_data_enabled(collaborator))
+        self.assertTrue(layout.ticket_index(scope).exists())
+        self.assertFalse((scope / "ECS-4").exists())
+        self.assertFalse((scope / "ECS-5").exists())
+        catalog = api.TicketCatalog(collaborator)
+        self.assertEqual([ticket.id for ticket in catalog.list_tickets()], ["ECS-4", "ECS-5"])
+
+        opened = catalog.get_ticket("ECS", "ECS-5")
+
+        self.assertEqual(opened.id, "ECS-5")
+        self.assertTrue((scope / "ECS-5" / "ticket.json").exists())
+        self.assertFalse((scope / "ECS-4").exists())
+
+    def test_concurrent_ticket_publications_keep_both_index_references(self) -> None:
+        self.initialize()
+
+        collaborators = []
+        for name in ("Ada", "Lin"):
+            source = Path(self.tmp.name) / name.casefold()
+            source.mkdir()
+            run_git(source, "init", "-b", "ecs")
+            run_git(source, "config", "user.name", name)
+            run_git(source, "config", "user.email", f"{name.casefold()}@example.com")
+            (source / project.LOCATOR_FILE).write_text(
+                (self.source / project.LOCATOR_FILE).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            project.setup(source)
+            collaborators.append(source)
+
+        for source, number in zip(collaborators, (4, 5), strict=True):
+            commands.dispatch(
+                "ticket.create",
+                {
+                    "ticket": {
+                        "id": f"ECS-{number}",
+                        "key": f"ECS-{number}",
+                        "title": f"Ticket {number}",
+                        "type": "task",
+                        "status": "todo",
+                    }
+                },
+                commands.CommandContext(source),
+            )
+
+        shown = run_git(self.remote, "show", "ticketbunker/data:projects/ECS/tickets/index.json")
+        self.assertEqual(
+            [entry["id"] for entry in json.loads(shown)["tickets"]],
+            ["ECS-4", "ECS-5"],
+        )
 
     def test_ticket_path_is_project_scoped_without_bunker_suffix(self) -> None:
         self.initialize()

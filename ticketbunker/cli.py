@@ -86,6 +86,15 @@ def _resolve_bunker(arg: str) -> Path | None:
         for by_id in (scope / arg, scope / f"{arg}_bunker"):
             if by_id.is_dir():
                 return by_id
+    source_root = project_mod.find_source_root()
+    locator = project_mod.load_locator(source_root) if source_root is not None else None
+    if source_root is not None and locator is not None and config.validate_ticket_id(arg):
+        try:
+            return project_mod.materialize_ticket(
+                source_root, str(locator.get("project") or ""), arg
+            )
+        except commands.CommandRejected:
+            return None
     return None
 
 

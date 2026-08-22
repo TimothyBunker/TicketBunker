@@ -1430,12 +1430,11 @@ def page_ticket(
     root: Path, ticket_id: str, fp: str, project_key: str | None = None
 ) -> bytes | None:
     try:
-        database = TicketDatabase(root, project_key)
-    except (FileNotFoundError, ValueError):
-        return None
-    try:
-        ticket = database.get_ticket(ticket_id)
-    except KeyError:
+        if project_key:
+            ticket = TicketCatalog(root).get_ticket(project_key, ticket_id)
+        else:
+            ticket = TicketDatabase(root).get_ticket(ticket_id)
+    except (FileNotFoundError, KeyError, ValueError):
         return None
 
     status = ticket.status

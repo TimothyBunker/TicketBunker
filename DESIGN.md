@@ -345,6 +345,12 @@ people, and labels; status, assignee, reporter, label, and project are explicit
 facets. Filters and the current page live in the URL. Results are server-side
 pages of twenty lightweight ticket references, so the browser receives only the
 requested summaries and never composes every ticket/report to build a list.
+Each project commits those bounded references at
+`projects/<PROJECT>/tickets/index.json`. The index contains human-facing ticket
+summary fields, small report/branch counters, the canonical relative reference,
+source URL, and a digest of `ticket.json`; it never contains report bodies. It is
+generated from typed ticket mutations as a publication side effect, not another
+write authority.
 
 **Projects is the companion catalog surface.** It lists projects known to the
 companion config/data branches; selecting one applies the same search and
@@ -700,7 +706,13 @@ directories are ordinary checkouts of the locator's canonical branches.
 Ticket IDs resolve under
 `.tb/data/projects/<PROJECT>/tickets/`. A second `tb init` is refused; other
 clones run `tb setup`, which reads the committed locator and fast-forwards both
-local checkouts. Embedded same-repository and standalone `--root` operation
+local checkouts. A fresh setup checks out configuration normally but uses a
+sparse data checkout containing only project ticket indexes. Listing, search,
+facets, and pagination therefore work without copying every bunker. Opening or
+mutating one indexed ticket expands only that ticket's canonical path in the
+sparse checkout. Data branches made before indexes remain compatible: setup
+detects the missing index and falls back to a full checkout rather than hiding
+old tickets. Embedded same-repository and standalone `--root` operation
 remain compatibility modes, not defaults.
 
 **Initialization authority comes from Git, not TicketBunker identity.** The
@@ -719,7 +731,10 @@ append-only logs (`ledger.jsonl`, `inferences.jsonl`) merge by **union** —
 every side's entries survive, order within the merge is immaterial for
 append-only records; the **master is never merged**, it is a generated
 artifact — `merge=ours` keeps a placeholder and the post-merge hook
-regenerates it from the actual children. `tb hooks --install` writes
+regenerates it from the actual children. The generated ticket index likewise
+uses `merge=ours` to avoid line-oriented JSON conflicts; after a rebase the
+publisher recomputes each locally changed ticket reference against the selected
+remote index, so concurrent additions remain discoverable. `tb hooks --install` writes
 `post-commit`/`post-merge` hooks that run `tb refresh` — resolve the
 current branch's ticket, re-run the observation pipeline, recompose,
 regenerate the master — never blocking git (a branch without a ticket, or

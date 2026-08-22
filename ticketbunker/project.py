@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import commands
+from . import commands, layout, ticketindex
 from .adapters.gitrun import GitError, git, git_status
 from .ledger import Ledger
 
@@ -171,6 +171,8 @@ def _checkout_branch(
     target: Path,
     identity: dict[str, str],
     ledger: Ledger,
+    *,
+    sparse: bool = False,
 ) -> bool:
     """Create a local checkout. Return True when the remote branch existed."""
     exists = _branch_exists(source_root, remote, branch, ledger)
@@ -178,12 +180,29 @@ def _checkout_branch(
         shutil.rmtree(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if exists:
+        clone_args = ["clone", "--single-branch", "--branch", branch]
+        if sparse:
+            clone_args.extend(["--filter=blob:none", "--sparse"])
         git(
             source_root,
-            ["clone", "--single-branch", "--branch", branch, remote, str(target)],
+            [*clone_args, remote, str(target)],
             ledger,
             "companion_clone",
         )
+        if sparse:
+            git(
+                target,
+                [
+                    "sparse-checkout",
+                    "set",
+                    "--no-cone",
+                    "/.gitattributes",
+                    "/.gitignore",
+                    "/projects/*/tickets/index.json",
+                ],
+                ledger,
+                "companion_sparse",
+            )
     else:
         target.mkdir()
         git(target, ["init"], ledger, "companion_setup")
@@ -365,13 +384,14 @@ def _seed_config(
     )
 
 
-def _seed_data(checkout: Path, project_key: str) -> None:
+def _seed_data(checkout: Path, project_key: str, project_name: str | None = None) -> None:
     attributes = checkout / ".gitattributes"
     if not attributes.exists():
         attributes.write_text(
             "**/ledger.jsonl merge=union\n"
             "**/inferences/inferences.jsonl merge=union\n"
-            "**/reports/master.md merge=ours\n",
+            "**/reports/master.md merge=ours\n"
+            "**/tickets/index.json merge=ours\n",
             encoding="utf-8",
         )
     ignore = checkout / ".gitignore"
@@ -388,6 +408,8 @@ def _seed_data(checkout: Path, project_key: str) -> None:
     keep = checkout / "projects" / project_key / "tickets" / ".keep"
     keep.parent.mkdir(parents=True, exist_ok=True)
     keep.touch(exist_ok=True)
+    if not layout.ticket_index(keep.parent).exists():
+        ticketindex.write(keep.parent, project_key, project_name or project_key, ())
 
 
 def _ensure_source_ignore(source_root: Path) -> None:
@@ -464,8 +486,11 @@ def initialize(
         )
     data_existed = _checkout_branch(source_root, remote, data_branch, data_path, identity, ledger)
 
-    _seed_data(data_path, project_key)
+    project_name = str(payload.get("project_name") or project_key)
+    _seed_data(data_path, project_key, project_name)
     imported = _import_legacy_tickets(legacy_root, tickets_dir(source_root, project_key)) if legacy_root else []
+    if imported:
+        ticketindex.rebuild(tickets_dir(source_root, project_key), project_key, project_name)
     for ticket_id in imported:
         git(
             data_path,
@@ -477,7 +502,7 @@ def initialize(
     _seed_config(
         config_path,
         project_key,
-        str(payload.get("project_name") or project_key),
+        project_name,
         _source_remote(source_root, ledger),
         str(payload.get("base_branch") or _source_branch(source_root, ledger)),
         identity,
@@ -587,7 +612,33 @@ def setup(source_root: Path) -> dict[str, Any]:
         else:
             if not _branch_exists(source_root, remote, branch, ledger):
                 raise ProjectError("remote_branch_missing", f"The companion repository has no {branch!r} branch.")
-            _checkout_branch(source_root, remote, branch, target, identity, ledger)
+            _checkout_branch(
+                source_root,
+                remote,
+                branch,
+                target,
+                identity,
+                ledger,
+                sparse=target == data_checkout(source_root),
+            )
+
+    current_index = layout.ticket_index(tickets_dir(source_root, project_key))
+    if not current_index.exists():
+        sparse_value = git(
+            data_checkout(source_root),
+            ["config", "--bool", "core.sparseCheckout"],
+            ledger,
+            "companion_sparse",
+            check=False,
+        ).strip()
+        if sparse_value == "true":
+            # Compatibility for data branches created before committed indexes.
+            git(
+                data_checkout(source_root),
+                ["sparse-checkout", "disable"],
+                ledger,
+                "companion_sparse",
+            )
 
     if not (project_config_dir(source_root, project_key) / "project.json").exists():
         raise ProjectError("project_missing", f"The companion configuration does not contain project {project_key}.")
@@ -601,6 +652,118 @@ def setup(source_root: Path) -> dict[str, Any]:
     }
 
 
+def sparse_data_enabled(source_root: Path) -> bool:
+    checkout = data_checkout(source_root)
+    if not (checkout / ".git").exists():
+        return False
+    proc = subprocess.run(
+        ["git", "-C", str(checkout), "config", "--bool", "core.sparseCheckout"],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def include_ticket_path(source_root: Path, project_key: str, ticket_id: str) -> None:
+    """Include one ticket path in a sparse checkout, whether new or remote."""
+    if not sparse_data_enabled(source_root):
+        return
+    ledger = _init_ledger(Path(source_root).resolve())
+    pattern = f"/projects/{project_key}/tickets/{ticket_id}/"
+    try:
+        git(
+            data_checkout(source_root),
+            ["sparse-checkout", "add", "--no-cone", pattern],
+            ledger,
+            "ticket_materialize",
+        )
+    except GitError as exc:
+        raise ProjectError(
+            "ticket_materialize_failed",
+            f"TicketBunker could not include {ticket_id} in the local data checkout. "
+            "Run 'tb setup' and retry.\n"
+            f"Git said: {exc.stderr.strip() or 'sparse checkout failed'}",
+        ) from exc
+
+
+def materialize_ticket(source_root: Path, project_key: str, ticket_id: str) -> Path:
+    """Hydrate one indexed ticket into a sparse companion data checkout."""
+    source_root = Path(source_root).resolve()
+    bunker = layout.companion_bunker_path(tickets_dir(source_root, project_key), ticket_id)
+    if bunker.is_dir():
+        return bunker
+    if not sparse_data_enabled(source_root):
+        raise ProjectError(
+            "ticket_not_materialized",
+            f"Companion data does not contain {project_key}/{ticket_id}. Run 'tb setup' and retry.",
+        )
+    include_ticket_path(source_root, project_key, ticket_id)
+    if not bunker.is_dir():
+        raise ProjectError(
+            "ticket_missing",
+            f"The companion index references {ticket_id}, but its bunker is absent. Run 'tb doctor'.",
+        )
+    return bunker
+
+
+def _project_display_name(source_root: Path, project_key: str) -> str:
+    path = project_config_dir(source_root, project_key) / "project.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return project_key
+    return str(value.get("name") or project_key) if isinstance(value, dict) else project_key
+
+
+def _dirty_ticket_ids(status: str) -> dict[str, set[str]]:
+    found: dict[str, set[str]] = {}
+    pattern = re.compile(r"projects/([A-Z][A-Z0-9]*)/tickets/([A-Za-z0-9._-]+)(?:/|$)")
+    for line in status.splitlines():
+        match = pattern.search(line[3:] if len(line) > 3 else line)
+        if match and match.group(2) != "index.json":
+            found.setdefault(match.group(1), set()).add(match.group(2))
+    return found
+
+
+def _refresh_ticket_indexes(source_root: Path, status: str) -> dict[str, set[str]]:
+    dirty = _dirty_ticket_ids(status)
+    projects_root = data_projects_dir(source_root)
+    if projects_root.is_dir():
+        for path in projects_root.iterdir():
+            scope = path / "tickets"
+            if path.is_dir() and PROJECT_KEY_RE.fullmatch(path.name) and scope.is_dir():
+                index = layout.ticket_index(scope)
+                if not index.exists():
+                    dirty.setdefault(path.name, set()).update(
+                        bunker.name for bunker in layout.ticket_dirs(scope)
+                    )
+    for project_key, ticket_ids in dirty.items():
+        scope = tickets_dir(source_root, project_key)
+        name = _project_display_name(source_root, project_key)
+        if layout.ticket_index(scope).exists():
+            ticketindex.update(scope, project_key, name, ticket_ids)
+        else:
+            ticketindex.rebuild(scope, project_key, name)
+    return dirty
+
+
+def _reconcile_ticket_indexes(source_root: Path, dirty: dict[str, set[str]]) -> None:
+    """Reapply local index entries after a rebase selects the remote index.
+
+    Ticket indexes are generated references. Their merge driver deliberately
+    avoids line-level JSON conflicts, then this pass adds every locally
+    changed ticket back to the reconciled remote index.
+    """
+    for project_key, ticket_ids in dirty.items():
+        scope = tickets_dir(source_root, project_key)
+        ticketindex.update(
+            scope,
+            project_key,
+            _project_display_name(source_root, project_key),
+            ticket_ids,
+        )
+
+
 def publish_data(source_root: Path, message: str) -> dict[str, Any]:
     """Commit, reconcile, and publish the local companion data checkout."""
     source_root = Path(source_root).resolve()
@@ -612,6 +775,8 @@ def publish_data(source_root: Path, message: str) -> dict[str, Any]:
         raise ProjectError("data_checkout_missing", "Local companion data is missing. Run 'tb setup' and retry.")
     branch = str(locator.get("data_branch") or DEFAULT_DATA_BRANCH)
     ledger = Ledger(source_root / ".git" / "ticketbunker-data-sync.jsonl")
+    dirty = git(checkout, ["status", "--porcelain"], ledger, "data_publish").strip()
+    dirty_tickets = _refresh_ticket_indexes(source_root, dirty)
     git(checkout, ["add", "-A"], ledger, "data_publish")
     if git(checkout, ["status", "--porcelain"], ledger, "data_publish").strip():
         git(checkout, ["commit", "-m", message], ledger, "data_publish")
@@ -621,6 +786,11 @@ def publish_data(source_root: Path, message: str) -> dict[str, Any]:
         remote_head = git(checkout, ["rev-parse", f"origin/{branch}"], ledger, "data_publish").strip()
         if local_head != remote_head:
             git(checkout, ["pull", "--rebase", "origin", branch], ledger, "data_publish")
+            if dirty_tickets:
+                _reconcile_ticket_indexes(source_root, dirty_tickets)
+                git(checkout, ["add", "-A"], ledger, "data_publish")
+                if git(checkout, ["status", "--porcelain"], ledger, "data_publish").strip():
+                    git(checkout, ["commit", "--amend", "--no-edit"], ledger, "data_publish")
             local_head = git(checkout, ["rev-parse", "HEAD"], ledger, "data_publish").strip()
             remote_head = git(checkout, ["rev-parse", f"origin/{branch}"], ledger, "data_publish").strip()
         if local_head != remote_head:

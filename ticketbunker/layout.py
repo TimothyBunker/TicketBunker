@@ -78,6 +78,11 @@ def companion_bunker_path(tickets_scope: Path, ticket_id: str) -> Path:
     return Path(tickets_scope) / ticket_id
 
 
+def ticket_index(tickets_scope: Path) -> Path:
+    """The committed lightweight catalog for one project's ticket scope."""
+    return Path(tickets_scope) / "index.json"
+
+
 def ticket_dirs(scope: Path) -> list[Path]:
     """Return current ticket records, including legacy ``*_bunker`` names."""
     scope = Path(scope)

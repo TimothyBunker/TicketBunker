@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import config, layout, project, types
+from . import config, layout, project, ticketindex, types
 from .builders import master as master_mod
 from .processors.anchorcheck import predates, verified_stamp
 
@@ -209,6 +209,9 @@ class TicketSummary:
     project: str = ""
     project_name: str = ""
     description: str = ""
+    reference: str = ""
+    source_url: str = ""
+    ticket_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -587,51 +590,36 @@ class TicketCatalog:
             tickets_dir = self._tickets_dir(key)
             project_doc = self._project_document(key)
             project_name = str(project_doc.get("name") or key)
-            for bunker in layout.ticket_dirs(tickets_dir):
-                paths = layout.paths(bunker)
-                data = _read_json(paths["ticket"])
-                ticket_id = str(data.get("id") or "")
-                if not ticket_id:
-                    continue
-                resolution = _read_json(paths["branch_resolution"])
-                branch_names = {
-                    str(value)
-                    for field in ("branches", "assigned_missing")
-                    for value in resolution.get(field, [])
-                    if isinstance(value, str) and value
-                }
-                if not branch_names:
-                    branch_names.update(_string_values(data.get("assigned_branches")))
-                reports = paths["children"]
-                report_count = len(tuple(reports.glob("*.md"))) if reports.is_dir() else 0
-                author_per = _read_json(paths["authorship"]).get("per_branch", {})
-                development = ""
-                if isinstance(author_per, dict):
-                    development = max(
-                        (
-                            str(value.get("recency_of_development") or "")
-                            for value in author_per.values()
-                            if isinstance(value, dict)
-                        ),
-                        default="",
-                    )
+            indexed = ticketindex.read(tickets_dir)
+            if indexed is not None:
+                entries = [value for value in indexed["tickets"] if isinstance(value, dict)]
+            else:
+                entries = [
+                    value
+                    for bunker in layout.ticket_dirs(tickets_dir)
+                    if (value := ticketindex.summarize(bunker, key, project_name)) is not None
+                ]
+            for data in entries:
                 summaries.append(
                     TicketSummary(
-                        id=ticket_id,
+                        id=str(data.get("id") or ""),
                         title=str(data.get("title") or ""),
                         status=str(data.get("status") or ""),
                         type=str(data.get("type") or ""),
                         priority=str(data.get("priority") or ""),
                         assignee=str(data.get("assignee") or ""),
                         updated=str(data.get("updated") or ""),
-                        branch_count=len(branch_names),
-                        report_count=report_count,
-                        last_development=development,
+                        branch_count=int(data.get("branch_count") or 0),
+                        report_count=int(data.get("report_count") or 0),
+                        last_development=str(data.get("last_development") or ""),
                         reporter=str(data.get("reporter") or ""),
                         labels=_string_values(data.get("labels")),
-                        project=key,
-                        project_name=project_name,
-                        description=str(data.get("description") or ""),
+                        project=str(data.get("project") or key),
+                        project_name=str(data.get("project_name") or project_name),
+                        description=str(data.get("description_excerpt") or ""),
+                        reference=str(data.get("reference") or ""),
+                        source_url=str(data.get("source_url") or ""),
+                        ticket_digest=str(data.get("ticket_digest") or ""),
                     )
                 )
         return tuple(summaries)
@@ -736,6 +724,13 @@ class TicketCatalog:
     def database(self, project_key: str) -> TicketDatabase:
         self._tickets_dir(project_key)
         return TicketDatabase(self.source_root, project_key if self.locator is not None else None)
+
+    def get_ticket(self, project_key: str, ticket_id: str) -> TicketSnapshot:
+        """Open one catalog reference, hydrating only that sparse ticket if needed."""
+        self._tickets_dir(project_key)
+        if self.locator is not None:
+            project.materialize_ticket(self.source_root, project_key, ticket_id)
+        return self.database(project_key).get_ticket(ticket_id)
 
 
 __all__ = [

@@ -44,6 +44,14 @@ def command_ticket_create(context: commands.CommandContext, payload: dict[str, A
     if bunker.exists():
         raise commands.CommandRejected("ticket_exists", f"{bunker} already exists — ticket IDs must be unique.")
 
+    locator = project.load_locator(context.project_root)
+    if locator is not None and not custom_root:
+        project.include_ticket_path(
+            context.project_root,
+            str(locator.get("project") or ""),
+            ticket_id,
+        )
+
     layout.init_dirs(bunker)
     ledger = _ledger(bunker)
     ledger.event(
