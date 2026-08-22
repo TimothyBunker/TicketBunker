@@ -8,6 +8,7 @@ unlabeled, nothing enters unvalidated.
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 INFERENCE_TAGS = ("real", "speculation")
@@ -77,12 +78,25 @@ def _validate_project_mappings(payload: dict) -> list[str]:
         return ["mappings require a 'providers' object"]
     errors = []
     for provider, settings in providers.items():
-        if not isinstance(provider, str) or not provider:
-            errors.append("provider names must be non-empty strings")
+        if (
+            not isinstance(provider, str)
+            or not provider
+            or not re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", provider)
+        ):
+            errors.append("provider names must be lowercase integration identifiers")
             continue
         if not isinstance(settings, dict):
             errors.append(f"provider {provider!r} must be an object")
             continue
+        label = settings.get("label")
+        if label is not None and (not isinstance(label, str) or not label.strip()):
+            errors.append(f"provider {provider!r} label must be a non-empty string")
+        template = settings.get("template")
+        if template is not None and (not isinstance(template, str) or not template.strip()):
+            errors.append(f"provider {provider!r} template must be a non-empty string")
+        applied = settings.get("template_applied")
+        if applied is not None and not isinstance(applied, bool):
+            errors.append(f"provider {provider!r} template_applied must be boolean")
         fields = settings.get("fields", {})
         if not isinstance(fields, dict) or not all(
             isinstance(ours, str) and ours and isinstance(theirs, str) and theirs

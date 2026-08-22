@@ -8,7 +8,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from ticketbunker import commands, config, config_viewer
+from ticketbunker import commands, config, config_viewer, projectconfig
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -27,6 +27,8 @@ class ConfigViewerTests(unittest.TestCase):
         (self.root / "README.md").write_text("voxel\n", encoding="utf-8")
         run_git(self.root, "add", "README.md")
         run_git(self.root, "commit", "-m", "initial")
+        self.remote = Path(self.tmp.name) / "ticketbunker.git"
+        subprocess.run(["git", "init", "--bare", str(self.remote)], check=True, capture_output=True)
         self.old_global_config = config.GLOBAL_CONFIG
         config.GLOBAL_CONFIG = Path(self.tmp.name) / "tbconfig.json"
         self.server = config_viewer.serve(self.root, 0)
@@ -60,7 +62,10 @@ class ConfigViewerTests(unittest.TestCase):
         text = body.decode("utf-8")
         self.assertEqual(status, 200)
         self.assertIn("text/html", content_type)
-        self.assertIn("Initialize TicketBunker", text)
+        self.assertIn("Connect TicketBunker", text)
+        self.assertIn("Repository URL", text)
+        self.assertIn("Connect repository", text)
+        self.assertIn("TicketBunker never creates this repository", text)
         self.assertIn("ticketbunker/config", text)
         self.assertNotIn("GITHUB_ACCESS_TOKEN=", text)
 
@@ -81,6 +86,58 @@ class ConfigViewerTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(run_git(self.root, "config", "--get", "user.name"), "T Bunker")
         self.assertEqual(config.load()["user"], "bunker")
+
+    def test_integrations_page_is_a_prefilled_mapping_matrix(self) -> None:
+        commands.dispatch(
+            "project.initialize",
+            {"project": "ECS", "bunker_repo": str(self.remote), "base_branch": "ecs"},
+            commands.CommandContext(self.root),
+        )
+
+        status, _content_type, body = self.request("GET", "/integrations")
+        text = body.decode("utf-8")
+
+        self.assertEqual(status, 200)
+        self.assertIn('aria-label="Integrations"', text)
+        self.assertEqual(text.count('data-command="configuration.mapping.replace"'), 3)
+        self.assertIn("Publish mappings", text)
+        self.assertIn("Add row", text)
+        self.assertIn("fields.summary", text)
+        self.assertIn("assignees[].username", text)
+        self.assertIn("labels[].name", text)
+        self.assertIn('data-command="configuration.integration.put"', text)
+        self.assertIn("Add integration", text)
+        self.assertNotIn('data-command="configuration.mapping.put"', text)
+
+    def test_custom_integration_appears_as_the_same_editable_surface(self) -> None:
+        initialized = commands.dispatch(
+            "project.initialize",
+            {"project": "ECS", "bunker_repo": str(self.remote), "base_branch": "ecs"},
+            commands.CommandContext(self.root),
+        )
+        commands.dispatch(
+            "configuration.integration.put",
+            {"base_revision": initialized["revision"] if "revision" in initialized else projectconfig.revision(self.root), "name": "Linear"},
+            commands.CommandContext(self.root),
+        )
+        credential_file = Path(self.tmp.name) / "credentials.env"
+        config.save({"credentials_file": str(credential_file)})
+        commands.dispatch(
+            "credentials.update",
+            {"provider": "linear", "token": "custom-secret"},
+            commands.CommandContext(self.root),
+        )
+
+        status, _content_type, body = self.request("GET", "/integrations")
+        text = body.decode("utf-8")
+
+        self.assertEqual(status, 200)
+        self.assertIn('data-provider-tab="linear"', text)
+        self.assertIn('data-provider="linear"', text)
+        self.assertIn("Linear token", text)
+        self.assertIn("Token saved locally", text)
+        self.assertIn('data-remove-integration="linear"', text)
+        self.assertIn("TICKETBUNKER_LINEAR_TOKEN=custom-secret", credential_file.read_text(encoding="utf-8"))
 
     def test_http_rejects_missing_transport_token(self) -> None:
         status, _content_type, body = self.request(

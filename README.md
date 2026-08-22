@@ -68,6 +68,8 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ## Usage
 
 ```sh
+# First create an empty Git repository on any host you control. TicketBunker
+# connects to that URL; it never creates the hosting repository.
 cd your-repo && tb init             # once: opens companion repository setup
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
 tb setup                            # every later clone: connect from .ticketbunker.json
@@ -110,13 +112,20 @@ The team's bunker database lives in a companion git repository — no service to
 stand up. `ticketbunker/config` holds field sets and project/provider mapping;
 `ticketbunker/data` holds tickets, observations, ledgers, and reports. Each
 successful data mutation commits, reconciles, and pushes through ordinary Git.
+The repository itself must already exist and be accessible when `tb init`
+connects it; an empty repository is valid. TicketBunker creates only its owned
+branches, never a GitHub, GitLab, Jira, or other hosting repository.
 JSONL ledgers are union-merged; generated masters are regenerated from their
 children. Remote and branch permissions are the authority, including who may
 publish configuration.
 
 The Ticket fields page has separate project and Global defaults views. Global
 changes create a new immutable field-set version for projects initialized in
-the future; existing projects retain their pinned composition.
+the future; existing projects retain their pinned composition. Integrations
+use an editable field-pair matrix: add or remove rows, then publish the complete
+mapping atomically. GitHub Issues, GitLab Issues, and Jira Cloud start with
+editable templates; custom integrations use the exact same mapping and local
+token surfaces.
 
 To move an old embedded database safely:
 

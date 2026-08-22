@@ -33,7 +33,9 @@ Trust model, non-negotiable:
 - **Companion storage is the default**: one-time `tb init` publishes separate
   `ticketbunker/config` and `ticketbunker/data` branches before writing the
   source locator; later clones use repeatable `tb setup`. Remote Git and branch
-  permissions are the only authority. `tb migrate` backs up an embedded `.tb`
+  permissions are the only authority. The user creates the companion repository
+  anywhere and supplies its URL; init verifies that it exists before any local
+  project state is written and never calls a hosting API to create it. `tb migrate` backs up an embedded `.tb`
   below `.git`, publishes all ticket material, and only then removes legacy
   tracked paths. Successful companion data mutations reconcile and push on
   command completion. Live dogfood verified on `TimothyBunker/coal`: ECS-4
@@ -43,7 +45,10 @@ Trust model, non-negotiable:
   config, and data worktrees all clean.
 - **Configuration is remote and composable**: `tb config` opens a localhost
   editor for Identity, Repository, Ticket fields, and GitHub/GitLab/Jira
-  mappings/tokens. Existing projects pin immutable field-set versions; global
+  mappings/tokens. Integration mappings are an add/remove row matrix published
+  atomically; GitHub Issues, GitLab Issues, and Jira Cloud are prefilled editable
+  templates, and custom integrations use the same mapping plus local-token
+  contract. Existing projects pin immutable field-set versions; global
   default edits seed only future projects. Tokens stay local, outside the
   repository. CLI, editor HTTP, and programmatic callers share
   `ticketbunker.commands` handlers and stable rejection codes.
@@ -80,8 +85,11 @@ Trust model, non-negotiable:
   updated`, `--reverse`, `--fetch` includes remote-only tickets),
   `tb show` (fields, comments, development panel, report state, ledger
   tail), `tb view` (localhost web viewer, auto-reloads via database
-  fingerprint polling, trust tags as chips, digest inline + components
-  collapsed). **Viewer is localhost-only BY DESIGN — no bind option, no
+  fingerprint polling). Per-ticket pages split ticket-owned and agent-owned
+  content into Ticket/Agent tabs. Agent work defaults to a branch-separated
+  Master synthesis; a native selector and the persistent Branches rail switch
+  to any child component while its full evidence stays collapsed by category.
+  **Viewer is localhost-only BY DESIGN — no bind option, no
   auth surface, remote viewing is SSH port-forwarding's job. Do not add
   network exposure.**
 - **Git-native merge story**: generated data-branch `.gitattributes` — ledgers and

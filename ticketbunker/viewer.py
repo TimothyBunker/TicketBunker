@@ -49,9 +49,10 @@ body {
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-rendering: optimizeLegibility;
 }
+button, select { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-a:focus-visible, summary:focus-visible {
+a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible {
   outline: 3px solid rgba(12, 102, 228, .28);
   outline-offset: 3px;
   border-radius: 2px;
@@ -89,6 +90,21 @@ p { margin: 0 0 12px; }
 .ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 0; }
 .ticket-main { min-width: 0; padding: 31px 42px 0 0; }
 .ticket-rail { min-width: 0; padding: 31px 0 0 30px; border-left: 1px solid var(--line); }
+.view-tabs { display: flex; gap: 20px; margin: 0 0 30px; border-bottom: 1px solid var(--line); }
+.view-tab {
+  min-height: 44px;
+  padding: 9px 2px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 650;
+  cursor: pointer;
+}
+.view-tab:hover { color: var(--fg); }
+.view-tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+.view-panel[hidden], .report-panel[hidden] { display: none; }
 .section { margin: 0 0 34px; }
 .description { max-width: 78ch; white-space: pre-wrap; }
 .criteria { margin: 0; padding-left: 21px; }
@@ -96,7 +112,18 @@ p { margin: 0 0 12px; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
 .section-heading h2 { margin: 0; }
 .section-heading a { min-width: 0; flex: 0 1 auto; font-size: 12px; overflow-wrap: anywhere; text-align: right; }
-.agent-generation { color: var(--muted); font-size: 12px; text-align: right; }
+.report-picker { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.report-picker select {
+  min-width: min(290px, 42vw);
+  min-height: 40px;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+}
+.report-context { margin: -4px 0 16px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.agent-generation { color: var(--muted); }
 .agent-work { max-width: 78ch; }
 .work-category { padding: 19px 0 20px; border-top: 1px solid var(--line); }
 .work-category:first-of-type { padding-top: 0; border-top: 0; }
@@ -104,11 +131,17 @@ p { margin: 0 0 12px; }
 .brief-claims { min-width: 0; }
 .brief-claims p { margin: 0 0 7px; }
 .brief-claims p:last-child { margin-bottom: 0; }
+.master-branch-summary { padding: 12px 2px; }
+.master-branch-summary:first-child { padding-top: 1px; }
+.master-branch-summary + .master-branch-summary { border-top: 1px solid var(--line-strong); }
+.master-branch-label { margin-bottom: 7px; color: var(--fg); font-weight: 650; }
+.master-branch-label span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
 .category-trail { margin-top: 10px; }
 .category-trail > summary { display: list-item; cursor: pointer; padding: 5px 2px; color: var(--accent); font-size: 12px; font-weight: 600; }
 .trail-count { float: right; margin-left: 16px; color: var(--muted); font-weight: 400; text-align: right; }
 .trail-body { margin: 6px 0 0 17px; border-top: 1px solid var(--line); }
 .trail-report { padding: 13px 2px 10px; border-bottom: 1px solid var(--line); }
+.trail-report + .trail-report { border-top: 1px solid var(--line-strong); }
 .trail-report-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; margin-bottom: 7px; }
 .trail-report-name { min-width: 0; color: var(--fg); font-weight: 650; }
 .trail-report-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
@@ -157,6 +190,12 @@ li { margin: 3px 0; }
 .ticket-id { color: var(--accent); font-weight: 650; }
 .ticket-title { color: var(--fg); font-weight: 600; }
 .ticket-link-meta { color: var(--muted); font-size: 12px; text-align: right; }
+@media (min-width: 761px) and (max-width: 1000px) {
+  .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
+  .ticket-main { padding-right: 24px; }
+  .ticket-rail { padding-left: 20px; }
+  .report-picker select { min-width: min(210px, 30vw); }
+}
 @media (max-width: 760px) {
   main { padding: 20px 18px 55px; }
   h1 { font-size: 22px; }
@@ -166,6 +205,9 @@ li { margin: 3px 0; }
   .section-heading { align-items: flex-start; }
   .section-heading h2 { flex: 0 0 auto; }
   .section-heading a { flex: 1 1 auto; }
+  .agent-heading { display: grid; grid-template-columns: 1fr; }
+  .report-picker { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; }
+  .report-picker select { min-width: 0; width: 100%; min-height: 44px; }
   .trail-body { margin-left: 0; }
   .trail-report-head { grid-template-columns: 1fr; gap: 6px; }
   .trail-report-state { justify-self: start; }
@@ -178,18 +220,69 @@ li { margin: 3px 0; }
 
 _POLL_JS = """
 const fp = document.documentElement.dataset.fp;
-function openLinkedReport(hash) {
-  if (!hash || !hash.startsWith('#report-')) return;
-  let target = document.querySelector(hash);
-  while (target) {
-    if (target instanceof HTMLDetailsElement) target.open = true;
-    target = target.parentElement?.closest('details');
+const viewTabs = [...document.querySelectorAll('[data-view-tab]')];
+const viewPanels = [...document.querySelectorAll('[data-view-panel]')];
+const reportSelect = document.querySelector('[data-report-select]');
+const reportPanels = [...document.querySelectorAll('[data-report-panel]')];
+
+function activateView(name, moveFocus = false) {
+  viewTabs.forEach((tab) => {
+    const selected = tab.dataset.viewTab === name;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && moveFocus) tab.focus();
+  });
+  viewPanels.forEach((panel) => { panel.hidden = panel.dataset.viewPanel !== name; });
+}
+
+function selectReport(value, updateHash = false) {
+  if (!reportSelect || !reportPanels.some((panel) => panel.dataset.reportPanel === value)) return;
+  reportSelect.value = value;
+  reportPanels.forEach((panel) => { panel.hidden = panel.dataset.reportPanel !== value; });
+  if (updateHash) {
+    const selected = reportPanels.find((panel) => panel.dataset.reportPanel === value);
+    history.replaceState(null, '', `#${selected.id}`);
   }
 }
-openLinkedReport(location.hash);
+
+function openLinkedReport(hash) {
+  if (!hash || !hash.startsWith('#report-')) return false;
+  const target = document.querySelector(hash);
+  if (!target || !target.dataset.reportPanel) return false;
+  activateView('agent');
+  selectReport(target.dataset.reportPanel);
+  return true;
+}
+
+viewTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => {
+    activateView(tab.dataset.viewTab);
+    if (tab.dataset.viewTab === 'ticket') history.replaceState(null, '', '#ticket');
+    else if (reportSelect) selectReport(reportSelect.value, true);
+  });
+  tab.addEventListener('keydown', (event) => {
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % viewTabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + viewTabs.length) % viewTabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = viewTabs.length - 1;
+    if (next !== null) {
+      event.preventDefault();
+      activateView(viewTabs[next].dataset.viewTab, true);
+    }
+  });
+});
+
+if (reportSelect) reportSelect.addEventListener('change', () => selectReport(reportSelect.value, true));
+if (location.hash === '#ticket') activateView('ticket');
+else openLinkedReport(location.hash);
 document.addEventListener('click', (event) => {
   const link = event.target.closest('a[href^="#report-"]');
-  if (link) openLinkedReport(link.getAttribute('href'));
+  if (link && openLinkedReport(link.getAttribute('href'))) {
+    event.preventDefault();
+    history.replaceState(null, '', link.getAttribute('href'));
+    document.querySelector(link.getAttribute('href')).scrollIntoView({block: 'start'});
+  }
 });
 setInterval(async () => {
   try {
@@ -291,7 +384,7 @@ def render_report(text: str) -> str:
 def _page(title: str, body: str, fp: str) -> bytes:
     document = (
         f'<!doctype html><html lang="en" data-fp="{fp}"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         '<link rel="icon" href="data:,">'
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><main>{body}</main><script>{_POLL_JS}</script></body></html>"
@@ -401,26 +494,37 @@ def _generation_label(report: ReportSnapshot) -> str:
     return ""
 
 
-def _category_trail(ticket: TicketSnapshot, label: str, summary: str = "Full trail") -> str:
-    reports = [report for report in ticket.reports if _report_section(report, label)]
+def _report_metadata(report: ReportSnapshot) -> str:
+    metadata = []
+    if report.owner:
+        metadata.append(f"Work by {report.owner}")
+    generator = _generation_label(report)
+    if generator:
+        metadata.append(generator)
+    if report.verified_commit:
+        metadata.append(report.verified_commit)
+    return " · ".join(metadata)
+
+
+def _category_trail(
+    source_reports: tuple[ReportSnapshot, ...],
+    label: str,
+    summary: str = "Full trail",
+) -> str:
+    reports = [report for report in source_reports if _report_section(report, label)]
     count = len(reports)
     noun = "report" if count == 1 else "reports"
     rows = []
     for report in reports:
-        metadata = ["Child report"]
-        if report.owner:
-            metadata.append(f"Work by {report.owner}")
-        generator = _generation_label(report)
-        if generator:
-            metadata.append(generator)
-        if report.verified_commit:
-            metadata.append(report.verified_commit)
-        anchor = f' id="{_report_anchor(report)}"' if label == "Who" else ""
+        metadata = _report_metadata(report)
+        metadata_html = (
+            f'<span class="trail-report-meta">{html.escape(metadata)}</span>' if metadata else ""
+        )
         rows.append(
-            f'<article class="trail-report"{anchor}>'
+            '<article class="trail-report">'
             '<div class="trail-report-head">'
             f'<div class="trail-report-name mono">{html.escape(report.branch)}'
-            f'<span class="trail-report-meta">{html.escape(" · ".join(metadata))}</span></div>'
+            f'{metadata_html}</div>'
             f'<div class="trail-report-state">{_report_state_badge(report)}</div></div>'
             f'<div class="trail-copy">{render_report(_report_section(report, label))}</div></article>'
         )
@@ -431,29 +535,67 @@ def _category_trail(ticket: TicketSnapshot, label: str, summary: str = "Full tra
     )
 
 
-def _agent_work(ticket: TicketSnapshot) -> str:
-    if not ticket.reports:
-        return '<section class="section"><h2>Agent work</h2><p class="empty">No child reports.</p></section>'
-    current = ticket.reports[0]
+def _master_preview(reports: tuple[ReportSnapshot, ...], label: str) -> str:
+    rows = []
+    for report in reports:
+        preview = _category_preview(report, label)
+        if not preview:
+            continue
+        rows.append(
+            '<article class="master-branch-summary">'
+            f'<div class="master-branch-label mono">{html.escape(report.branch)}</div>'
+            f'<div class="brief-claims">{preview}</div></article>'
+        )
+    return "".join(rows)
+
+
+def _agent_report_panel(reports: tuple[ReportSnapshot, ...], value: str, *, master: bool) -> str:
+    panel_id = "report-master" if master else _report_anchor(reports[0])
+    hidden = "" if master else " hidden"
+    if not reports:
+        return (
+            f'<div class="report-panel" id="{panel_id}" data-report-panel="{html.escape(value, quote=True)}"{hidden}>'
+            '<p class="empty">No agent reports yet.</p></div>'
+        )
+
+    context = ""
+    if not master:
+        report = reports[0]
+        generation = _generation_label(report)
+        suffix = f" · {generation}" if generation else ""
+        context = (
+            f'<p class="report-context"><span class="mono">{html.escape(report.branch)}</span>'
+            f'<span class="agent-generation">{html.escape(suffix)}</span></p>'
+        )
+
     categories = []
     for label in ("Who", "What", "Where", "Why"):
-        preview = _category_preview(current, label)
+        preview = _master_preview(reports, label) if master else _category_preview(reports[0], label)
         categories.append(
             f'<section class="work-category"><h3>{label}</h3>'
-            f'<div class="brief-claims">{preview}</div>'
-            f'{_category_trail(ticket, label)}</section>'
-        )
-    generation = _generation_label(current)
-    heading = '<h2>Agent work</h2>'
-    if generation:
-        heading = (
-            '<div class="section-heading"><h2>Agent work</h2>'
-            f'<span class="agent-generation">{html.escape(generation)}</span></div>'
+            f'<div class="{"master-brief" if master else "brief-claims"}">{preview}</div>'
+            f'{_category_trail(reports, label)}</section>'
         )
     return (
-        f'<section class="section agent-work">{heading}'
-        f'{"".join(categories)}<div class="report-state-trail">'
-        f'{_category_trail(ticket, "State", "Report state")}</div></section>'
+        f'<div class="report-panel" id="{panel_id}" data-report-panel="{html.escape(value, quote=True)}"{hidden}>'
+        f'{context}{"".join(categories)}<div class="report-state-trail">'
+        f'{_category_trail(reports, "State", "Report state")}</div></div>'
+    )
+
+
+def _agent_work(ticket: TicketSnapshot) -> str:
+    options = ['<option value="master">Master</option>']
+    panels = [_agent_report_panel(ticket.reports, "master", master=True)]
+    for report in ticket.reports:
+        options.append(
+            f'<option value="{html.escape(report.slug, quote=True)}">{html.escape(report.branch)}</option>'
+        )
+        panels.append(_agent_report_panel((report,), report.slug, master=False))
+    return (
+        '<section class="section agent-work"><div class="section-heading agent-heading">'
+        '<h2>Agent work</h2><label class="report-picker"><span>Report</span>'
+        f'<select data-report-select aria-label="Agent report">{"".join(options)}</select></label></div>'
+        f'{"".join(panels)}</section>'
     )
 
 
@@ -632,22 +774,40 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         )
     head_facts = f'<div class="head-facts">{"".join(facts)}</div>' if facts else ""
 
-    main_sections = []
+    ticket_sections = []
     if ticket.description:
-        main_sections.append(
+        ticket_sections.append(
             '<section class="section"><h2>Description</h2>'
             f'<div class="description">{html.escape(ticket.description)}</div></section>'
         )
     criteria = ticket.data.get("acceptance_criteria") or []
     if isinstance(criteria, list) and criteria:
         items = "".join(f"<li>{html.escape(str(item))}</li>" for item in criteria)
-        main_sections.append(
+        ticket_sections.append(
             f'<section class="section"><h2>Acceptance criteria</h2><ul class="criteria">{items}</ul></section>'
         )
-    main_sections.append(_agent_work(ticket))
     comments = _comments(ticket)
     if comments:
-        main_sections.append(comments)
+        ticket_sections.append(comments)
+    details = _details(ticket)
+    if details:
+        ticket_sections.append(f'<section class="section ticket-details">{details}</section>')
+    if not ticket_sections:
+        ticket_sections.append('<p class="empty">No ticket information yet.</p>')
+
+    tabs = (
+        '<div class="view-tabs" role="tablist" aria-label="Ticket view">'
+        '<button class="view-tab" id="ticket-tab" type="button" role="tab" '
+        'aria-selected="true" aria-controls="ticket-panel" data-view-tab="ticket">Ticket</button>'
+        '<button class="view-tab" id="agent-tab" type="button" role="tab" tabindex="-1" '
+        'aria-selected="false" aria-controls="agent-panel" data-view-tab="agent">Agent</button></div>'
+    )
+    panels = (
+        '<div class="view-panel" id="ticket-panel" role="tabpanel" aria-labelledby="ticket-tab" '
+        f'data-view-panel="ticket">{"".join(ticket_sections)}</div>'
+        '<div class="view-panel" id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" '
+        f'data-view-panel="agent" hidden>{_agent_work(ticket)}</div>'
+    )
 
     body = (
         '<div class="crumbs"><a href="/">Tickets</a> / '
@@ -656,8 +816,8 @@ def page_ticket(root: Path, ticket_id: str, fp: str) -> bytes | None:
         f'<div class="ticket-key">{html.escape(ticket.id)}</div>'
         f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}</header>'
         '<div class="ticket-layout"><div class="ticket-main">'
-        f'{"".join(main_sections)}</div><aside class="ticket-rail">'
-        f'{_lifecycle(ticket)}{_branches(ticket)}{_details(ticket)}</aside></div>'
+        f'{tabs}{panels}</div><aside class="ticket-rail">'
+        f'{_lifecycle(ticket)}{_branches(ticket)}</aside></div>'
     )
     return _page(f"{ticket.id} — TicketBunker", body, fp)
 

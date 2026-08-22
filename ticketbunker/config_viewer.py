@@ -25,7 +25,10 @@ _ALLOWED_COMMANDS = {
     "configuration.field.remove",
     "configuration.global.field.put",
     "configuration.global.field.remove",
+    "configuration.integration.put",
+    "configuration.integration.remove",
     "configuration.mapping.put",
+    "configuration.mapping.replace",
     "credentials.update",
 }
 
@@ -121,14 +124,25 @@ button:disabled { opacity: .55; cursor: wait; }
 .field-key { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .field-type { color: var(--body); }
 .tabs { display: flex; gap: 18px; margin: 0 0 24px; border-bottom: 1px solid var(--line); }
-.tabs button { min-height: 39px; padding: 8px 1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); background: transparent; }
+.tabs button { min-height: 44px; padding: 8px 1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); background: transparent; }
 .tabs button:hover { color: var(--fg); background: transparent; }
 .tabs button[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
 .provider[hidden], .field-scope[hidden] { display: none; }
-.mapping-list { margin-top: 18px; border-top: 1px solid var(--line); }
-.mapping-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); gap: 11px; padding: 11px 2px; border-bottom: 1px solid var(--line); }
-.mapping-row span { min-width: 0; overflow-wrap: anywhere; }
+.mapping-matrix { border-top: 1px solid var(--line); }
+.mapping-head, .mapping-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.mapping-head { padding: 8px 2px; color: var(--muted); font-size: 12px; }
+.mapping-entry { padding: 10px 2px; border-top: 1px solid var(--line); }
+.mapping-entry:first-child { border-top: 0; }
+.mapping-entry label { min-width: 0; }
+.mapping-entry label > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.mapping-entry button { min-height: 44px; }
 .mapping-arrow { color: var(--muted); text-align: center; }
+.custom-integration { max-width: 600px; }
 .notice { margin: 20px 0 0; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--fg); }
 .empty { color: var(--muted); }
 @media (max-width: 760px) {
@@ -147,8 +161,14 @@ button:disabled { opacity: .55; cursor: wait; }
   .field-row { grid-template-columns: minmax(0, 1fr) auto; }
   .field-type, .field-source { grid-row: 2; font-size: 12px; }
   .field-row button { grid-column: 2; grid-row: 1 / span 2; }
-  .mapping-row { grid-template-columns: 1fr; gap: 2px; }
-  .mapping-arrow { text-align: left; }
+  .tabs { overflow-x: auto; }
+  .tabs button { flex: 0 0 auto; }
+  .mapping-head { display: none; }
+  .mapping-entry { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .mapping-entry label { grid-column: 1; }
+  .mapping-entry label > span { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }
+  .mapping-entry .mapping-arrow { display: none; }
+  .mapping-entry button { grid-column: 2; grid-row: 1 / span 2; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 """
@@ -220,20 +240,20 @@ def _repository_page(state: dict[str, Any], root: Path) -> str:
         </section>"""
     branch = _current_branch(root)
     return f"""
-    <header class="page-head"><h1>Initialize TicketBunker</h1><p class="lede">Connect this source repository to its companion repository.</p></header>
+    <header class="page-head"><h1>Connect TicketBunker</h1><p class="lede">Create a Git repository wherever you want, then connect it here.</p></header>
     <section class="section">
       <form data-command="project.initialize" data-reload="repository">
         <div class="form-grid">
           <label>Project key<input name="project" placeholder="ECS" autocapitalize="characters" required></label>
           <label>Project name<input name="project_name" placeholder="Entity Component System"></label>
-          <label class="span-2">Companion repository<input name="bunker_repo" placeholder="git@github.com:team/project-ticketbunker.git" required></label>
+          <label class="span-2">Repository URL<input name="bunker_repo" placeholder="git@github.com:team/project-ticketbunker.git" required></label>
           <label>Configuration branch<input name="config_branch" value="{_e(project.DEFAULT_CONFIG_BRANCH)}" required></label>
           <label>Data branch<input name="data_branch" value="{_e(project.DEFAULT_DATA_BRANCH)}" required></label>
           <label>Source base branch<input name="base_branch" value="{_e(branch)}" required></label>
         </div>
-        <div class="actions"><button type="submit">Initialize project</button><output class="status" aria-live="polite"></output></div>
+        <div class="actions"><button type="submit">Connect repository</button><output class="status" aria-live="polite"></output></div>
       </form>
-      <p class="notice">Initialization succeeds only after both companion branches are published.</p>
+      <p class="notice">TicketBunker never creates this repository. It connects to the URL above, then publishes its configuration and data branches.</p>
     </section>"""
 
 
@@ -312,63 +332,134 @@ def _fields_page(state: dict[str, Any]) -> str:
     </div>"""
 
 
+def _integration_settings(provider: str, state: dict[str, Any]) -> dict[str, Any]:
+    stored = state.get("mappings", {}).get("providers", {}).get(provider, {})
+    stored = stored if isinstance(stored, dict) else {}
+    preset = project.STANDARD_INTEGRATIONS.get(provider, {})
+    settings = {**preset, **stored}
+    if preset and not stored.get("template_applied"):
+        fields = dict(preset.get("fields", {}))
+        fields.update(stored.get("fields", {}))
+        settings["fields"] = fields
+    else:
+        settings["fields"] = dict(stored.get("fields", preset.get("fields", {})))
+    return settings
+
+
+def _field_options(fields: list[dict[str, Any]], selected: str = "") -> str:
+    return "".join(
+        f'<option value="{_e(field["key"])}"{' selected' if field['key'] == selected else ''}>'
+        f'{_e(field["label"])} · {_e(field["key"])}</option>'
+        for field in fields
+    )
+
+
+def _mapping_entry(fields: list[dict[str, Any]], ours: str = "", theirs: str = "") -> str:
+    return f"""
+      <div class="mapping-entry" data-mapping-entry>
+        <label><span>TicketBunker field</span><select data-mapping-ours required>{_field_options(fields, ours)}</select></label>
+        <span class="mapping-arrow" aria-hidden="true">↔</span>
+        <label><span>Integration field</span><input data-mapping-theirs value="{_e(theirs)}" placeholder="payload.field.path" required></label>
+        <button class="secondary" type="button" data-remove-mapping>Remove</button>
+      </div>"""
+
+
 def _provider_panel(provider: str, state: dict[str, Any], selected: bool) -> str:
+    settings = _integration_settings(provider, state)
+    label = str(settings.get("label") or provider)
     configured = bool(state["credentials"].get(provider))
     badge = '<span class="badge good">Token saved locally</span>' if configured else '<span class="badge">No local token</span>'
-    mappings = state.get("mappings", {}).get("providers", {}).get(provider, {})
+    available = {field["key"] for field in state["fields"]}
+    mapping_fields = {
+        ours: theirs
+        for ours, theirs in settings.get("fields", {}).items()
+        if ours in available
+    }
     mapping_rows = "".join(
-        f'<div class="mapping-row"><span class="mono">{_e(ours)}</span><span class="mapping-arrow">→</span><span class="mono">{_e(theirs)}</span></div>'
-        for ours, theirs in mappings.get("fields", {}).items()
-    ) or '<p class="empty">No field mappings.</p>'
-    field_options = "".join(
-        f'<option value="{_e(field["key"])}">{_e(field["label"])} · {_e(field["key"])}</option>'
-        for field in state["fields"]
+        _mapping_entry(state["fields"], ours, theirs)
+        for ours, theirs in mapping_fields.items()
     )
+    first_field = str(state["fields"][0]["key"]) if state["fields"] else ""
     mapping_form = ""
     if state["initialized"]:
         mapping_form = f"""
-        <form data-command="configuration.mapping.put">
+        <form data-command="configuration.mapping.replace" data-mapping-form>
           <input type="hidden" name="base_revision" value="{_e(state['revision'])}">
           <input type="hidden" name="provider" value="{_e(provider)}">
-          <div class="form-grid">
-            <label>TicketBunker field<select name="ours">{field_options}</select></label>
-            <label>{_e(provider.title())} field<input name="theirs" placeholder="fields.customfield_10420" required></label>
+          <div class="mapping-matrix">
+            <div class="mapping-head"><span>TicketBunker field</span><span></span><span>{_e(label)} field</span><span></span></div>
+            <div data-mapping-rows>{mapping_rows}</div>
           </div>
-          <div class="actions"><button type="submit">Publish mapping</button><output class="status" aria-live="polite"></output></div>
+          <template data-mapping-template>{_mapping_entry(state['fields'], first_field)}</template>
+          <div class="actions">
+            <button class="secondary" type="button" data-add-mapping{' disabled' if not state['fields'] else ''}>Add row</button>
+            <button type="submit">Publish mappings</button>
+            <output class="status" aria-live="polite"></output>
+          </div>
         </form>"""
     else:
-        mapping_form = '<p class="notice">Initialize the project to publish field mappings.</p>'
+        readonly_rows = "".join(
+            f'<div class="mapping-entry"><span class="mono">{_e(ours)}</span><span class="mapping-arrow">↔</span><span class="mono">{_e(theirs)}</span><span></span></div>'
+            for ours, theirs in mapping_fields.items()
+        )
+        mapping_form = (
+            f'<div class="mapping-matrix">{readonly_rows}</div>'
+            '<p class="notice">Connect a repository to publish field mappings.</p>'
+        )
+    custom_remove = ""
+    if provider not in project.STANDARD_INTEGRATIONS and state["initialized"]:
+        custom_remove = (
+            f'<button class="danger" type="button" data-remove-integration="{_e(provider)}" '
+            f'data-base-revision="{_e(state["revision"])}">Remove integration</button>'
+        )
     return f"""
-    <div class="provider" data-provider="{_e(provider)}"{' hidden' if not selected else ''}>
+    <div class="provider" id="integration-{_e(provider)}" role="tabpanel" aria-labelledby="integration-tab-{_e(provider)}" data-provider="{_e(provider)}"{' hidden' if not selected else ''}>
       <section class="section">
         <div class="section-head"><h2>Access token</h2>{badge}</div>
         <form data-command="credentials.update">
           <input type="hidden" name="provider" value="{_e(provider)}">
-          <div class="form-grid"><label class="span-2">Token<input name="token" type="password" autocomplete="off" required></label></div>
+          <div class="form-grid"><label class="span-2">{_e(label)} token<input name="token" type="password" autocomplete="off" required></label></div>
           <div class="actions"><button type="submit">Save locally</button><output class="status" aria-live="polite"></output></div>
         </form>
       </section>
       <section class="section">
-        <div class="section-head"><h2>Field mapping</h2><span class="meta">{_e(mappings.get('template', provider + '-agile'))}</span></div>
+        <div class="section-head"><h2>Field mappings</h2><span class="meta">{_e(settings.get('template', 'custom'))}</span></div>
         {mapping_form}
-        <div class="mapping-list">{mapping_rows}</div>
+        {custom_remove}
       </section>
     </div>"""
 
 
 def _integrations_page(state: dict[str, Any]) -> str:
+    configured = state.get("mappings", {}).get("providers", {})
+    custom = sorted(provider for provider in configured if provider not in project.STANDARD_INTEGRATIONS)
+    providers = [*project.STANDARD_INTEGRATIONS, *custom]
     tabs = "".join(
-        f'<button type="button" role="tab" data-provider-tab="{provider}" aria-selected="{"true" if index == 0 else "false"}">{provider.title()}</button>'
-        for index, provider in enumerate(("github", "gitlab", "jira"))
+        f'<button id="integration-tab-{_e(provider)}" type="button" role="tab" data-provider-tab="{_e(provider)}" '
+        f'aria-controls="integration-{_e(provider)}" aria-selected="{"true" if index == 0 else "false"}"'
+        f'{"" if index == 0 else " tabindex=\"-1\""}>{_e(_integration_settings(provider, state).get("label") or provider)}</button>'
+        for index, provider in enumerate(providers)
     )
     panels = "".join(
         _provider_panel(provider, state, index == 0)
-        for index, provider in enumerate(("github", "gitlab", "jira"))
+        for index, provider in enumerate(providers)
     )
+    add_integration = '<p class="notice">Connect a repository to add integrations.</p>'
+    if state["initialized"]:
+        add_integration = f"""
+        <section class="section custom-integration">
+          <h2>Add integration</h2>
+          <form data-command="configuration.integration.put">
+            <input type="hidden" name="base_revision" value="{_e(state['revision'])}">
+            <div class="form-grid"><label class="span-2">Integration name<input name="name" placeholder="Linear" required maxlength="80"></label></div>
+            <div class="actions"><button type="submit">Add integration</button><output class="status" aria-live="polite"></output></div>
+          </form>
+        </section>"""
     return f"""
-    <header class="page-head"><h1>Integrations</h1><p class="lede">Local credentials and provider field mappings.</p></header>
-    <div class="tabs" role="tablist">{tabs}</div>
-    {panels}"""
+    <header class="page-head"><h1>Integrations</h1><p class="lede">Credentials and field mappings.</p></header>
+    <div class="tabs" role="tablist" aria-label="Integrations">{tabs}</div>
+    {panels}
+    {add_integration}"""
 
 
 def _render(root: Path, page: str, token: str) -> bytes:
@@ -386,7 +477,7 @@ def _render(root: Path, page: str, token: str) -> bytes:
     project_name = state.get("project", {}).get("key") or "Not initialized"
     script_state = json.dumps({"token": token}, separators=(",", ":")).replace("<", "\\u003c")
     body = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="data:,">
 <title>{_e(page.title())} · TicketBunker</title><style>{_STYLE}</style></head>
 <body><div class="shell"><aside class="side"><div class="brand">TicketBunker<span class="project-mark">{_e(project_name)}</span></div>
 <nav class="nav" aria-label="Configuration">{nav}</nav></aside>
@@ -418,9 +509,41 @@ async function send(command, payload, status) {
     buttons.forEach(button => button.disabled = false);
   }
 }
-document.querySelectorAll('form[data-command]').forEach(form => form.addEventListener('submit', event => {
+document.querySelectorAll('form[data-command]:not([data-mapping-form])').forEach(form => form.addEventListener('submit', event => {
   event.preventDefault(); send(form.dataset.command, formPayload(form), form.querySelector('.status'));
 }));
+document.querySelectorAll('form[data-mapping-form]').forEach(form => form.addEventListener('submit', event => {
+  event.preventDefault();
+  const fields = [...form.querySelectorAll('[data-mapping-entry]')].map(row => ({
+    ours: row.querySelector('[data-mapping-ours]').value,
+    theirs: row.querySelector('[data-mapping-theirs]').value
+  }));
+  send(form.dataset.command, {
+    provider: form.elements.provider.value,
+    base_revision: form.elements.base_revision.value,
+    fields
+  }, form.querySelector('.status'));
+}));
+document.querySelectorAll('[data-add-mapping]').forEach(button => button.addEventListener('click', () => {
+  const form = button.closest('form');
+  const template = form.querySelector('[data-mapping-template]');
+  const row = template.content.firstElementChild.cloneNode(true);
+  const used = new Set([...form.querySelectorAll('[data-mapping-ours]')].map(select => select.value));
+  const select = row.querySelector('[data-mapping-ours]');
+  const available = [...select.options].find(option => !used.has(option.value));
+  if (!available) {
+    const status = form.querySelector('.status');
+    status.className = 'status error'; status.textContent = 'Every TicketBunker field already has a row.';
+    return;
+  }
+  select.value = available.value;
+  form.querySelector('[data-mapping-rows]').append(row);
+  row.querySelector('[data-mapping-theirs]').focus();
+}));
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-remove-mapping]');
+  if (button) button.closest('[data-mapping-entry]').remove();
+});
 document.querySelectorAll('[data-remove-command]').forEach(button => button.addEventListener('click', () => {
   if (!button.dataset.confirmed) {
     button.dataset.confirmed = 'true'; button.textContent = 'Confirm remove';
@@ -431,10 +554,39 @@ document.querySelectorAll('[data-remove-command]').forEach(button => button.addE
   const revision = button.closest('[data-field-scope]')?.querySelector('[name="base_revision"]')?.value || '';
   send(button.dataset.removeCommand, {key: button.dataset.fieldKey, base_revision: revision}, status);
 }));
-document.querySelectorAll('[data-provider-tab]').forEach(tab => tab.addEventListener('click', () => {
-  document.querySelectorAll('[data-provider-tab]').forEach(value => value.setAttribute('aria-selected', value === tab ? 'true' : 'false'));
-  document.querySelectorAll('[data-provider]').forEach(panel => panel.hidden = panel.dataset.provider !== tab.dataset.providerTab);
+document.querySelectorAll('[data-remove-integration]').forEach(button => button.addEventListener('click', () => {
+  if (!button.dataset.confirmed) {
+    button.dataset.confirmed = 'true'; button.textContent = 'Confirm removal';
+    window.setTimeout(() => { delete button.dataset.confirmed; button.textContent = 'Remove integration'; }, 4000);
+    return;
+  }
+  const status = document.createElement('output'); status.className = 'status'; button.after(status);
+  send('configuration.integration.remove', {
+    provider: button.dataset.removeIntegration,
+    base_revision: button.dataset.baseRevision
+  }, status);
 }));
+const providerTabs = [...document.querySelectorAll('[data-provider-tab]')];
+function activateProvider(tab, moveFocus = false) {
+  providerTabs.forEach(value => {
+    const selected = value === tab;
+    value.setAttribute('aria-selected', String(selected));
+    value.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll('[data-provider]').forEach(panel => panel.hidden = panel.dataset.provider !== tab.dataset.providerTab);
+  if (moveFocus) tab.focus();
+}
+providerTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => activateProvider(tab));
+  tab.addEventListener('keydown', event => {
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % providerTabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + providerTabs.length) % providerTabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = providerTabs.length - 1;
+    if (next !== null) { event.preventDefault(); activateProvider(providerTabs[next], true); }
+  });
+});
 document.querySelectorAll('[data-field-tab]').forEach(tab => tab.addEventListener('click', () => {
   document.querySelectorAll('[data-field-tab]').forEach(value => value.setAttribute('aria-selected', value === tab ? 'true' : 'false'));
   document.querySelectorAll('[data-field-scope]').forEach(panel => panel.hidden = panel.dataset.fieldScope !== tab.dataset.fieldTab);

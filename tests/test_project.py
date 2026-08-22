@@ -51,6 +51,26 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertIn("/.tb/", (self.source / ".gitignore").read_text(encoding="utf-8"))
         self.assertTrue(run_git(self.remote, "show-ref", "--verify", "refs/heads/ticketbunker/config"))
         self.assertTrue(run_git(self.remote, "show-ref", "--verify", "refs/heads/ticketbunker/data"))
+        mappings = projectconfig.state(self.source)["mappings"]["providers"]
+        self.assertEqual(mappings["github"]["fields"]["title"], "title")
+        self.assertEqual(mappings["gitlab"]["fields"]["assignee"], "assignees[].username")
+        self.assertEqual(mappings["jira"]["fields"]["title"], "fields.summary")
+
+    def test_init_requires_an_existing_remote_before_writing_local_project_state(self) -> None:
+        missing = Path(self.tmp.name) / "not-created.git"
+
+        with self.assertRaises(commands.CommandRejected) as caught:
+            commands.dispatch(
+                "project.initialize",
+                {"project": "ECS", "bunker_repo": str(missing), "base_branch": "ecs"},
+                commands.CommandContext(self.source),
+            )
+
+        self.assertEqual(caught.exception.code, "bunker_repo_unreachable")
+        self.assertIn("never creates the repository", str(caught.exception))
+        self.assertFalse((self.source / project.LOCATOR_FILE).exists())
+        self.assertFalse((self.source / project.LOCAL_DIR).exists())
+        self.assertFalse((self.source / ".gitignore").exists())
 
     def test_init_is_create_once_and_setup_is_repeatable(self) -> None:
         self.initialize()
@@ -147,6 +167,92 @@ class CompanionProjectTests(unittest.TestCase):
             mapped["mappings"]["providers"]["jira"]["fields"]["organization.charging_code"],
             "fields.customfield_10420",
         )
+
+    def test_mapping_matrix_replaces_all_rows_atomically(self) -> None:
+        self.initialize()
+        replaced = commands.dispatch(
+            "configuration.mapping.replace",
+            {
+                "base_revision": projectconfig.revision(self.source),
+                "provider": "github",
+                "fields": [
+                    {"ours": "title", "theirs": "issue.title"},
+                    {"ours": "labels", "theirs": "issue.labels[].name"},
+                ],
+            },
+            commands.CommandContext(self.source, transport="http"),
+        )
+        self.assertEqual(
+            replaced["mappings"]["providers"]["github"]["fields"],
+            {"title": "issue.title", "labels": "issue.labels[].name"},
+        )
+
+        removed = commands.dispatch(
+            "configuration.mapping.replace",
+            {
+                "base_revision": replaced["revision"],
+                "provider": "github",
+                "fields": [{"ours": "title", "theirs": "issue.title"}],
+            },
+            commands.CommandContext(self.source, transport="cli"),
+        )
+        self.assertEqual(
+            removed["mappings"]["providers"]["github"]["fields"],
+            {"title": "issue.title"},
+        )
+
+    def test_custom_integrations_use_the_same_mapping_commands(self) -> None:
+        self.initialize()
+        added = commands.dispatch(
+            "configuration.integration.put",
+            {
+                "base_revision": projectconfig.revision(self.source),
+                "name": "Rally Dev",
+            },
+            commands.CommandContext(self.source, transport="http"),
+        )
+        self.assertEqual(added["mappings"]["providers"]["rally-dev"]["label"], "Rally Dev")
+
+        mapped = commands.dispatch(
+            "configuration.mapping.replace",
+            {
+                "base_revision": added["revision"],
+                "provider": "rally-dev",
+                "fields": {"title": "work_item.name", "status": "work_item.state"},
+            },
+            commands.CommandContext(self.source, transport="cli"),
+        )
+        self.assertEqual(
+            mapped["mappings"]["providers"]["rally-dev"]["fields"],
+            {"title": "work_item.name", "status": "work_item.state"},
+        )
+
+        removed = commands.dispatch(
+            "configuration.integration.remove",
+            {
+                "base_revision": mapped["revision"],
+                "provider": "rally-dev",
+            },
+            commands.CommandContext(self.source),
+        )
+        self.assertNotIn("rally-dev", removed["mappings"]["providers"])
+
+    def test_mapping_matrix_rejects_duplicate_ticketbunker_fields(self) -> None:
+        self.initialize()
+        with self.assertRaises(commands.CommandRejected) as caught:
+            commands.dispatch(
+                "configuration.mapping.replace",
+                {
+                    "base_revision": projectconfig.revision(self.source),
+                    "provider": "jira",
+                    "fields": [
+                        {"ours": "title", "theirs": "fields.summary"},
+                        {"ours": "title", "theirs": "fields.customfield_10000"},
+                    ],
+                },
+                commands.CommandContext(self.source),
+            )
+        self.assertEqual(caught.exception.code, "mapping_field_duplicate")
 
     def test_empty_ui_enum_input_is_ignored_for_non_enum_fields(self) -> None:
         self.initialize()

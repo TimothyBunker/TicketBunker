@@ -127,6 +127,29 @@ def _branch_exists(source_root: Path, remote: str, branch: str, ledger: Ledger) 
     return status == 0 and bool(output.strip())
 
 
+def _require_existing_remote(source_root: Path, remote: str, ledger: Ledger) -> None:
+    """Reject an absent/inaccessible companion before creating local state.
+
+    An empty remote is valid: TicketBunker creates its two owned branches, but
+    never creates the hosting repository itself.
+    """
+    output, status = git_status(
+        source_root,
+        ["ls-remote", remote],
+        ledger,
+        "companion_probe",
+    )
+    if status != 0:
+        detail = output.strip() or "the Git remote could not be reached"
+        raise ProjectError(
+            "bunker_repo_unreachable",
+            "TicketBunker could not connect to that repository. Create an empty Git "
+            "repository first, check the URL and your access, then try again. "
+            "TicketBunker never creates the repository for you.\n"
+            f"Git said: {detail}",
+        )
+
+
 def _configure_identity(checkout: Path, identity: dict[str, str], ledger: Ledger) -> None:
     git(checkout, ["config", "user.name", identity["name"]], ledger, "companion_setup")
     git(checkout, ["config", "user.email", identity["email"]], ledger, "companion_setup")
@@ -224,6 +247,55 @@ STANDARD_FIELD_SETS: dict[str, dict[str, Any]] = {
 }
 
 
+# Provider paths are starter compositions, not core ticket fields. They mirror
+# the documented issue payloads closely enough to make first setup useful and
+# remain fully replaceable through project configuration.
+STANDARD_INTEGRATIONS: dict[str, dict[str, Any]] = {
+    "github": {
+        "label": "GitHub",
+        "template": "github-issues",
+        "template_applied": True,
+        "fields": {
+            "title": "title",
+            "description": "body",
+            "status": "state",
+            "assignee": "assignee.login",
+            "reporter": "user.login",
+            "labels": "labels[].name",
+        },
+    },
+    "gitlab": {
+        "label": "GitLab",
+        "template": "gitlab-issues",
+        "template_applied": True,
+        "fields": {
+            "title": "title",
+            "description": "description",
+            "type": "type",
+            "status": "state",
+            "assignee": "assignees[].username",
+            "reporter": "author.username",
+            "labels": "labels[]",
+        },
+    },
+    "jira": {
+        "label": "Jira",
+        "template": "jira-cloud-issues-v3",
+        "template_applied": True,
+        "fields": {
+            "title": "fields.summary",
+            "description": "fields.description",
+            "type": "fields.issuetype.name",
+            "priority": "fields.priority.name",
+            "status": "fields.status.name",
+            "assignee": "fields.assignee.displayName",
+            "reporter": "fields.reporter.displayName",
+            "labels": "fields.labels[]",
+        },
+    },
+}
+
+
 def _seed_config(
     checkout: Path,
     project_key: str,
@@ -275,9 +347,11 @@ def _seed_config(
         {
             "schema_version": SCHEMA_VERSION,
             "providers": {
-                "github": {"template": "github-agile", "fields": {}},
-                "gitlab": {"template": "gitlab-agile", "fields": {}},
-                "jira": {"template": "jira-agile", "fields": {}},
+                provider: {
+                    **{key: value for key, value in settings.items() if key != "fields"},
+                    "fields": dict(settings["fields"]),
+                }
+                for provider, settings in STANDARD_INTEGRATIONS.items()
             },
         },
     )
@@ -368,6 +442,7 @@ def initialize(
         )
 
     ledger = _init_ledger(source_root)
+    _require_existing_remote(source_root, remote, ledger)
     identity = _identity(source_root, ledger)
     config_path = config_checkout(source_root)
     data_path = data_checkout(source_root)

@@ -122,7 +122,19 @@ def credential_file() -> Path:
     return Path.home() / ".config" / "ticketbunker" / "credentials.env"
 
 
-def credential_state() -> dict[str, bool]:
+def _credential_variable(provider: str) -> str:
+    builtins = {
+        "github": "GITHUB_ACCESS_TOKEN",
+        "gitlab": "GITLAB_ACCESS_TOKEN",
+        "jira": "JIRA_API_TOKEN",
+    }
+    if provider in builtins:
+        return builtins[provider]
+    safe = re.sub(r"[^A-Z0-9]+", "_", provider.upper()).strip("_")
+    return f"TICKETBUNKER_{safe}_TOKEN"
+
+
+def credential_state(providers: tuple[str, ...] = ("github", "gitlab", "jira")) -> dict[str, bool]:
     path = credential_file()
     names = set()
     if path.exists():
@@ -131,26 +143,28 @@ def credential_state() -> dict[str, bool]:
             if line and not line.startswith("#") and "=" in line:
                 names.add(line.split("=", 1)[0].strip())
     return {
-        "github": "GITHUB_ACCESS_TOKEN" in names or bool(os.environ.get("GITHUB_ACCESS_TOKEN")),
-        "gitlab": "GITLAB_ACCESS_TOKEN" in names or bool(os.environ.get("GITLAB_ACCESS_TOKEN")),
-        "jira": "JIRA_API_TOKEN" in names or bool(os.environ.get("JIRA_API_TOKEN")),
+        provider: _credential_variable(provider) in names
+        or bool(os.environ.get(_credential_variable(provider)))
+        for provider in providers
     }
 
 
 def state(source_root: Path) -> dict[str, Any]:
     locator, composition_path, mappings_path, key = _paths(source_root)
     project_doc = _read_json(project.project_config_dir(source_root, key) / "project.json")
+    mappings = _read_json(mappings_path)
+    providers = tuple(str(value) for value in mappings.get("providers", {}))
     return {
         "project": project_doc,
         "locator": locator,
         "revision": revision(source_root),
         "identity": identity_state(source_root),
         "credentials_file": str(credential_file()),
-        "credentials": credential_state(),
+        "credentials": credential_state(providers),
         "composition": _read_json(composition_path),
         "fields": resolved_fields(source_root),
         "global_fields": global_default_fields(source_root),
-        "mappings": _read_json(mappings_path),
+        "mappings": mappings,
     }
 
 
@@ -370,25 +384,167 @@ def command_global_field_remove(context: commands.CommandContext, payload: dict[
     return {"revision": new_revision, "global_fields": global_default_fields(context.project_root)}
 
 
-@commands.register("configuration.mapping.put")
-def command_mapping_put(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
-    provider = str(payload.get("provider") or "").strip().lower()
-    ours = str(payload.get("ours") or "").strip()
-    theirs = str(payload.get("theirs") or "").strip()
-    if provider not in {"github", "gitlab", "jira"}:
-        raise commands.CommandRejected("provider_invalid", "Provider must be GitHub, GitLab, or Jira.")
-    if not ours or not theirs:
-        raise commands.CommandRejected("mapping_fields_required", "Choose both the TicketBunker field and the external field.")
-    if ours not in {field["key"] for field in resolved_fields(context.project_root)}:
-        raise commands.CommandRejected("mapping_field_unknown", f"TicketBunker field {ours!r} is not in this project composition.")
+_INTEGRATION_ID_RE = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
+
+
+def _integration_id(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    identifier = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("-._")
+    if not _INTEGRATION_ID_RE.fullmatch(identifier):
+        raise commands.CommandRejected(
+            "integration_id_invalid",
+            "Integration identifier must start with a letter and use only lowercase letters, numbers, dots, dashes, or underscores.",
+        )
+    return identifier
+
+
+def _mapping_fields(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, str]:
+    raw = payload.get("fields")
+    if isinstance(raw, dict):
+        pairs = list(raw.items())
+    elif isinstance(raw, list):
+        pairs = []
+        for row in raw:
+            if not isinstance(row, dict):
+                raise commands.CommandRejected("mapping_invalid", "Each mapping row must contain two fields.")
+            pairs.append((row.get("ours"), row.get("theirs")))
+    else:
+        raise commands.CommandRejected("mapping_invalid", "Mappings must be a list of field pairs.")
+
+    available = {field["key"] for field in resolved_fields(context.project_root)}
+    result: dict[str, str] = {}
+    for ours_value, theirs_value in pairs:
+        ours = str(ours_value or "").strip()
+        theirs = str(theirs_value or "").strip()
+        if not ours or not theirs:
+            raise commands.CommandRejected(
+                "mapping_fields_required",
+                "Every mapping row needs both a TicketBunker field and an integration field.",
+            )
+        if ours not in available:
+            raise commands.CommandRejected(
+                "mapping_field_unknown",
+                f"TicketBunker field {ours!r} is not in this project composition.",
+            )
+        if ours in result:
+            raise commands.CommandRejected(
+                "mapping_field_duplicate",
+                f"TicketBunker field {ours!r} appears more than once. Keep one row for each field.",
+            )
+        result[ours] = theirs
+    return result
+
+
+def _configured_integrations(source_root: Path) -> dict[str, Any]:
+    providers = _read_json(_paths(source_root)[2]).get("providers", {})
+    return providers if isinstance(providers, dict) else {}
+
+
+@commands.register("configuration.integration.put")
+def command_integration_put(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise commands.CommandRejected("integration_name_required", "Enter an integration name.")
+    if len(name) > 80:
+        raise commands.CommandRejected("integration_name_invalid", "Integration name must be 80 characters or fewer.")
+    provider = _integration_id(payload.get("provider") or name)
+    if provider in project.STANDARD_INTEGRATIONS:
+        raise commands.CommandRejected(
+            "integration_builtin",
+            f"{project.STANDARD_INTEGRATIONS[provider]['label']} is already available as a preset.",
+        )
 
     def mutate(root: Path, ledger: Ledger, key: str) -> None:
         path = root / "mappings.json"
         mappings = _read_json(path)
-        settings = mappings.setdefault("providers", {}).setdefault(provider, {"template": f"{provider}-agile", "fields": {}})
-        settings.setdefault("fields", {})[ours] = theirs
+        providers = mappings.setdefault("providers", {})
+        if provider in providers:
+            raise commands.CommandRejected("integration_exists", f"Integration {provider!r} already exists.")
+        providers[provider] = {
+            "label": name,
+            "template": "custom",
+            "template_applied": True,
+            "fields": {},
+        }
         handlers.intake_config_document("project_mappings", path, mappings, ledger, project=key)
 
+    new_revision = _publish(
+        context.project_root,
+        payload.get("base_revision"),
+        f"Add {name} integration",
+        mutate,
+    )
+    return {"revision": new_revision, "mappings": _read_json(_paths(context.project_root)[2])}
+
+
+@commands.register("configuration.integration.remove")
+def command_integration_remove(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    provider = _integration_id(payload.get("provider"))
+    if provider in project.STANDARD_INTEGRATIONS:
+        raise commands.CommandRejected("integration_builtin", "Preset integrations cannot be removed.")
+
+    def mutate(root: Path, ledger: Ledger, key: str) -> None:
+        path = root / "mappings.json"
+        mappings = _read_json(path)
+        providers = mappings.setdefault("providers", {})
+        if provider not in providers:
+            raise commands.CommandRejected("integration_unknown", f"Integration {provider!r} does not exist.")
+        del providers[provider]
+        handlers.intake_config_document("project_mappings", path, mappings, ledger, project=key)
+
+    new_revision = _publish(
+        context.project_root,
+        payload.get("base_revision"),
+        f"Remove {provider} integration",
+        mutate,
+    )
+    return {"revision": new_revision, "mappings": _read_json(_paths(context.project_root)[2])}
+
+
+@commands.register("configuration.mapping.replace")
+def command_mapping_replace(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    provider = _integration_id(payload.get("provider"))
+    if provider not in _configured_integrations(context.project_root):
+        raise commands.CommandRejected("integration_unknown", f"Integration {provider!r} does not exist.")
+    fields = _mapping_fields(context, payload)
+
+    def mutate(root: Path, ledger: Ledger, key: str) -> None:
+        path = root / "mappings.json"
+        mappings = _read_json(path)
+        settings = mappings.setdefault("providers", {})[provider]
+        settings["fields"] = fields
+        settings["template_applied"] = True
+        handlers.intake_config_document("project_mappings", path, mappings, ledger, project=key)
+
+    new_revision = _publish(
+        context.project_root,
+        payload.get("base_revision"),
+        f"Configure {provider} field mappings",
+        mutate,
+    )
+    return {"revision": new_revision, "mappings": _read_json(_paths(context.project_root)[2])}
+
+
+@commands.register("configuration.mapping.put")
+def command_mapping_put(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    """Backward-compatible one-pair command for CLI/API callers."""
+    provider = _integration_id(payload.get("provider"))
+    if provider not in _configured_integrations(context.project_root):
+        raise commands.CommandRejected("integration_unknown", f"Integration {provider!r} does not exist.")
+    fields = _mapping_fields(
+        context,
+        {"fields": [{"ours": payload.get("ours"), "theirs": payload.get("theirs")}]},
+    )
+
+    def mutate(root: Path, ledger: Ledger, key: str) -> None:
+        path = root / "mappings.json"
+        mappings = _read_json(path)
+        settings = mappings.setdefault("providers", {})[provider]
+        settings.setdefault("fields", {}).update(fields)
+        settings["template_applied"] = True
+        handlers.intake_config_document("project_mappings", path, mappings, ledger, project=key)
+
+    ours = next(iter(fields))
     new_revision = _publish(
         context.project_root,
         payload.get("base_revision"),
@@ -400,11 +556,13 @@ def command_mapping_put(context: commands.CommandContext, payload: dict[str, Any
 
 @commands.register("credentials.update")
 def command_credentials_update(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
-    provider = str(payload.get("provider") or "").strip().lower()
+    provider = _integration_id(payload.get("provider"))
     token = str(payload.get("token") or "").strip()
-    variables = {"github": "GITHUB_ACCESS_TOKEN", "gitlab": "GITLAB_ACCESS_TOKEN", "jira": "JIRA_API_TOKEN"}
-    if provider not in variables:
-        raise commands.CommandRejected("provider_invalid", "Provider must be GitHub, GitLab, or Jira.")
+    integrations: dict[str, Any] = dict(project.STANDARD_INTEGRATIONS)
+    if project.load_locator(context.project_root) is not None:
+        integrations.update(_configured_integrations(context.project_root))
+    if provider not in integrations:
+        raise commands.CommandRejected("integration_unknown", f"Integration {provider!r} does not exist.")
     if not token:
         raise commands.CommandRejected("credential_required", "Paste the token to save it locally.")
     if "\n" in token or "\r" in token:
@@ -429,9 +587,9 @@ def command_credentials_update(context: commands.CommandContext, payload: dict[s
             else:
                 key, value = raw.split("=", 1)
                 entries[key.strip()] = value
-    entries[variables[provider]] = token
+    entries[_credential_variable(provider)] = token
     text = "# TicketBunker credentials. Never commit this file.\n"
     text += "\n".join(f"{key}={value}" for key, value in sorted(entries.items())) + "\n"
     path.write_text(text, encoding="utf-8")
     path.chmod(0o600)
-    return {"credentials_file": str(path), "credentials": credential_state()}
+    return {"credentials_file": str(path), "credentials": credential_state(tuple(integrations))}

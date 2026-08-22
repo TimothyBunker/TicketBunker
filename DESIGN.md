@@ -337,23 +337,28 @@ log. Declared workflow state (status, ours) is always shown *beside*
 observed git state (merged-back, recency — the pipeline's), never blended.
 `tb view` serves the same data as a minimal local viewer
 (`ticketbunker/viewer.py`, stdlib HTTP on 127.0.0.1): a ticket list and
-per-ticket pages organized around completing one ticket. The singular page
-keeps tracker-declared lifecycle beside (never blended with) observed branch
-state; description and optional acceptance criteria lead. When the newest
-child has a Reader brief, its concise Who/What/Where/Why claims are the primary
-reading surface. Each category immediately follows its synthesis with a native
-disclosure for that category's unchanged evidence, grouped by child report in
-development-recency order. State remains a separate collapsed report trail,
-because tracker lifecycle and observed branch state are already visible in the
-ticket rail. Direct branch links open the exact report's Who trail;
-legacy children derive compact previews from their evidence without inventing
-synthesis. Verification and freshness remain visible. Details and carried-over
-comments remain available without turning the page into a dashboard. Each child
-trail labels work authors separately from the harness/provider/model that generated
-the report; the newest report's generator is also visible beside Agent work so
-the default synthesis never hides who produced it. Unknown generator fields stay
-absent instead of being guessed. Raw tracker metadata stays collapsed under
-Details. Trust tags render as
+per-ticket pages organized around completing one ticket. The singular page has
+an explicit **Ticket / Agent** contract. Ticket is the default view and owns the
+description, optional acceptance criteria, carried-over comments, and collapsed
+tracker details. Agent owns Agent work and never mixes those fields into its
+report surface. Tracker lifecycle and the persistent Branches rail remain beside
+(never blended with) both views.
+
+Agent work defaults to **Master** and provides one native report selector at the
+right of its heading: Master followed by each branch report. Master presents each
+category's concise Reader brief contributions in development-recency order, with
+the branch named and a visible rule between branch contributions; each category
+immediately follows its synthesis with a native disclosure for the unchanged
+evidence, likewise separated and grouped by child. Selecting a branch narrows all
+Who/What/Where/Why synthesis and evidence to that component. Direct links in the
+persistent Branches rail activate Agent and select the corresponding report.
+State remains a separate collapsed report trail, because tracker lifecycle and
+observed branch state are already visible in the rail. Legacy children derive
+compact previews from their evidence without inventing synthesis. Verification
+and freshness remain visible. Each child trail labels work authors separately
+from the harness/provider/model that generated the report; a selected branch also
+shows its known generator beside its branch identity. Unknown generator fields
+stay absent instead of being guessed. Trust tags render as
 chips. It is strictly
 read-only — no write
 endpoint exists, every page renders from `.tb/` on each request, and pages
@@ -650,9 +655,13 @@ knowing them all; tooling and humans can both address any piece of instance
 state by path without asking.
 
 **The root is git-relative; the durable storage is companion-relative.** `tb
-init` runs inside a source git repository and fails outside one. It publishes
-the project to a companion remote first, then writes `.ticketbunker.json` and
-adds `/.tb/` to the source ignore file. The ignored `.tb/config` and `.tb/data`
+init` runs inside a source git repository and fails outside one. The user first
+creates a Git repository on any host and supplies its clone URL. TicketBunker
+has no repository-creation path or hosting API: it verifies that the supplied
+remote exists and is accessible before creating `.tb/` or changing the source,
+then publishes only its config/data branches. An empty remote is valid. After
+both branches publish it writes `.ticketbunker.json` and adds `/.tb/` to the
+source ignore file. The ignored `.tb/config` and `.tb/data`
 directories are ordinary checkouts of the locator's canonical branches.
 Ticket IDs resolve under
 `.tb/data/projects/<PROJECT>/tickets/`. A second `tb init` is refused; other
@@ -782,11 +791,23 @@ and removals. Later changes to global defaults affect newly created projects,
 not existing project compositions. Tickets hold values and the universal tags
 field; they do not define schemas.
 
-GitHub, GitLab, and Jira are optional sources. Each provider maps its field
-paths into the same resolved project fields, so provider-only information can
-be retained without coupling the core ticket type to one service. Tokens are
-local-only secrets in a mode-0600 credential file outside the repository;
-configuration stores mappings and templates, never token values.
+Integrations are named, provider-agnostic configuration entries. Each maps
+external payload paths into the same resolved project fields, so provider-only
+information can be retained without coupling the core ticket type to one
+service. GitHub Issues, GitLab Issues, and Jira Cloud are editable starter
+templates, not a closed provider enum; a user can add or remove a custom
+integration through the same typed command boundary. The editor renders each
+integration as a matrix of TicketBunker-field ↔ external-field input rows.
+Adding and removing rows is a local draft; **Publish mappings** replaces that
+integration's complete map in one revision-checked config commit, so partial UI
+publication cannot leave the matrix half-applied. The legacy one-pair command
+remains available to CLI/API callers for compatibility.
+
+Tokens are local-only secrets in a mode-0600 credential file outside the
+repository. Built-in environment names remain `GITHUB_ACCESS_TOKEN`,
+`GITLAB_ACCESS_TOKEN`, and `JIRA_API_TOKEN`; custom entries deterministically
+use `TICKETBUNKER_<INTEGRATION>_TOKEN`. Canonical configuration stores labels,
+templates, and field mappings, never token values.
 
 ### 3.16 The project universe boundary
 

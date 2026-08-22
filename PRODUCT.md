@@ -45,6 +45,8 @@ and report provenance easier to reach. It should disappear into the task.
 5. Reveal depth progressively. Metadata, activity, and full reports remain available without crowding the default view.
 6. Keep one command model. CLI, HTTP, and viewer actions dispatch the same backend commands.
 7. Separate reading from auditing. In each report category, lead with concise evidence-bounded synthesis and keep that category's unchanged trail one disclosure away.
+8. Make provenance structural. Ticket-owned information and agent-owned information live behind explicit Ticket and Agent views; Master and branch reports are selected, never visually blended.
+9. Treat integrations as compositions. Presets accelerate setup, but custom integrations use the same field matrix and command contract.
 
 ## Accessibility & Inclusion
 
