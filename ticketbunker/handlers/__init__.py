@@ -142,7 +142,8 @@ def intake_tbroot(repo: Path, text: str, ledger: Ledger) -> Path:
 
 
 def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger,
-                            repo: Path | None = None, refs: list[str] | None = None) -> Path:
+                            repo: Path | None = None, refs: list[str] | None = None,
+                            generation: dict[str, str] | None = None) -> Path:
     if repo is not None and refs:
         from ..processors import anchorcheck
 
@@ -150,8 +151,11 @@ def intake_report_component(bunker: Path, branch: str, text: str, ledger: Ledger
         if errors:
             ledger.event("intake_rejected", info_type="report_component", branch=branch, errors=errors)
             raise IntakeRejected("report_component", errors)
-        text = anchorcheck.annotate(text, repo, refs[0], _now())
-    _gate("report_component", {"branch": branch, "text": text}, ledger, branch=branch)
+        text = anchorcheck.annotate(text, repo, refs[0], _now(), generation=generation)
+    _gate(
+        "report_component", {"branch": branch, "text": text}, ledger,
+        branch=branch, generation=generation or {},
+    )
     dest = layout.child_report(bunker, branch)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8")

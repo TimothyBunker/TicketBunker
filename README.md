@@ -68,6 +68,8 @@ cd your-repo && tb init            # once per repo: creates .tb/ at the git root
 tb config --user Tim               # once per machine: team identifier (defaults from git user.name)
 
 tb ticket TB-1267                                  # opens $EDITOR on a ticket template (flags and --from FILE also work)
+tb ticket --from-json ticket.json                  # complete provider-neutral object; ID may come from JSON
+tb ticket --from-json -                            # paste one JSON object, then Ctrl-D; pipes use the same gate
 tb comment TB-1267 --author ann --when 2026-08-10  # carry a tracker comment over verbatim (paste in $EDITOR or pipe stdin)
 tb branch TB-1267 --name fourier-alg-impl --repo . # creates Tim/TB-1267-fourier-alg-impl
 tb branch TB-1267 --assign legacy-fix --repo .     # or adopt an existing branch whose name carries no ticket ID
@@ -93,7 +95,9 @@ tb survey . && tb status TB-1267
 
 `.tb/` is committed with your repo — the bunker database shares the code's
 remote and access boundary. A separate standalone database (`tb ticket
---root`, `tb sync`) is still supported.
+--root`, `tb sync`) is still supported. Bootstrap code diffs, authorship, and
+development counters pathspec-exclude `.tb/`, so committing the database does
+not make TicketBunker report its own generated files as product work.
 
 ## The backend is a git repo
 
@@ -145,11 +149,30 @@ ledger cannot be bypassed. Optional `acceptance_criteria` and `metadata`
 fields preserve tracker-shaped and project-specific information in
 `ticket.json` without making the tracker authoritative.
 
+### GitHub Projects example
+
+GitHub support is an example translator, not a core dependency. It reads the
+token from the environment, emits the same JSON that can be pasted by hand, and
+lives outside the installed `ticketbunker/` package:
+
+```sh
+set -a; source ~/.gitenv/.env; set +a
+python3 examples/github_projects/import_issue.py \
+  https://github.com/TimothyBunker/coal/issues/4 --project 8 \
+  | tb ticket --from-json -
+```
+
+The resulting ticket keeps GitHub assignment, labels, lifecycle, comments,
+source timestamps/URL, and Project identity/status as committed repository data.
+See [examples/github_projects/README.md](examples/github_projects/README.md).
+
 ## Running the agent
 
 `tb run` drives the whole session: compose tb.md for the branch, scaffold
 the pre-filled form, invoke the harness headless, publish the filled form
-through the gate, regenerate the master.
+through the gate, regenerate the master. The publish stamp records the harness,
+provider, and model values orchestration actually knows; the viewer shows those
+separately from the people whose code or ticket work the report describes.
 
 From inside your repo on a convention-named branch, `tb run` needs no
 arguments: it reads the current branch, extracts the ticket ID, and finds
@@ -176,8 +199,10 @@ tool_call hook, never by the agent's own volition.
 
 ## Status
 
-Full loop implemented and verified end-to-end with a stub harness: init →
-branch → bootstrap → run (compose, scaffold, agent session, gated publish,
-master regen) → sync. The pi profile is wired and verified up to provider
-login; a real-model run needs only credentials (`pi /login`). Not yet
-built: git-hook triggers, the root-surveyor session runner.
+The full loop is implemented and verified with both a deterministic stub and
+a live Codex session: init → tracker JSON intake → branch resolution → bootstrap
+→ run (compose, scaffold, agent session, gated publish, master regeneration) →
+sync. Git refresh hooks and the gated root-surveyor runner are implemented.
+Pi remains an optional reference harness; using it requires the `pi` binary and
+that harness's own provider login, while Codex is independently supported and
+records its identity on accepted reports.

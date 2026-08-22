@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..contracts import StageContract, run_stage
 from ..adapters.gitrun import git, git_status
-from ..layout import branch_slug
+from ..layout import TB_DIR, branch_slug
 from ..ledger import Ledger
 
 CONTRACTS: dict[str, StageContract] = {
@@ -35,21 +35,21 @@ CONTRACTS: dict[str, StageContract] = {
         name="diff",
         purpose="Capture the actual work on each branch — the changed code itself, not just which regions changed.",
         inputs="Per-branch merge-bases.",
-        process="git diff --numstat and --name-status for the file map; full patch text captured to observations/patches/, bounded.",
+        process="git diff --numstat and --name-status for the file map, excluding the repository's own .tb database; full patch text captured to observations/patches/, bounded.",
         desired_outcome="Per branch: files touched with add/delete counts and change kinds, plus the actual patch as an observation.",
     ),
     "merge_history": StageContract(
         name="merge_history",
         purpose="Establish each branch's freshness and integration state.",
         inputs="Per-branch merge-bases; baseline.",
-        process="Count commits ahead/behind the baseline; test if the branch tip is an ancestor of the baseline.",
-        desired_outcome="Per branch: ahead/behind counts, last-sync date, merged-back flag.",
+        process="Count code-affecting commits outside .tb ahead/behind the baseline; test whether each non-merge code commit is an ancestor of the baseline.",
+        desired_outcome="Per branch: code ahead/behind counts, last-sync date, code-merged-back flag.",
     ),
     "work_separation": StageContract(
         name="work_separation",
         purpose="Separate the author's work from incidental merges and baseline churn.",
         inputs="Per-branch merge-bases.",
-        process="List commits from merge-base to tip; partition merge commits from non-merge (work) commits.",
+        process="List commits from merge-base to tip that touch project paths outside .tb; partition merge commits from non-merge (work) commits.",
         desired_outcome="Per branch: ordered work commits (hash, author, date, subject) and merge commits counted separately.",
     ),
     "authorship": StageContract(
@@ -136,15 +136,16 @@ def run_bootstrap(
     observations["baseline_info"] = bases
 
     PATCH_MAX_LINES = 5000
+    code_pathspec = ["--", ".", f":(exclude){TB_DIR}"]
 
     def stage_diff() -> dict:
         result = {}
         patches_dir = obs_dir / "patches"
         for br, info in bases.items():
             base = info["merge_base"]
-            numstat = git(repo, ["diff", "--numstat", f"{base}..{br}"], ledger, "diff")
-            status = git(repo, ["diff", "--name-status", f"{base}..{br}"], ledger, "diff")
-            patch = git(repo, ["diff", f"{base}..{br}"], ledger, "diff")
+            numstat = git(repo, ["diff", "--numstat", f"{base}..{br}", *code_pathspec], ledger, "diff")
+            status = git(repo, ["diff", "--name-status", f"{base}..{br}", *code_pathspec], ledger, "diff")
+            patch = git(repo, ["diff", f"{base}..{br}", *code_pathspec], ledger, "diff")
             patch_lines = patch.splitlines()
             truncated = len(patch_lines) > PATCH_MAX_LINES
             if truncated:
@@ -188,10 +189,34 @@ def run_bootstrap(
         result = {}
         for br, info in bases.items():
             base = info["merge_base"]
-            ahead = int(git(repo, ["rev-list", "--count", f"{base}..{br}"], ledger, "merge_history").strip())
-            behind = int(git(repo, ["rev-list", "--count", f"{base}..{baseline}"], ledger, "merge_history").strip())
-            _, ancestor_status = git_status(repo, ["merge-base", "--is-ancestor", br, baseline], ledger, "merge_history")
-            merged_back = ancestor_status == 0
+            ahead = int(
+                git(repo, ["rev-list", "--count", f"{base}..{br}", *code_pathspec], ledger, "merge_history").strip()
+            )
+            behind = int(
+                git(
+                    repo,
+                    ["rev-list", "--count", f"{base}..{baseline}", *code_pathspec],
+                    ledger,
+                    "merge_history",
+                ).strip()
+            )
+            code_commits = git(
+                repo,
+                ["rev-list", "--no-merges", f"{base}..{br}", *code_pathspec],
+                ledger,
+                "merge_history",
+            ).split()
+            merged_back = True
+            for commit in code_commits:
+                _, ancestor_status = git_status(
+                    repo,
+                    ["merge-base", "--is-ancestor", commit, baseline],
+                    ledger,
+                    "merge_history",
+                )
+                if ancestor_status != 0:
+                    merged_back = False
+                    break
             result[br] = {
                 "ahead_of_merge_base": ahead,
                 "behind_baseline": behind,
@@ -209,7 +234,12 @@ def run_bootstrap(
         for br, info in bases.items():
             base = info["merge_base"]
             fmt = "%H%x09%P%x09%an%x09%aI%x09%s"
-            out = git(repo, ["log", "--reverse", f"--format={fmt}", f"{base}..{br}"], ledger, "work_separation")
+            out = git(
+                repo,
+                ["log", "--reverse", f"--format={fmt}", f"{base}..{br}", *code_pathspec],
+                ledger,
+                "work_separation",
+            )
             work, merges = [], []
             for line in out.splitlines():
                 parts = line.split("\t")

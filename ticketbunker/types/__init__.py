@@ -20,16 +20,19 @@ def _validate_ticket(payload: dict) -> list[str]:
     from .. import config
 
     errors = []
-    if not payload.get("id"):
+    ticket_id = payload.get("id")
+    if not isinstance(ticket_id, str) or not ticket_id.strip():
         errors.append("ticket requires a unique 'id'")
-    elif not config.validate_ticket_id(payload["id"]):
+    elif not config.validate_ticket_id(ticket_id):
         errors.append(
-            f"ticket id {payload['id']!r} does not match the allowed pattern {config.ticket_pattern()!r}"
+            f"ticket id {ticket_id!r} does not match the allowed pattern {config.ticket_pattern()!r}"
         )
-    if not payload.get("key"):
+    if not isinstance(payload.get("key"), str) or not payload["key"].strip():
         errors.append("ticket requires a 'key' (matched against branch names)")
-    if payload.get("people_of_interest") is not None and not isinstance(payload["people_of_interest"], list):
-        errors.append("'people_of_interest' must be a list")
+    people = payload.get("people_of_interest")
+    if people is not None:
+        if not isinstance(people, list) or not all(isinstance(person, str) and person.strip() for person in people):
+            errors.append("'people_of_interest' must be a list of non-empty strings")
     assigned = payload.get("assigned_branches")
     if assigned is not None:
         if not isinstance(assigned, list) or not all(isinstance(b, str) and b.strip() for b in assigned):
@@ -56,15 +59,25 @@ def _validate_ticket(payload: dict) -> list[str]:
             errors.append("'comments' must be a list")
         else:
             for i, c in enumerate(comments):
-                if not isinstance(c, dict) or not (c.get("author") or "").strip() or not (c.get("text") or "").strip():
+                if (
+                    not isinstance(c, dict)
+                    or not isinstance(c.get("author"), str)
+                    or not c["author"].strip()
+                    or not isinstance(c.get("text"), str)
+                    or not c["text"].strip()
+                ):
                     errors.append(f"comment {i}: requires a non-empty 'author' and 'text' (carried over verbatim from the tracker)")
+                    continue
+                for field in ("when", "source"):
+                    if c.get(field) is not None and not isinstance(c[field], str):
+                        errors.append(f"comment {i}: optional '{field}' must be a string")
     refs = payload.get("references")
     if refs is not None:
         if not isinstance(refs, list):
             errors.append("'references' must be a list of ticket ids")
         else:
             for ref in refs:
-                if not config.validate_ticket_id(ref):
+                if not isinstance(ref, str) or not config.validate_ticket_id(ref):
                     errors.append(f"reference {ref!r} does not match the allowed ticket pattern")
     return errors
 

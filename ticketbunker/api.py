@@ -162,6 +162,9 @@ class ReportSnapshot:
     verified_branch: str = ""
     verified_commit: str = ""
     verified_at: str = ""
+    agent_harness: str = ""
+    agent_provider: str = ""
+    agent_model: str = ""
     stale_in_master: bool = False
     predates_development: bool = False
     who: str = ""
@@ -371,6 +374,9 @@ class TicketDatabase:
                         verified_branch=str(stamp.get("branch") or ""),
                         verified_commit=str(stamp.get("commit") or ""),
                         verified_at=str(stamp.get("ts") or ""),
+                        agent_harness=str(stamp.get("harness") or ""),
+                        agent_provider=str(stamp.get("provider") or ""),
+                        agent_model=str(stamp.get("model") or ""),
                         stale_in_master=report_path.name in stale,
                         predates_development=bool(
                             stamp.get("ts")

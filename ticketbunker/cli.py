@@ -5,7 +5,8 @@ validated, ledgered), artifacts are produced by builders/, facts by
 processors/, external systems live behind adapters/. The bunker layout is
 defined once in layout.py.
 
-  tb ticket <ticket_id> [--key KEY] [--title T] [--priority P] [--description D]
+  tb ticket [<ticket_id>] [--from-json FILE|-] [--key KEY] [--title T]
+            [--priority P] [--description D]
             [--assignee A] [--reporter R] [--poi NAME ...] [--root DIR]
   tb branch <bunker> --repo PATH (--name SHORT | --assign BRANCH)
   tb bootstrap <bunker> --repo PATH [--baseline main]
@@ -109,6 +110,21 @@ def _verify_refs(bunker: Path, branch: str) -> list[str]:
     return refs
 
 
+def _generation(args: argparse.Namespace) -> dict[str, str]:
+    """The generator identity known by orchestration, without guessing.
+
+    Omitted provider/model values stay unknown. Codex is the one harness
+    whose provider is intrinsic rather than a selectable runtime argument.
+    """
+    generation = {"harness": args.harness}
+    provider = args.provider or ("openai" if args.harness == "codex" else None)
+    if provider:
+        generation["provider"] = provider
+    if args.model:
+        generation["model"] = args.model
+    return generation
+
+
 def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
     """Every bunker whose ticket explicitly assigns this branch, across the
     project's .tb/ and the configured bunker root."""
@@ -158,6 +174,48 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_ticket(args: argparse.Namespace) -> int:
+    flag_fields = (args.key, args.title, args.priority, args.description, args.assignee,
+                   args.reporter, args.poi, args.ref, args.label, args.type, args.status)
+    if args.from_json and (args.from_file or any(v is not None for v in flag_fields)):
+        print("error: --from-json is a complete ticket payload; do not combine it with --from or field flags",
+              file=sys.stderr)
+        return 1
+
+    json_payload: dict | None = None
+    if args.from_json:
+        try:
+            raw = sys.stdin.read() if args.from_json == "-" else Path(args.from_json).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"error: cannot read {args.from_json}: {exc}", file=sys.stderr)
+            return 1
+        try:
+            value = json.loads(raw)
+        except ValueError as exc:
+            print(f"error: {args.from_json}: invalid JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(value, dict):
+            print(f"error: {args.from_json}: ticket JSON must be one object", file=sys.stderr)
+            return 1
+        json_payload = value
+
+    payload_id = json_payload.get("id") if json_payload is not None else None
+    if payload_id is not None and not isinstance(payload_id, str):
+        print("error: ticket JSON 'id' must be a string", file=sys.stderr)
+        return 1
+    if args.ticket_id and payload_id and args.ticket_id != payload_id:
+        print(
+            f"error: positional ticket ID {args.ticket_id!r} disagrees with JSON id {payload_id!r}",
+            file=sys.stderr,
+        )
+        return 1
+    ticket_id = args.ticket_id or payload_id
+    if not ticket_id:
+        print(
+            "error: ticket ID required — pass it positionally, or include 'id' in --from-json",
+            file=sys.stderr,
+        )
+        return 1
+
     if args.root:
         root_dir = Path(args.root)
     else:
@@ -167,18 +225,19 @@ def cmd_ticket(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 1
         root_dir = layout.bunkers_dir(project)
-    bunker = root_dir / f"{args.ticket_id}_bunker"
+    bunker = root_dir / f"{ticket_id}_bunker"
     if bunker.exists():
         print(f"error: {bunker} already exists — ticket IDs must be unique", file=sys.stderr)
         return 1
 
-    # Three ways in, one gate: field flags (scripting), a template file
-    # (--from), or $EDITOR on the template when no fields were given at all.
+    # Four ways in, one gate: normalized JSON (file/stdin), field flags
+    # (scripting), a template file (--from), or $EDITOR on the template when
+    # no fields were given at all.
     fields: dict = {}
     form_text = None
-    flag_fields = (args.key, args.title, args.priority, args.description, args.assignee,
-                   args.reporter, args.poi, args.ref, args.label, args.type, args.status)
-    if args.from_file:
+    if json_payload is not None:
+        fields = json_payload
+    elif args.from_file:
         try:
             form_text = Path(args.from_file).read_text(encoding="utf-8")
             fields = ticketform.parse(form_text)
@@ -189,33 +248,49 @@ def cmd_ticket(args: argparse.Namespace) -> int:
             print(f"error: {args.from_file}: {exc}", file=sys.stderr)
             return 1
     elif all(v is None for v in flag_fields) and sys.stdin.isatty():
-        form_text = ticketform.edit(ticketform.template(args.ticket_id))
+        form_text = ticketform.edit(ticketform.template(ticket_id))
         try:
             fields = ticketform.parse(form_text)
         except ValueError as exc:
-            draft = root_dir / f"{args.ticket_id}.draft.md"
+            draft = root_dir / f"{ticket_id}.draft.md"
             draft.write_text(form_text, encoding="utf-8")
             print(f"error: {exc}\n  your draft is saved — fix it and re-run: "
-                  f"tb ticket {args.ticket_id} --from {draft}", file=sys.stderr)
+                  f"tb ticket {ticket_id} --from {draft}", file=sys.stderr)
             return 1
 
-    payload = {
-        "id": args.ticket_id,
-        "key": args.key or fields.get("key") or args.ticket_id,
-        "title": args.title or fields.get("title"),
-        "priority": args.priority or fields.get("priority"),
-        "description": args.description or fields.get("description"),
-        "assignee": args.assignee or fields.get("assignee"),
-        "reporter": args.reporter or fields.get("reporter"),
-        "people_of_interest": args.poi or fields.get("people_of_interest") or [],
-        "references": args.ref or fields.get("references") or [],
-        "type": args.type or fields.get("type") or "task",
-        "status": args.status or fields.get("status") or "todo",
-        "labels": args.label or fields.get("labels") or [],
-    }
+    if json_payload is not None:
+        # Preserve the complete provider-neutral object, including extension
+        # metadata and carried-over comments. Defaults are only TicketBunker
+        # mechanics; the typed gate remains the authority on its shape.
+        payload = dict(json_payload)
+        payload["id"] = ticket_id
+        payload.setdefault("key", ticket_id)
+        payload.setdefault("type", "task")
+        payload.setdefault("status", "todo")
+        payload.setdefault("people_of_interest", [])
+        payload.setdefault("references", [])
+        payload.setdefault("labels", [])
+    else:
+        payload = {
+            "id": ticket_id,
+            "key": args.key or fields.get("key") or ticket_id,
+            "title": args.title or fields.get("title"),
+            "priority": args.priority or fields.get("priority"),
+            "description": args.description or fields.get("description"),
+            "assignee": args.assignee or fields.get("assignee"),
+            "reporter": args.reporter or fields.get("reporter"),
+            "people_of_interest": args.poi or fields.get("people_of_interest") or [],
+            "references": args.ref or fields.get("references") or [],
+            "type": args.type or fields.get("type") or "task",
+            "status": args.status or fields.get("status") or "todo",
+            "labels": args.label or fields.get("labels") or [],
+        }
     layout.init_dirs(bunker)
     ledger = _ledger(bunker)
-    ledger.event("bunker_init", ticket_id=args.ticket_id, ticket_key=payload["key"])
+    intake = "json" if json_payload is not None else "template" if args.from_file else "flags" if any(
+        v is not None for v in flag_fields
+    ) else "editor"
+    ledger.event("bunker_init", ticket_id=ticket_id, ticket_key=payload.get("key"), intake=intake)
     try:
         handlers.intake_ticket(bunker, payload, ledger)
     except IntakeRejected as exc:
@@ -225,10 +300,10 @@ def cmd_ticket(args: argparse.Namespace) -> int:
 
         shutil.rmtree(bunker)
         if form_text is not None:
-            draft = root_dir / f"{args.ticket_id}.draft.md"
+            draft = root_dir / f"{ticket_id}.draft.md"
             draft.write_text(form_text, encoding="utf-8")
             print(f"error: {exc}\n  your draft is saved — fix it and re-run: "
-                  f"tb ticket {args.ticket_id} --from {draft}", file=sys.stderr)
+                  f"tb ticket {ticket_id} --from {draft}", file=sys.stderr)
         else:
             print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -603,7 +678,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f)
     try:
         dest = handlers.intake_report_component(bunker, args.branch, text, ledger,
-                                                repo=repo, refs=_verify_refs(bunker, args.branch))
+                                                repo=repo, refs=_verify_refs(bunker, args.branch),
+                                                generation=_generation(args))
     except IntakeRejected as exc:
         for err in exc.errors:
             print(f"[error] {err}", file=sys.stderr)
@@ -754,7 +830,8 @@ def cmd_merge(args: argparse.Namespace) -> int:
         for f in findings_by_branch[br]:
             print(f"{br}: {f}")
         handlers.intake_report_component(bunker, br, body, ledger,
-                                         repo=repo, refs=_verify_refs(bunker, br))
+                                         repo=repo, refs=_verify_refs(bunker, br),
+                                         generation=_generation(args))
     ledger.event(
         "merge_reconciled",
         branches=sorted(bodies),
@@ -1124,6 +1201,15 @@ def cmd_show(args: argparse.Namespace) -> int:
                 marks.append("predates latest development — re-run tb run")
             elif v.get("commit"):
                 marks.append(f"verified at {v['commit']}")
+            identity = v.get("model") or v.get("provider")
+            if v.get("model") and v.get("provider"):
+                identity = f"{v['model']} ({v['provider']})"
+            if identity and v.get("harness"):
+                marks.append(f"generated by {identity} via {v['harness']}")
+            elif identity:
+                marks.append(f"generated by {identity}")
+            elif v.get("harness"):
+                marks.append(f"generated via {v['harness']}")
             print(f"  {branch_name}" + (f"  ({'; '.join(marks)})" if marks else ""))
         print(f"  master: {layout.paths(bunker)['master']}")
 
@@ -1324,8 +1410,17 @@ def cmd_checkout(args: argparse.Namespace) -> int:
                 kept.append(br)
                 continue
         try:
+            from .processors.anchorcheck import verified_stamp
+
+            source_stamp = verified_stamp(text)
+            generation = {
+                key: source_stamp[key]
+                for key in ("harness", "provider", "model")
+                if source_stamp.get(key)
+            }
             handlers.intake_report_component(bunker, local, text, ledger,
-                                             repo=repo, refs=_verify_refs(bunker, br))
+                                             repo=repo, refs=_verify_refs(bunker, br),
+                                             generation=generation)
             imported.append(br)
         except IntakeRejected as exc:
             rejected.append((br, exc))
@@ -1407,7 +1502,7 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("ticket", help="create a new ticket bunker in the project's .tb/ (no field flags: opens $EDITOR on a template)")
-    s.add_argument("ticket_id")
+    s.add_argument("ticket_id", nargs="?", help="optional when --from-json contains an id")
     s.add_argument("--key", default=None,
                    help="token matched against branch names (default: the ticket id itself)")
     s.add_argument("--title", default=None)
@@ -1423,6 +1518,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="linked ticket in another project (pattern-validated); repeatable")
     s.add_argument("--from", dest="from_file", default=None, metavar="FILE",
                    help="read fields from a saved ticket template instead of flags or the editor")
+    s.add_argument("--from-json", default=None, metavar="FILE|-",
+                   help="read one complete, provider-neutral ticket object from a file or stdin")
     s.add_argument("--root", default=None, help="create the bunker in this directory instead of the project .tb/")
     s.set_defaults(fn=cmd_ticket)
 

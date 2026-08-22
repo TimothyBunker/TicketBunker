@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 # An anchor as reports write them: `path` or `path:line`, where path has a
@@ -120,15 +121,29 @@ def verify(text: str, repo: Path, refs: list[str], bunker: Path) -> list[str]:
 VERIFIED_RE = re.compile(r"^<!-- tb:verified .*-->\n?", re.MULTILINE)
 
 
-def annotate(text: str, repo: Path, ref: str, ts: str) -> str:
+def annotate(
+    text: str,
+    repo: Path,
+    ref: str,
+    ts: str,
+    generation: dict[str, str] | None = None,
+) -> str:
     """Stamp the component with the ref its anchors were verified against —
-    mechanical provenance the master surfaces, never agent-authored."""
+    plus the known harness identity — mechanical provenance the master and
+    read model surface, never agent-authored."""
     proc = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--short", ref],
         capture_output=True, text=True,
     )
     sha = proc.stdout.strip() if proc.returncode == 0 else "unknown"
-    stamp = f"<!-- tb:verified branch={ref} commit={sha} ts={ts} -->\n"
+    fields = {"branch": ref, "commit": sha, "ts": ts}
+    for key in ("harness", "provider", "model"):
+        if generation and generation.get(key):
+            fields[key] = str(generation[key])
+    encoded = " ".join(
+        f"{key}={urllib.parse.quote(str(value), safe='/:.+_-')}" for key, value in fields.items()
+    )
+    stamp = f"<!-- tb:verified {encoded} -->\n"
     return stamp + VERIFIED_RE.sub("", text)
 
 
@@ -137,7 +152,10 @@ def verified_stamp(text: str) -> dict:
     m = re.search(r"<!-- tb:verified (.*?) -->", text)
     if not m:
         return {}
-    return dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    return {
+        key: urllib.parse.unquote(value)
+        for key, value in (kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
+    }
 
 
 def predates(stamp_ts: str, recency: str) -> bool:

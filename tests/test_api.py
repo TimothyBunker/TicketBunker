@@ -76,7 +76,7 @@ class TicketDatabaseTests(unittest.TestCase):
             json.dumps({"branch": "ada/TB-7-api", "user": "Ada"}), encoding="utf-8"
         )
         layout.child_report(self.bunker, "ada/TB-7-api").write_text(
-            """<!-- tb:verified branch=ada/TB-7-api commit=abc1234 ts=2026-08-12T08:10:00+00:00 -->
+            """<!-- tb:verified branch=ada/TB-7-api commit=abc1234 ts=2026-08-12T08:10:00+00:00 harness=pi provider=openai model=gpt-5.6-sol -->
 ## Reader brief
 
 ### Who
@@ -133,6 +133,9 @@ class TicketDatabaseTests(unittest.TestCase):
         self.assertEqual(len(ticket.reports), 1)
         self.assertEqual(ticket.reports[0].owner, "Ada")
         self.assertEqual(ticket.reports[0].verified_commit, "abc1234")
+        self.assertEqual(ticket.reports[0].agent_harness, "pi")
+        self.assertEqual(ticket.reports[0].agent_provider, "openai")
+        self.assertEqual(ticket.reports[0].agent_model, "gpt-5.6-sol")
         self.assertEqual(ticket.reports[0].state, "predates development")
         self.assertIsNotNone(ticket.reports[0].brief)
         self.assertIn("Ada owns", ticket.reports[0].brief.who)
@@ -164,6 +167,19 @@ class TicketDatabaseTests(unittest.TestCase):
         self.assertIn(
             "'metadata' must be a mapping with non-empty string keys",
             types.validate("ticket", {"id": "TB-7", "key": "seven", "metadata": {"": 1}}),
+        )
+        self.assertIn(
+            "'people_of_interest' must be a list of non-empty strings",
+            types.validate("ticket", {"id": "TB-7", "key": "seven", "people_of_interest": [7]}),
+        )
+        self.assertTrue(types.validate("ticket", {"id": 7, "key": "seven"}))
+        self.assertTrue(types.validate("ticket", {"id": "TB-7", "key": "seven", "references": [7]}))
+        self.assertIn(
+            "comment 0: optional 'when' must be a string",
+            types.validate(
+                "ticket",
+                {"id": "TB-7", "key": "seven", "comments": [{"author": "Ada", "text": "Hi", "when": 7}]},
+            ),
         )
 
 

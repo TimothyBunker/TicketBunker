@@ -320,6 +320,10 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
     labels = ticket.get("labels") or []
     if labels:
         lines.append(f"- **labels**: {', '.join(labels)}")
+    criteria = ticket.get("acceptance_criteria") or []
+    if criteria:
+        lines += ["", "## Acceptance criteria", ""]
+        lines += [f"- {item}" for item in criteria]
     lines.append("")
     lines += ["## People", ""]
     lines.append(f"- **assignee**: {ticket.get('assignee') or 'not configured'}")
@@ -338,9 +342,17 @@ def write_ticket(context_dir: Path, ticket: dict) -> Path:
         lines += ["## Tracker comments (carried over verbatim — primary sources for Why)", ""]
         for c in comments:
             when = (c.get("when") or "")[:10]
-            lines.append(f"- **{c['author']}**{f' ({when})' if when else ''}:")
+            source = f" — source: {c['source']}" if c.get("source") else ""
+            lines.append(f"- **{c['author']}**{f' ({when})' if when else ''}{source}:")
             for text_line in c["text"].splitlines():
                 lines.append(f"  {text_line}")
+    metadata = ticket.get("metadata")
+    if metadata:
+        import json
+
+        lines += ["", "## Source and extension metadata", "", "```json"]
+        lines += json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+        lines.append("```")
     path = context_dir / "20_ticket.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

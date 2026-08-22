@@ -187,11 +187,17 @@ control:
 2. **Baseline identification.** Determine the reference branch (default: `main`,
    configurable per repo) and compute `merge-base` for each ticket branch.
 3. **Diff extraction.** `git diff <merge-base> <branch>` per branch — the actual
-   work, not noise from an aging fork point.
+   work, not noise from an aging fork point. The repository-owned `.tb/`
+   database is pathspec-excluded from code diffs and patches so reports never
+   recursively describe TicketBunker's own generated artifacts.
 4. **Merge history.** When the branch last merged main (or was rebased), how far
-   behind it is, and whether it has been merged back.
-5. **Work separation.** Partition commits into *author work* vs *incidental
-   merges/main churn*, so the report reflects what the person actually did.
+   its code-affecting history is ahead/behind, and whether its non-merge code
+   commits have been merged back. Database-only `.tb/` commits are excluded so
+   observing and committing a bunker cannot change its own development state.
+5. **Work separation.** Partition commits that touch project paths outside
+   `.tb/` into *author work* vs *incidental merges/main churn*, so database-only
+   commits do not become code authorship while the report still reflects what
+   the person actually did.
 6. **Authorship map.** `git log` / blame over the touched paths: who committed,
    when, in what order.
 
@@ -317,9 +323,13 @@ with the agent at all:
   bootstrap extensions and command-fed agent do the rest).
 - The report is the sole user-facing artifact — it must be complete enough that
   reading it answers who/what/where/why without a follow-up conversation.
-- The pi session file is retained as **provenance**: if a report claim needs
-  auditing, the session shows exactly which commands produced which observations
-  and how each inference was derived. It is an audit log, not a chat to resume.
+- The harness transcript/session is retained as **provenance**: if a report claim
+  needs auditing, it shows exactly which commands produced which observations
+  and how each inference was derived. The accepted component is also stamped by
+  orchestration with every generator fact it actually knows — harness, provider,
+  and model — rather than asking the agent to identify itself. Work authorship
+  and report generation are separate facts. The session is an audit log, not a
+  chat to resume.
 - If interactive follow-up is ever needed, that's a signal the report schema is
   missing a section — fix the schema, don't normalize talking to the agent.
 
@@ -343,7 +353,12 @@ because tracker lifecycle and observed branch state are already visible in the
 ticket rail. Direct branch links open the exact report's Who trail;
 legacy children derive compact previews from their evidence without inventing
 synthesis. Verification and freshness remain visible. Details and carried-over
-comments remain available without turning the page into a dashboard. Trust tags render as
+comments remain available without turning the page into a dashboard. Each child
+trail labels work authors separately from the harness/provider/model that generated
+the report; the newest report's generator is also visible beside Agent work so
+the default synthesis never hides who produced it. Unknown generator fields stay
+absent instead of being guessed. Raw tracker metadata stays collapsed under
+Details. Trust tags render as
 chips. It is strictly
 read-only — no write
 endpoint exists, every page renders from `.tb/` on each request, and pages
@@ -382,8 +397,9 @@ against the source repo — the branch itself, then the exact baseline state
 (merge-base) the observations were computed from — and against the bunker's
 own files for observation anchors. A cited line number must fall inside the
 file. A claim none of whose anchors resolve is rejected at the gate, and an
-accepted component is stamped (`tb:verified branch/commit/ts`, mechanical,
-never agent-authored) with the ref it was proven against; the master's
+accepted component is stamped (`tb:verified branch/commit/ts` plus known
+`harness/provider/model`, mechanical, never agent-authored) with the ref it was
+proven against and its generator identity; the master's
 manifest and digest carry that ref, and `tb show`/the viewer badge any
 component whose branch has developed past its verification instant. This
 proves existence, not meaning — a resolvable anchor can still be cited
@@ -468,9 +484,10 @@ The bootstrap context handed to a session is a **composite markdown document,
    what the agent is expected to produce, in what order.
 3. **The local universe** — the project's tbroot.md, mirrored in (§3.10).
 4. **Ticket information** — essentially all of the ticket: title, priority,
-   description, people. Markdown by default; can be carried as XML where
-   that makes injection easier. This is *information we add* — kept as its
-   own fragment, never blended into generated content.
+   description, people, acceptance criteria, carried-over comment sources, and
+   the source/extension metadata mapping. Markdown by default, with metadata as
+   deterministic JSON inside the fragment. This is *information we add* — kept
+   as its own fragment, never blended into generated content.
 5. **Observations** — the latest bootstrap output, as its own fragment.
 
 Fragments 1–2 and 4 are *ours*; 3 is agent-written but gated (§3.10); 5 is
@@ -602,6 +619,17 @@ side channel that writes without the type check. This is the same
 by-construction philosophy as the ledger: validation is structural, not a
 convention the agent is asked to follow.
 
+**Tracker integration ends at a provider-neutral JSON boundary.** `tb ticket
+--from-json FILE` (or `-` for stdin/copy-paste/pipes) accepts one complete
+ticket object, preserves typed extension metadata and tracker comments, and
+passes it through the ordinary ticket handler. The ticket ID may come from the
+object, so a translator can pipe directly into `tb ticket --from-json -`.
+Provider adapters live outside the installed core — the GitHub Projects example
+under `examples/` reads GitHub and emits this object — keeping the core
+stdlib-only and preventing any tracker from becoming the authority. JSON input
+is a complete source, not an implicit override layer: combining it with field
+flags or the editor-template path is rejected.
+
 ### 3.13 Code architecture
 
 The repo separates cleanly by role, **per information type**:
@@ -700,11 +728,12 @@ versions, estimates and votes stay the tracker's job. **Comments are carried
 over, not authored**: `tb comment` pastes a real tracker comment onto the
 ticket verbatim, keeping its original author (and optionally timestamp and
 source URL) — ours-provenance imported context that composition feeds to the
-agent as primary source material for Why. Creation has three ways in, one
-gate: field flags for scripting, `--from FILE` for a saved template, and —
-the default when no fields are given — `$EDITOR` on a pre-filled template,
-like `git commit`; a draft that fails validation is saved and the error says
-how to resume it. After creation, fields move only through `tb set`
+agent as primary source material for Why. Creation has four ways in, one
+gate: provider-neutral `--from-json FILE|-` for API/copy-paste adapters, field
+flags for scripting, `--from FILE` for a saved human template, and — the default
+when no fields are given — `$EDITOR` on a pre-filled template, like `git commit`;
+a draft that fails validation is saved and the error says how to resume it.
+After creation, fields move only through `tb set`
 (status transitions, priority, labels, …) — the same ticket gate, so there
 is never a hand-edited side channel into ticket.json.
 
