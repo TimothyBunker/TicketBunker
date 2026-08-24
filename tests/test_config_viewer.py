@@ -70,6 +70,8 @@ class ConfigViewerTests(unittest.TestCase):
         self.assertIn("Create an empty companion repository", text)
         self.assertIn("Commit the locator", text)
         self.assertIn("tb doctor", text)
+        self.assertIn('data-command="project.connect"', text)
+        self.assertNotIn('data-command="project.initialize"', text)
         self.assertNotIn("GITHUB_ACCESS_TOKEN=", text)
 
     def test_connected_repository_page_shows_shared_readiness_checks(self) -> None:
@@ -83,7 +85,7 @@ class ConfigViewerTests(unittest.TestCase):
         text = body.decode("utf-8")
 
         self.assertEqual(status, 200)
-        self.assertIn("Needs setup", text)
+        self.assertIn("Needs connection", text)
         self.assertIn("Source contract", text)
         self.assertIn("git add .ticketbunker.json .gitignore", text)
         self.assertIn("Run <span class=\"mono\">tb doctor</span> for remote access", text)

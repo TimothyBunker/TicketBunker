@@ -37,22 +37,7 @@ def _git(root: Path, args: list[str], ledger: Ledger, stage: str = "doctor") -> 
 
 
 def _remote_heads(root: Path, remote: str, branches: list[str], ledger: Ledger) -> tuple[dict[str, str], str]:
-    output, status = git_status(
-        root,
-        ["ls-remote", "--heads", remote, *(f"refs/heads/{branch}" for branch in branches)],
-        ledger,
-        "doctor_remote",
-        env={"GIT_TERMINAL_PROMPT": "0"},
-        timeout=10,
-    )
-    if status != 0:
-        return {}, output.strip()
-    heads = {}
-    for line in output.splitlines():
-        sha, separator, ref = line.partition("\t")
-        if separator and ref.startswith("refs/heads/"):
-            heads[ref.removeprefix("refs/heads/")] = sha
-    return heads, ""
+    return project.probe_remote_heads(root, remote, branches, ledger)
 
 
 def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
@@ -143,7 +128,7 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
         if current != branch:
             checkout_checks.append(f"{label} is on {current or 'detached HEAD'}, expected {branch}")
     if checkout_checks:
-        checks.append(_check("checkouts", "Companion checkouts", "fail", "; ".join(checkout_checks) + ".", "tb setup"))
+        checks.append(_check("checkouts", "Companion checkouts", "fail", "; ".join(checkout_checks) + ".", "tb init"))
     else:
         sparse = "sparse indexes" if project.sparse_data_enabled(root) else "full data"
         checks.append(_check("checkouts", "Companion checkouts", "pass", f"Configuration and {sparse} checkouts are present."))
@@ -151,20 +136,21 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
     if check_remote:
         heads, error = _remote_heads(root, remote, [config_branch, data_branch], ledger)
         if error:
+            _code, summary, action = project.classify_remote_failure(remote, error)
             checks.append(
                 _check(
                     "remote",
                     "Companion remote",
                     "fail",
-                    error.splitlines()[-1] if error else "Remote access failed.",
-                    "check the repository URL and Git credentials, then run tb doctor",
+                    summary,
+                    action,
                 )
             )
         else:
             missing_branches = [branch for branch in (config_branch, data_branch) if branch not in heads]
             if missing_branches:
                 checks.append(
-                    _check("remote", "Companion remote", "fail", f"Missing branches: {', '.join(missing_branches)}.", "tb setup")
+                    _check("remote", "Companion remote", "fail", f"Missing branches: {', '.join(missing_branches)}.", "tb init")
                 )
             else:
                 stale = []
@@ -178,7 +164,7 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
                             stale.append(branch)
                 if stale:
                     checks.append(
-                        _check("remote", "Companion remote", "warn", f"Local checkout differs on {', '.join(stale)}.", "tb setup")
+                        _check("remote", "Companion remote", "warn", f"Local checkout differs on {', '.join(stale)}.", "tb init")
                     )
                 else:
                     checks.append(_check("remote", "Companion remote", "pass", "Remote access and both canonical branches are current."))
@@ -188,7 +174,7 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
     try:
         config_state = projectconfig.state(root)
     except (commands.CommandRejected, GitError, OSError, ValueError) as exc:
-        checks.append(_check("configuration", "Project configuration", "fail", str(exc), "tb setup"))
+        checks.append(_check("configuration", "Project configuration", "fail", str(exc), "tb init"))
         config_state = None
     if config_state is not None:
         field_count = len(config_state.get("fields") or [])
@@ -199,7 +185,7 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
 
     index = ticketindex.read(project.tickets_dir(root, project_key))
     if index is None:
-        checks.append(_check("index", "Ticket index", "warn", "No valid committed ticket index is present.", "tb setup"))
+        checks.append(_check("index", "Ticket index", "warn", "No valid committed ticket index is present.", "tb init"))
     else:
         checks.append(_check("index", "Ticket index", "pass", f"{len(index['tickets'])} ticket references."))
 

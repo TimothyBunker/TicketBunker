@@ -27,7 +27,7 @@ def _ticket(source_root: Path, ticket_id: str) -> tuple[dict[str, Any], Path, st
     except KeyError as exc:
         raise commands.CommandRejected(
             "ticket_missing",
-            f"Ticket {ticket_id} is not in project {project_key}. Run 'tb setup' and choose an indexed ticket.",
+            f"Ticket {ticket_id} is not in project {project_key}. Run 'tb init' and choose an indexed ticket.",
         ) from exc
     return dict(snapshot.data), snapshot.bunker, project_key
 

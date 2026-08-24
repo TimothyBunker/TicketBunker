@@ -539,7 +539,7 @@ class TicketCatalog:
             data = project.data_checkout(self.source_root)
             if not data.is_dir():
                 raise FileNotFoundError(
-                    "local companion data is missing; run 'tb setup' and retry"
+                    "local companion data is missing; run 'tb init' and retry"
                 )
         elif not layout.bunkers_dir(self.source_root).is_dir():
             raise FileNotFoundError(f"no {layout.TB_DIR}/ database under {self.source_root}")

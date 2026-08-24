@@ -120,7 +120,7 @@ def run_mock(workspace: Path) -> dict[str, Any]:
     try:
         initialized, initialize_ms = _timed(
             lambda: commands.dispatch(
-                "project.initialize",
+                "project.connect",
                 {
                     "project": "ECS",
                     "project_name": "Voxel ECS",
@@ -174,7 +174,7 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         )
         _git(collaborator, "config", "user.name", "Lin")
         _git(collaborator, "config", "user.email", "lin@example.com")
-        _setup_result, collaborator_setup_ms = _timed(lambda: project.setup(collaborator))
+        _setup_result, collaborator_setup_ms = _timed(lambda: project.connect(collaborator))
         before_open = _materialized(collaborator)
         collaborator_catalog = api.TicketCatalog(collaborator)
         collaborator_refs = collaborator_catalog.list_tickets()
@@ -195,7 +195,7 @@ def run_mock(workspace: Path) -> dict[str, Any]:
                 commands.CommandContext(collaborator),
             )
         )
-        project.setup(owner)
+        project.connect(owner)
         owner_doctor = doctor.report(owner)
         collaborator_doctor = doctor.report(collaborator)
         rendered = viewer.page_ticket(

@@ -74,9 +74,8 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 ```sh
 # First create an empty Git repository on any host you control. TicketBunker
 # connects to that URL; it never creates the hosting repository.
-cd your-repo && tb init             # once: opens companion repository setup
+cd your-repo && tb init             # owner: connect a new companion; clone: use the committed locator
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
-tb setup                            # every later clone: connect from .ticketbunker.json
 tb config                           # remote-backed identity, storage, fields, integrations editor
 tb doctor                           # readiness checks with exact next commands (--json / --offline available)
 tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
@@ -111,9 +110,17 @@ tb survey . && tb status TB-1267
 `.ticketbunker.json` is committed with the source. `.tb/` is an ignored local
 checkout/cache; canonical configuration and data live on separate branches of
 the companion repository. A standalone database (`tb ticket --root`, `tb
-sync`) and embedded legacy bunkers remain supported. A fresh `tb setup` checks
+sync`) and embedded legacy bunkers remain supported. On every later clone,
+`tb init` reads the locator and connects automatically. A fresh connection checks
 out only committed ticket indexes; opening or changing a ticket fetches that
 one bunker without copying every ticket and report.
+
+`tb init` performs its own remote probe. It retries transient DNS resolution,
+uses bounded non-interactive Git operations, and distinguishes DNS, timeout,
+authentication, repository access, and local fast-forward failures. The old
+`tb setup` spelling remains an alias. If a clone lands on a default branch that
+predates the locator, `tb init` finds the single locator-bearing remote branch
+and switches a clean worktree to it. Dirty or conflicting choices are refused.
 
 ## The backend is a git repo
 

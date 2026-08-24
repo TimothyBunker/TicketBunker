@@ -93,7 +93,8 @@ class DoctorTests(unittest.TestCase):
         remote = next(value for value in result["checks"] if value["key"] == "remote")
         self.assertFalse(result["ready"])
         self.assertEqual(remote["status"], "fail")
-        self.assertIn("Git credentials", remote["action"])
+        self.assertIn("repository URL and access grant", remote["action"])
+        self.assertIn("tb init", remote["action"])
 
 
 if __name__ == "__main__":

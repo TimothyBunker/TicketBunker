@@ -36,11 +36,21 @@ exercise unless a live boundary is explicitly called out.
 
 ### Companion database and configuration
 
-- `tb init` connects to an existing Git repository; it never creates a hosted
-  repository. It publishes `ticketbunker/config` and `ticketbunker/data`, then
-  writes `.ticketbunker.json`. A second init is refused.
-- `tb setup` is the repeatable collaborator path. Companion refresh failures
-  are typed, actionable rejections rather than raw Git tracebacks.
+- `tb init` is the one public connection command. Without a locator it connects
+  an owner-created repository, publishes `ticketbunker/config` and
+  `ticketbunker/data`, then writes `.ticketbunker.json`; with a committed
+  locator it connects or refreshes a collaborator checkout. `tb setup` remains
+  only as an alias.
+- Remote Git probes are non-interactive and bounded. Transient DNS resolution
+  is retried three times; DNS, timeout, authentication, access, and local
+  fast-forward failures get distinct actionable rejections instead of raw Git
+  tracebacks or manual `getent`/`git ls-remote` diagnosis.
+- A fresh clone on a locator-less default branch fetches source refs, discovers
+  one canonical remote locator, and safely switches a clean worktree to that
+  tracking branch. Dirty and ambiguous cases stop with an exact next action.
+  Live verification cloned Coal at default `main`; installed `tb init` found
+  `origin/ecs`, switched to `ecs`, connected both companion checkouts, passed
+  `tb doctor`, and listed all four ECS references. The scratch clone was removed.
 - Remote Git and branch rules remain the sole authorization mechanism.
 - Configuration is project composition, not mutable inheritance. New projects
   pin the then-current global field sets. Project edits do not rewrite global
@@ -61,7 +71,7 @@ exercise unless a live boundary is explicitly called out.
 - Canonical tickets are `projects/<PROJECT>/tickets/<TICKET-ID>` on the data
   branch. `projects/<PROJECT>/tickets/index.json` contains bounded summary
   references, source URLs, digests, and counts—not report bodies.
-- A fresh setup sparsely checks out indexes only. Tickets, Projects, search,
+- A fresh connection sparsely checks out indexes only. Tickets, Projects, search,
   facets, and pagination work from those references. Opening or mutating one
   ticket hydrates only that ticket. Index-less older data branches fall back to
   a full checkout.
@@ -74,6 +84,13 @@ exercise unless a live boundary is explicitly called out.
 - Provider-neutral activity mirrors comments, history, worklogs, logs, notes,
   and extension-defined kinds. It is read-only in TicketBunker because the
   configured tracker remains that activity's ground truth.
+- GitHub Project #8 was live-synchronized into Coal on 23 August 2026: ECS-1
+  through ECS-4 are active, assigned to `TimothyBunker`, committed in the
+  companion index, and visible in both the personal and Project queries. The
+  first full pull created three and refreshed ECS-4; an immediate second pull
+  reported all four unchanged without moving the data revision. ECS-4's report
+  remained intact. Coal `ecs` commit `e886c58` records the source-base locator
+  hint; companion data commit `3a9ae5d` owns the four-ticket synchronization.
 
 ### Ticket-to-branch workflow
 
@@ -146,8 +163,9 @@ not run an agent report.
 
 ## Remaining product work
 
-1. Live-test GitHub sync with a disposable Project and real local credentials,
-   including hosted branch rules and API pagination/rate-limit failure copy.
+1. Exercise GitHub API pagination and rate-limit failure copy with a larger
+   disposable Project. The four-ticket live sync and hosted Git publication
+   path are verified.
 2. Verify the pi harness past its provider login and grade every `[real]`
    anchor, speculation rank, and cold-read Where/Why result.
 3. Warn when composed `tb.md` exceeds a documented token budget.

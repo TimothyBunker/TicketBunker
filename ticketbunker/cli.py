@@ -163,11 +163,9 @@ def cmd_init(args: argparse.Namespace) -> int:
         print("error: not inside a git repository — tb init roots itself in a git repo, like git does",
               file=sys.stderr)
         return 1
-    if not args.bunker_repo:
-        return _open_config_editor(source_root, args.port, not args.no_open, "repository")
     try:
         result = commands.dispatch(
-            "project.initialize",
+            "project.connect",
             {
                 "project": args.project,
                 "project_name": args.project_name,
@@ -181,29 +179,19 @@ def cmd_init(args: argparse.Namespace) -> int:
     except commands.CommandRejected as exc:
         print(f"error: {exc.message}", file=sys.stderr)
         return 1
+    if result["mode"] == "needs_initialization":
+        return _open_config_editor(source_root, args.port, not args.no_open, "repository")
+    if result["mode"] == "connected":
+        if result.get("source_branch"):
+            print(f"found the committed locator on origin/{result['source_branch']}; switched to {result['source_branch']}")
+        print(f"connected {result['project']} to {result['bunker_repository']}")
+        print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
+        print("ready: tb doctor")
+        return 0
     print(f"initialized {result['project']} in {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
     print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
-    return 0
-
-
-def cmd_setup(args: argparse.Namespace) -> int:
-    del args
-    source_root = project_mod.find_source_root()
-    if source_root is None:
-        print("error: not inside a git repository — run 'tb setup' from the project checkout", file=sys.stderr)
-        return 1
-    try:
-        result = commands.dispatch(
-            "project.setup", {}, commands.CommandContext(source_root, transport="cli")
-        )
-    except commands.CommandRejected as exc:
-        print(f"error: {exc.message}", file=sys.stderr)
-        return 1
-    print(f"connected {result['project']} to {result['bunker_repository']}")
-    print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
-    print("next: tb doctor")
     return 0
 
 
@@ -943,7 +931,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         return 1
     if project_mod.load_locator(source_root) is not None:
         try:
-            commands.dispatch("project.setup", {}, commands.CommandContext(source_root, transport="cli"))
+            commands.dispatch("project.connect", {}, commands.CommandContext(source_root, transport="cli"))
         except commands.CommandRejected as exc:
             print(f"error: cannot refresh canonical configuration: {exc.message}", file=sys.stderr)
             return 1
@@ -1453,7 +1441,7 @@ def cmd_checkout(args: argparse.Namespace) -> int:
     source_root = project_mod.find_source_root(repo)
     if source_root is not None and project_mod.load_locator(source_root) is not None:
         try:
-            commands.dispatch("project.setup", {}, commands.CommandContext(source_root, transport="cli"))
+            commands.dispatch("project.connect", {}, commands.CommandContext(source_root, transport="cli"))
         except commands.CommandRejected as exc:
             print(f"error: cannot refresh companion data: {exc.message}", file=sys.stderr)
             return 1
@@ -1633,21 +1621,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tb", description="TicketBunker — git context layer for tickets")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", help="initialize this project in a companion TicketBunker Git repository")
+    s = sub.add_parser(
+        "init",
+        aliases=["setup"],
+        help="initialize a project or connect this checkout from its committed locator",
+    )
     s.add_argument("--project", required=False, help="project key, for example ECS")
     s.add_argument("--project-name", default=None, help="display name (default: project key)")
     s.add_argument("--bunker-repo", default=None, help="existing companion Git repository URL")
     s.add_argument("--config-branch", default=project_mod.DEFAULT_CONFIG_BRANCH)
     s.add_argument("--data-branch", default=project_mod.DEFAULT_DATA_BRANCH)
     s.add_argument("--base", default=None, help="source baseline branch (default: current branch)")
-    s.add_argument("--port", type=int, default=8378, help="setup editor localhost port (default: 8378)")
-    s.add_argument("--no-open", action="store_true", help="do not open the setup editor in a browser")
+    s.add_argument("--port", type=int, default=8378, help="connection editor localhost port (default: 8378)")
+    s.add_argument("--no-open", action="store_true", help="do not open the connection editor in a browser")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("setup", help="connect this checkout to its existing companion TicketBunker repository")
-    s.set_defaults(fn=cmd_setup)
-
-    s = sub.add_parser("doctor", help="check setup, Git state, companion access, indexes, credentials, and hooks")
+    s = sub.add_parser("doctor", help="check connection, Git state, companion access, indexes, credentials, and hooks")
     s.add_argument("--offline", action="store_true", help="skip the companion remote access check")
     s.add_argument("--json", action="store_true", help="emit the structured diagnostic report")
     s.set_defaults(fn=cmd_doctor)

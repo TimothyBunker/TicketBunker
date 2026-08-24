@@ -302,6 +302,34 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("TB-9", selected_page)
         self.assertIn('action="/project/TB"', selected_page)
 
+    def test_project_view_defaults_to_every_assignee_not_the_current_user(self) -> None:
+        bunker = layout.bunker_path(self.root, "TB-10")
+        layout.init_dirs(bunker)
+        layout.paths(bunker)["ticket"].write_text(
+            json.dumps(
+                {
+                    "id": "TB-10",
+                    "key": "ten",
+                    "title": "Another contributor's ticket",
+                    "status": "todo",
+                    "assignee": "Ada",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        personal = page_index(
+            self.root, "fingerprint", {"assignee": "Tim"}
+        ).decode("utf-8")
+        selected = page_project(self.root, "TB", "fingerprint")
+
+        self.assertNotIn("Another contributor&#x27;s ticket", personal)
+        self.assertIsNotNone(selected)
+        project_page = selected.decode("utf-8")
+        self.assertIn("A single, complete ticket", project_page)
+        self.assertIn("Another contributor&#x27;s ticket", project_page)
+        self.assertIn('<option value="*" selected>Anyone</option>', project_page)
+
     def test_ticket_results_are_paginated(self) -> None:
         for number in range(10, 31):
             bunker = layout.bunker_path(self.root, f"TB-{number}")

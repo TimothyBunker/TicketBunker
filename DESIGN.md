@@ -290,7 +290,7 @@ consequences:
 4. **Components live together under the ticket, keyed by source branch.** A
    successful publish places the gated component on the companion data branch
    immediately. Every checkout can therefore see the complete child set after
-   `tb setup`; `tb checkout <TICKET>` refreshes the companion checkout and
+   `tb init`; `tb checkout <TICKET>` refreshes the companion checkout and
    recompiles the master. Legacy embedded mode retains its branch-collection
    behavior for backward compatibility.
 
@@ -724,15 +724,25 @@ both branches publish it writes `.ticketbunker.json` and adds `/.tb/` to the
 source ignore file. The ignored `.tb/config` and `.tb/data`
 directories are ordinary checkouts of the locator's canonical branches.
 Ticket IDs resolve under
-`.tb/data/projects/<PROJECT>/tickets/`. A second `tb init` is refused; other
-clones run `tb setup`, which reads the committed locator and fast-forwards both
-local checkouts. Refresh failures are typed rejections that name the affected
-branch and direct the user through `tb doctor` back to `tb setup`; raw Git
-exceptions are not a user interface. A fresh setup checks out configuration normally but uses a
+`.tb/data/projects/<PROJECT>/tickets/`. **`tb init` is the single connection
+command.** Without a locator it performs the one-time owner initialization;
+with a committed locator it connects or refreshes the current checkout. The
+legacy spelling `tb setup` is only an alias for the same command and backend
+handler. The canonical command fast-forwards both local checkouts. Remote Git
+operations disable prompts, use bounded timeouts, and retry transient DNS
+resolution three times. Failures are classified as DNS, timeout,
+authentication, access, or local fast-forward problems and name the next
+action; users are never asked to discover `getent` or `git ls-remote`, and raw
+Git exceptions are not a user interface. If a fresh clone starts on a default
+source branch without the locator, the command fetches source refs, searches
+them for one canonical locator, and switches a clean worktree to that tracking
+branch automatically. New locators carry the configured source base as the
+selection hint; older locators fall back to the project key and conservative
+branch ranking. It refuses dirty or ambiguous switches. A fresh connection checks out configuration normally but uses a
 sparse data checkout containing only project ticket indexes. Listing, search,
 facets, and pagination therefore work without copying every bunker. Opening or
 mutating one indexed ticket expands only that ticket's canonical path in the
-sparse checkout. Data branches made before indexes remain compatible: setup
+sparse checkout. Data branches made before indexes remain compatible: connection
 detects the missing index and falls back to a full checkout rather than hiding
 old tickets. Embedded same-repository and standalone `--root` operation
 remain compatibility modes, not defaults.
@@ -860,7 +870,7 @@ Repository, Ticket fields, and Integrations. The CLI, editor HTTP transport,
 and programmatic callers dispatch the same command envelopes; transports do
 not reimplement mutations.
 
-Repository setup is a three-step contract, not a wizard that owns external
+Repository connection is a three-step contract, not a wizard that owns external
 state: create an empty companion repository, connect it, then commit the source
 locator. Before connection the Repository page shows those three steps; after
 connection it renders the same local readiness checks as `tb doctor`. The

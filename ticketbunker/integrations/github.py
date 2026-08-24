@@ -429,7 +429,7 @@ def sync(
     locator = project.load_locator(source_root)
     if locator is None:
         raise commands.CommandRejected("not_initialized", "Run 'tb init' before synchronizing GitHub tickets.")
-    project.setup(source_root)
+    project.connect(source_root)
     entries = _fixture_entries(fixture) if fixture else _live_entries(
         issue_ref,
         project_number,
@@ -461,4 +461,3 @@ def sync(
         commands.CommandContext(source_root, transport="github"),
     )
     return {**result, "source": "github", "fixture": str(fixture) if fixture else ""}
-

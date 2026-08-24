@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ticketbunker import api, commands, layout, project, projectconfig, ticketcommands
 
@@ -45,6 +46,7 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         locator = json.loads((self.source / project.LOCATOR_FILE).read_text(encoding="utf-8"))
         self.assertEqual(locator["project"], "ECS")
+        self.assertEqual(locator["base_branch"], "ecs")
         self.assertTrue((project.project_config_dir(self.source) / "project.json").exists())
         self.assertTrue((project.tickets_dir(self.source) / ".keep").exists())
         self.assertEqual(layout.bunkers_dir(self.source), project.tickets_dir(self.source))
@@ -83,6 +85,78 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertEqual(first["project"], "ECS")
         self.assertEqual(second["project"], "ECS")
 
+    def test_connect_initializes_then_refreshes_from_the_same_command(self) -> None:
+        initialized = commands.dispatch(
+            "project.connect",
+            {"project": "ECS", "bunker_repo": str(self.remote), "base_branch": "ecs"},
+            commands.CommandContext(self.source),
+        )
+        connected = commands.dispatch(
+            "project.connect",
+            {},
+            commands.CommandContext(self.source),
+        )
+
+        self.assertEqual(initialized["mode"], "initialized")
+        self.assertEqual(connected["mode"], "connected")
+        self.assertEqual(connected["project"], "ECS")
+
+    def test_connect_finds_locator_branch_from_a_fresh_default_branch_clone(self) -> None:
+        source_remote = Path(self.tmp.name) / "source.git"
+        subprocess.run(["git", "init", "--bare", str(source_remote)], check=True, capture_output=True)
+        run_git(self.source, "branch", "main")
+        run_git(self.source, "remote", "add", "origin", str(source_remote))
+        run_git(self.source, "push", "origin", "main", "ecs")
+        run_git(source_remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        self.initialize()
+        run_git(self.source, "add", project.LOCATOR_FILE, ".gitignore")
+        run_git(self.source, "commit", "-m", "Connect TicketBunker on ECS")
+        run_git(self.source, "push", "origin", "ecs")
+        run_git(self.source, "branch", "bunker/ECS-99-work")
+        run_git(self.source, "push", "origin", "bunker/ECS-99-work")
+
+        collaborator = Path(self.tmp.name) / "fresh-clone"
+        subprocess.run(["git", "clone", str(source_remote), str(collaborator)], check=True, capture_output=True)
+        run_git(collaborator, "config", "user.name", "Ada")
+        run_git(collaborator, "config", "user.email", "ada@example.com")
+        self.assertEqual(run_git(collaborator, "branch", "--show-current"), "main")
+        self.assertFalse((collaborator / project.LOCATOR_FILE).exists())
+
+        connected = commands.dispatch(
+            "project.connect",
+            {},
+            commands.CommandContext(collaborator),
+        )
+
+        self.assertEqual(connected["mode"], "connected")
+        self.assertEqual(connected["source_branch"], "ecs")
+        self.assertEqual(run_git(collaborator, "branch", "--show-current"), "ecs")
+        self.assertTrue((collaborator / project.LOCATOR_FILE).exists())
+        self.assertTrue((project.data_checkout(collaborator) / ".git").exists())
+
+    def test_init_retries_and_classifies_transient_dns_without_local_state(self) -> None:
+        failure = "ssh: Could not resolve hostname github.com: Temporary failure in name resolution"
+        with mock.patch.object(project, "git_status", return_value=(failure, 128)) as attempted:
+            with mock.patch.object(project.time, "sleep"):
+                with self.assertRaises(commands.CommandRejected) as caught:
+                    commands.dispatch(
+                        "project.connect",
+                        {
+                            "project": "ECS",
+                            "bunker_repo": "git@github.com:example/tickets.git",
+                            "base_branch": "ecs",
+                        },
+                        commands.CommandContext(self.source),
+                    )
+
+        self.assertEqual(caught.exception.code, "remote_dns_failed")
+        self.assertIn("3 automatic attempts", str(caught.exception))
+        self.assertIn("wsl --shutdown", str(caught.exception))
+        self.assertIn("tb init", str(caught.exception))
+        self.assertEqual(attempted.call_count, 3)
+        self.assertFalse((self.source / project.LOCATOR_FILE).exists())
+        self.assertFalse((self.source / project.LOCAL_DIR).exists())
+
     def test_setup_translates_companion_git_failure_into_actionable_rejection(self) -> None:
         self.initialize()
         missing = Path(self.tmp.name) / "moved-companion.git"
@@ -92,8 +166,7 @@ class CompanionProjectTests(unittest.TestCase):
             project.setup(self.source)
 
         self.assertEqual(caught.exception.code, "companion_refresh_failed")
-        self.assertIn("tb doctor", str(caught.exception))
-        self.assertIn("tb setup", str(caught.exception))
+        self.assertIn("tb init", str(caught.exception))
 
     def test_data_publication_commits_and_pushes_companion_changes(self) -> None:
         self.initialize()

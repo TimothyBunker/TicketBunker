@@ -19,7 +19,7 @@ from . import commands, doctor, project, projectconfig, types
 
 _PAGES = ("identity", "repository", "fields", "integrations")
 _ALLOWED_COMMANDS = {
-    "project.initialize",
+    "project.connect",
     "identity.update",
     "configuration.field.put",
     "configuration.field.remove",
@@ -256,7 +256,7 @@ def _repository_page(state: dict[str, Any], root: Path) -> str:
                 f'<span class="readiness-summary">{_e(value["summary"])}</span>{action}</span></li>'
             )
         readiness = (
-            "Needs setup"
+            "Needs connection"
             if not state["diagnostics"]["ready"]
             else "Ready with notes"
             if state["diagnostics"]["warnings"]
@@ -289,7 +289,7 @@ def _repository_page(state: dict[str, Any], root: Path) -> str:
       </ol>
     </section>
     <section class="section">
-      <form data-command="project.initialize" data-reload="repository">
+      <form data-command="project.connect" data-reload="repository">
         <div class="form-grid">
           <label>Project key<input name="project" placeholder="ECS" autocapitalize="characters" required></label>
           <label>Project name<input name="project_name" placeholder="Entity Component System"></label>

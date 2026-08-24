@@ -13,6 +13,8 @@ import json
 import re
 import shutil
 import subprocess
+import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,17 @@ DEFAULT_CONFIG_BRANCH = "ticketbunker/config"
 DEFAULT_DATA_BRANCH = "ticketbunker/data"
 SCHEMA_VERSION = 1
 PROJECT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]*$")
+REMOTE_ATTEMPTS = 3
+REMOTE_TIMEOUT_SECONDS = 20
+_REMOTE_ENV = {
+    "GIT_TERMINAL_PROMPT": "0",
+}
+_DNS_FAILURES = (
+    "could not resolve host",
+    "could not resolve hostname",
+    "name or service not known",
+    "temporary failure in name resolution",
+)
 
 
 class ProjectError(commands.CommandRejected):
@@ -125,13 +138,136 @@ def _source_branch(source_root: Path, ledger: Ledger) -> str:
     return branch or "main"
 
 
+def _remote_host(remote: str) -> str:
+    """Return a human-facing host for URL and scp-style Git remotes."""
+    value = remote.strip()
+    if "://" in value:
+        return urllib.parse.urlsplit(value).hostname or value
+    scp = re.match(r"^(?:[^@/]+@)?([^:/\\]+):", value)
+    return scp.group(1) if scp else value
+
+
+def _is_dns_failure(detail: str) -> bool:
+    lowered = detail.casefold()
+    return any(marker in lowered for marker in _DNS_FAILURES)
+
+
+def _remote_git_status(
+    repo: Path,
+    args: list[str],
+    ledger: Ledger,
+    stage: str,
+) -> tuple[str, int]:
+    """Run one remote Git operation with bounded transient-DNS retries."""
+    output = ""
+    status = 1
+    for attempt in range(1, REMOTE_ATTEMPTS + 1):
+        output, status = git_status(
+            repo,
+            args,
+            ledger,
+            stage,
+            env=_REMOTE_ENV,
+            timeout=REMOTE_TIMEOUT_SECONDS,
+        )
+        if status == 0 or not _is_dns_failure(output) or attempt == REMOTE_ATTEMPTS:
+            return output, status
+        ledger.event("remote_retry", stage=stage, attempt=attempt, reason="dns")
+        time.sleep(0.25 * attempt)
+    return output, status
+
+
+def _remote_git(repo: Path, args: list[str], ledger: Ledger, stage: str) -> str:
+    output, status = _remote_git_status(repo, args, ledger, stage)
+    if status != 0:
+        raise GitError(["git", "-C", str(repo), *args], status, output)
+    return output
+
+
+def classify_remote_failure(remote: str, detail: str, *, retry: str = "tb init") -> tuple[str, str, str]:
+    """Classify a Git transport failure without exposing a raw command error."""
+    lowered = detail.casefold()
+    host = _remote_host(remote)
+    if _is_dns_failure(detail):
+        return (
+            "remote_dns_failed",
+            f"TicketBunker could not resolve {host} after {REMOTE_ATTEMPTS} automatic attempts.",
+            "Restore this machine's DNS or network connection, then run "
+            f"'{retry}' again. On WSL, run 'wsl --shutdown' in Windows PowerShell first.",
+        )
+    if "timed out" in lowered or "operation timed out" in lowered:
+        return (
+            "remote_timeout",
+            f"The connection to {host} timed out after {REMOTE_TIMEOUT_SECONDS} seconds.",
+            f"Restore network or VPN access to {host}, then run '{retry}' again.",
+        )
+    if "permission denied" in lowered or "authentication failed" in lowered:
+        return (
+            "remote_auth_failed",
+            f"Git authentication for {host} was rejected.",
+            f"Restore this machine's Git or SSH credentials for {host}, then run '{retry}' again.",
+        )
+    if "repository not found" in lowered or "does not appear to be a git repository" in lowered:
+        return (
+            "remote_access_failed",
+            f"The companion repository does not exist or this user cannot access it: {remote}",
+            f"Check the repository URL and access grant, then run '{retry}' again.",
+        )
+    last_line = next((line.strip() for line in reversed(detail.splitlines()) if line.strip()), "Git rejected the connection")
+    return (
+        "remote_unreachable",
+        f"TicketBunker could not reach the companion repository. Git reported: {last_line}",
+        f"Restore access to {remote}, then run '{retry}' again.",
+    )
+
+
+def probe_remote_heads(
+    source_root: Path,
+    remote: str,
+    branches: list[str],
+    ledger: Ledger,
+) -> tuple[dict[str, str], str]:
+    """Read canonical remote heads through the same retrying transport path."""
+    output, status = _remote_git_status(
+        source_root,
+        ["ls-remote", "--heads", remote, *(f"refs/heads/{branch}" for branch in branches)],
+        ledger,
+        "doctor_remote",
+    )
+    if status != 0:
+        return {}, output.strip()
+    heads: dict[str, str] = {}
+    for line in output.splitlines():
+        sha, separator, ref = line.partition("\t")
+        if separator and ref.startswith("refs/heads/"):
+            heads[ref.removeprefix("refs/heads/")] = sha
+    return heads, ""
+
+
+def _remote_error(
+    remote: str,
+    detail: str,
+    *,
+    retry: str = "tb init",
+    fallback_code: str = "remote_unreachable",
+    fallback_summary: str = "",
+) -> ProjectError:
+    code, summary, action = classify_remote_failure(remote, detail, retry=retry)
+    if code in {"remote_unreachable", "remote_access_failed"} and fallback_summary:
+        code = fallback_code
+        summary = fallback_summary
+    return ProjectError(code, f"{summary}\nNext: {action}")
+
+
 def _branch_exists(source_root: Path, remote: str, branch: str, ledger: Ledger) -> bool:
-    output, status = git_status(
+    output, status = _remote_git_status(
         source_root,
         ["ls-remote", "--exit-code", "--heads", remote, f"refs/heads/{branch}"],
         ledger,
         "companion_probe",
     )
+    if status not in {0, 2}:
+        raise _remote_error(remote, output)
     return status == 0 and bool(output.strip())
 
 
@@ -141,20 +277,22 @@ def _require_existing_remote(source_root: Path, remote: str, ledger: Ledger) -> 
     An empty remote is valid: TicketBunker creates its two owned branches, but
     never creates the hosting repository itself.
     """
-    output, status = git_status(
+    output, status = _remote_git_status(
         source_root,
         ["ls-remote", remote],
         ledger,
         "companion_probe",
     )
     if status != 0:
-        detail = output.strip() or "the Git remote could not be reached"
-        raise ProjectError(
-            "bunker_repo_unreachable",
-            "TicketBunker could not connect to that repository. Create an empty Git "
-            "repository first, check the URL and your access, then try again. "
-            "TicketBunker never creates the repository for you.\n"
-            f"Git said: {detail}",
+        raise _remote_error(
+            remote,
+            output,
+            fallback_code="bunker_repo_unreachable",
+            fallback_summary=(
+                "TicketBunker could not connect to that companion repository. "
+                "Create the empty repository first or correct its URL. "
+                "TicketBunker never creates the repository."
+            ),
         )
 
 
@@ -183,7 +321,7 @@ def _checkout_branch(
         clone_args = ["clone", "--single-branch", "--branch", branch]
         if sparse:
             clone_args.extend(["--filter=blob:none", "--sparse"])
-        git(
+        _remote_git(
             source_root,
             [*clone_args, remote, str(target)],
             ledger,
@@ -218,18 +356,20 @@ def _commit_and_push(checkout: Path, branch: str, message: str, ledger: Ledger) 
     if dirty:
         git(checkout, ["commit", "-m", message], ledger, "companion_publish")
     try:
-        git(
+        _remote_git(
             checkout,
             ["push", "-u", "origin", f"HEAD:refs/heads/{branch}"],
             ledger,
             "companion_publish",
         )
     except GitError as exc:
-        raise ProjectError(
-            "remote_publish_rejected",
-            f"The configuration was prepared, but the Git remote rejected {branch!r}. "
-            "Check your remote permission, fetch the latest configuration, and retry.\n"
-            f"Git said: {exc.stderr.strip() or 'push rejected'}",
+        raise _remote_error(
+            git(checkout, ["remote", "get-url", "origin"], ledger, "companion_publish", check=False).strip(),
+            exc.stderr,
+            fallback_code="remote_publish_rejected",
+            fallback_summary=(
+                f"The configuration was prepared, but the companion remote rejected {branch!r}."
+            ),
         ) from exc
 
 
@@ -351,7 +491,7 @@ def _seed_config(
         raise ProjectError(
             "already_initialized",
             f"TicketBunker project {project_key} already exists in the canonical configuration. "
-            "Run 'tb setup' to connect this checkout.",
+            "Run 'tb init' to connect this checkout.",
         )
     _write_json(
         root / "project.json",
@@ -468,7 +608,7 @@ def initialize(
     if load_locator(source_root) is not None or (legacy_config.exists() and legacy_root is None):
         raise ProjectError(
             "already_initialized",
-            "This repository is already initialized for TicketBunker. Run 'tb setup' to connect this checkout.",
+            "This repository is already initialized for TicketBunker. Run 'tb init' to refresh this checkout.",
         )
 
     ledger = _init_ledger(source_root)
@@ -482,7 +622,7 @@ def initialize(
     if config_existed and (config_path / "projects" / project_key / "project.json").exists():
         raise ProjectError(
             "already_initialized",
-            f"TicketBunker project {project_key} already exists in the canonical configuration. Run 'tb setup'.",
+            f"TicketBunker project {project_key} already exists in the canonical configuration. Run 'tb init'.",
         )
     data_existed = _checkout_branch(source_root, remote, data_branch, data_path, identity, ledger)
 
@@ -499,12 +639,13 @@ def initialize(
             "legacy_import",
         )
     _commit_and_push(data_path, data_branch, f"Initialize {project_key} TicketBunker data", ledger)
+    source_base = str(payload.get("base_branch") or _source_branch(source_root, ledger))
     _seed_config(
         config_path,
         project_key,
         project_name,
         _source_remote(source_root, ledger),
-        str(payload.get("base_branch") or _source_branch(source_root, ledger)),
+        source_base,
         identity,
     )
     _commit_and_push(config_path, config_branch, f"Initialize {project_key} TicketBunker configuration", ledger)
@@ -515,6 +656,7 @@ def initialize(
         "bunker_repository": remote,
         "config_branch": config_branch,
         "data_branch": data_branch,
+        "base_branch": source_base,
     }
     _write_json(locator_path(source_root), locator)
     _ensure_source_ignore(source_root)
@@ -548,7 +690,7 @@ def migrate_legacy(source_root: Path, payload: dict[str, Any]) -> dict[str, Any]
     """
     source_root = Path(source_root).resolve()
     if load_locator(source_root) is not None:
-        raise ProjectError("already_initialized", "This repository already uses companion storage. Run 'tb setup'.")
+        raise ProjectError("already_initialized", "This repository already uses companion storage. Run 'tb init'.")
     legacy_root = local_root(source_root)
     tickets = _legacy_ticket_dirs(legacy_root) if legacy_root.is_dir() else []
     if not (legacy_root / "config.json").exists() and not tickets:
@@ -608,8 +750,8 @@ def setup(source_root: Path) -> dict[str, Any]:
     for branch, target in ((config_branch, config_checkout(source_root)), (data_branch, data_checkout(source_root))):
         try:
             if (target / ".git").exists():
-                git(target, ["fetch", "--prune", "origin"], ledger, "companion_refresh")
-                git(target, ["pull", "--ff-only", "origin", branch], ledger, "companion_refresh")
+                _remote_git(target, ["fetch", "--prune", "origin"], ledger, "companion_refresh")
+                _remote_git(target, ["pull", "--ff-only", "origin", branch], ledger, "companion_refresh")
             else:
                 if not _branch_exists(source_root, remote, branch, ledger):
                     raise ProjectError("remote_branch_missing", f"The companion repository has no {branch!r} branch.")
@@ -623,11 +765,14 @@ def setup(source_root: Path) -> dict[str, Any]:
                     sparse=target == data_checkout(source_root),
                 )
         except GitError as exc:
-            raise ProjectError(
-                "companion_refresh_failed",
-                f"TicketBunker could not fast-forward the local {branch!r} checkout. "
-                "Preserve or discard any local companion edits, run 'tb doctor', then retry 'tb setup'.\n"
-                f"Git said: {exc.stderr.strip() or 'companion refresh failed'}",
+            raise _remote_error(
+                remote,
+                exc.stderr,
+                fallback_code="companion_refresh_failed",
+                fallback_summary=(
+                    f"TicketBunker could not fast-forward the local {branch!r} checkout. "
+                    "Preserve or discard any local companion edits."
+                ),
             ) from exc
 
     current_index = layout.ticket_index(tickets_dir(source_root, project_key))
@@ -652,7 +797,7 @@ def setup(source_root: Path) -> dict[str, Any]:
                 raise ProjectError(
                     "companion_refresh_failed",
                     "TicketBunker could not restore the legacy full data checkout. "
-                    "Run 'tb doctor', then retry 'tb setup'.\n"
+                    "Run 'tb doctor', then retry 'tb init'.\n"
                     f"Git said: {exc.stderr.strip() or 'sparse checkout failed'}",
                 ) from exc
 
@@ -665,6 +810,166 @@ def setup(source_root: Path) -> dict[str, Any]:
         "bunker_repository": remote,
         "config_branch": config_branch,
         "data_branch": data_branch,
+    }
+
+
+def _remote_locator(source_root: Path, ledger: Ledger) -> tuple[dict[str, Any], str] | None:
+    """Find one canonical locator on source remote branches, if one exists."""
+    remotes = {
+        value.strip()
+        for value in git(source_root, ["remote"], ledger, "locator_discovery", check=False).splitlines()
+        if value.strip()
+    }
+    if "origin" not in remotes:
+        return None
+    source_remote = git(
+        source_root,
+        ["remote", "get-url", "origin"],
+        ledger,
+        "locator_discovery",
+        check=False,
+    ).strip()
+    try:
+        _remote_git(source_root, ["fetch", "--prune", "origin"], ledger, "locator_discovery")
+    except GitError as exc:
+        raise _remote_error(source_remote or "origin", exc.stderr) from exc
+    refs = [
+        value.strip()
+        for value in git(
+            source_root,
+            ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"],
+            ledger,
+            "locator_discovery",
+        ).splitlines()
+        if value.strip() and value.strip() != "origin/HEAD"
+    ]
+    candidates: list[tuple[dict[str, Any], str]] = []
+    for ref in refs:
+        raw, status = git_status(
+            source_root,
+            ["show", f"{ref}:{LOCATOR_FILE}"],
+            ledger,
+            "locator_discovery",
+        )
+        if status != 0:
+            continue
+        try:
+            value = json.loads(raw)
+        except ValueError as exc:
+            raise ProjectError(
+                "remote_locator_invalid",
+                f"{ref} contains an invalid {LOCATOR_FILE}: {exc}. Repair it, then run 'tb init'.",
+            ) from exc
+        if isinstance(value, dict) and value.get("project") and value.get("bunker_repository"):
+            candidates.append((value, ref))
+    if not candidates:
+        return None
+    signatures = {
+        json.dumps(value, sort_keys=True, separators=(",", ":"))
+        for value, _ref in candidates
+    }
+    if len(signatures) > 1:
+        branches = ", ".join(ref for _value, ref in candidates)
+        raise ProjectError(
+            "remote_locator_ambiguous",
+            f"Source branches contain different TicketBunker locators ({branches}). "
+            "Switch to the intended project branch, then run 'tb init'.",
+        )
+    value = candidates[0][0]
+    preferred = str(value.get("base_branch") or "").strip()
+    if not preferred:
+        preferred = str(value.get("project") or "").casefold()
+
+    def branch_rank(candidate: tuple[dict[str, Any], str]) -> tuple[int, int, int, str]:
+        branch = candidate[1].removeprefix("origin/")
+        return (
+            0 if branch == preferred else 1,
+            0 if branch in {"main", "master", "develop"} else 1,
+            branch.count("/") + len(branch),
+            branch.casefold(),
+        )
+
+    return min(candidates, key=branch_rank)
+
+
+def _switch_to_locator_branch(source_root: Path, remote_ref: str, ledger: Ledger) -> str:
+    branch = remote_ref.removeprefix("origin/")
+    dirty = git(
+        source_root,
+        ["status", "--porcelain", "--untracked-files=all"],
+        ledger,
+        "locator_discovery",
+    ).strip()
+    if dirty:
+        paths = ", ".join(line[3:] for line in dirty.splitlines()[:8])
+        raise ProjectError(
+            "source_switch_dirty",
+            f"TicketBunker found the project locator on {remote_ref}, but this worktree has changes ({paths}). "
+            f"Commit or stash them, switch to {branch}, then run 'tb init'.",
+        )
+    local = {
+        value.strip()
+        for value in git(
+            source_root,
+            ["branch", "--format=%(refname:short)"],
+            ledger,
+            "locator_discovery",
+        ).splitlines()
+        if value.strip()
+    }
+    try:
+        if branch in local:
+            git(source_root, ["switch", branch], ledger, "locator_discovery")
+        else:
+            git(
+                source_root,
+                ["switch", "--track", "-c", branch, remote_ref],
+                ledger,
+                "locator_discovery",
+            )
+    except GitError as exc:
+        raise ProjectError(
+            "source_branch_switch_failed",
+            f"TicketBunker found the project locator on {remote_ref}, but Git could not switch to it. "
+            f"Switch to {branch} manually, then run 'tb init'.\n"
+            f"Git said: {exc.stderr.strip() or 'branch switch failed'}",
+        ) from exc
+    return branch
+
+
+def connect(source_root: Path, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Initialize an owner checkout or refresh an existing collaborator checkout."""
+    source_root = Path(source_root).resolve()
+    supplied = dict(payload or {})
+    locator = load_locator(source_root)
+    switched_branch = ""
+    if locator is None and not str(supplied.get("bunker_repo") or "").strip():
+        ledger = _init_ledger(source_root)
+        discovered = _remote_locator(source_root, ledger)
+        if discovered is None:
+            return {"mode": "needs_initialization"}
+        _value, remote_ref = discovered
+        switched_branch = _switch_to_locator_branch(source_root, remote_ref, ledger)
+        locator = load_locator(source_root)
+        if locator is None:
+            raise ProjectError(
+                "remote_locator_missing",
+                f"Git switched to {switched_branch}, but {LOCATOR_FILE} is absent. Repair the branch, then run 'tb init'.",
+            )
+    if locator is None:
+        return {**initialize(source_root, supplied), "mode": "initialized"}
+    requested_remote = str(supplied.get("bunker_repo") or "").strip()
+    canonical_remote = str(locator.get("bunker_repository") or "").strip()
+    if requested_remote and requested_remote != canonical_remote:
+        raise ProjectError(
+            "locator_conflict",
+            "This checkout already has a committed TicketBunker locator. "
+            "Run 'tb init' without repository options to use its canonical companion.",
+        )
+    return {
+        **setup(source_root),
+        "mode": "connected",
+        "source_branch": switched_branch,
     }
 
 
@@ -697,7 +1002,7 @@ def include_ticket_path(source_root: Path, project_key: str, ticket_id: str) -> 
         raise ProjectError(
             "ticket_materialize_failed",
             f"TicketBunker could not include {ticket_id} in the local data checkout. "
-            "Run 'tb setup' and retry.\n"
+            "Run 'tb init' and retry.\n"
             f"Git said: {exc.stderr.strip() or 'sparse checkout failed'}",
         ) from exc
 
@@ -711,7 +1016,7 @@ def materialize_ticket(source_root: Path, project_key: str, ticket_id: str) -> P
     if not sparse_data_enabled(source_root):
         raise ProjectError(
             "ticket_not_materialized",
-            f"Companion data does not contain {project_key}/{ticket_id}. Run 'tb setup' and retry.",
+            f"Companion data does not contain {project_key}/{ticket_id}. Run 'tb init' and retry.",
         )
     include_ticket_path(source_root, project_key, ticket_id)
     if not bunker.is_dir():
@@ -788,7 +1093,7 @@ def publish_data(source_root: Path, message: str) -> dict[str, Any]:
         return {"published": False}
     checkout = data_checkout(source_root)
     if not (checkout / ".git").exists():
-        raise ProjectError("data_checkout_missing", "Local companion data is missing. Run 'tb setup' and retry.")
+        raise ProjectError("data_checkout_missing", "Local companion data is missing. Run 'tb init' and retry.")
     branch = str(locator.get("data_branch") or DEFAULT_DATA_BRANCH)
     ledger = Ledger(source_root / ".git" / "ticketbunker-data-sync.jsonl")
     dirty = git(checkout, ["status", "--porcelain"], ledger, "data_publish").strip()
@@ -796,12 +1101,12 @@ def publish_data(source_root: Path, message: str) -> dict[str, Any]:
     git(checkout, ["add", "-A"], ledger, "data_publish")
     if git(checkout, ["status", "--porcelain"], ledger, "data_publish").strip():
         git(checkout, ["commit", "-m", message], ledger, "data_publish")
-    git(checkout, ["fetch", "--prune", "origin"], ledger, "data_publish")
     try:
+        _remote_git(checkout, ["fetch", "--prune", "origin"], ledger, "data_publish")
         local_head = git(checkout, ["rev-parse", "HEAD"], ledger, "data_publish").strip()
         remote_head = git(checkout, ["rev-parse", f"origin/{branch}"], ledger, "data_publish").strip()
         if local_head != remote_head:
-            git(checkout, ["pull", "--rebase", "origin", branch], ledger, "data_publish")
+            _remote_git(checkout, ["pull", "--rebase", "origin", branch], ledger, "data_publish")
             if dirty_tickets:
                 _reconcile_ticket_indexes(source_root, dirty_tickets)
                 git(checkout, ["add", "-A"], ledger, "data_publish")
@@ -810,15 +1115,19 @@ def publish_data(source_root: Path, message: str) -> dict[str, Any]:
             local_head = git(checkout, ["rev-parse", "HEAD"], ledger, "data_publish").strip()
             remote_head = git(checkout, ["rev-parse", f"origin/{branch}"], ledger, "data_publish").strip()
         if local_head != remote_head:
-            git(checkout, ["push", "origin", f"HEAD:refs/heads/{branch}"], ledger, "data_publish")
+            _remote_git(checkout, ["push", "origin", f"HEAD:refs/heads/{branch}"], ledger, "data_publish")
             return {"published": True, "revision": local_head}
         return {"published": False, "revision": local_head}
     except GitError as exc:
-        raise ProjectError(
-            "data_publish_rejected",
-            "TicketBunker kept the local data commit, but could not reconcile it with the companion remote. "
-            "Resolve the data checkout and retry with any tb command.\n"
-            f"Git said: {exc.stderr.strip() or 'publication rejected'}",
+        raise _remote_error(
+            str(locator.get("bunker_repository") or "origin"),
+            exc.stderr,
+            retry="the same TicketBunker command",
+            fallback_code="data_publish_rejected",
+            fallback_summary=(
+                "TicketBunker kept the local data commit, but could not reconcile it with the companion remote. "
+                "Resolve the data checkout before retrying."
+            ),
         ) from exc
 
 
@@ -827,10 +1136,15 @@ def _command_initialize(context: commands.CommandContext, payload: dict[str, Any
     return initialize(context.project_root, payload)
 
 
+@commands.register("project.connect")
+def _command_connect(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    return connect(context.project_root, payload)
+
+
 @commands.register("project.setup")
 def _command_setup(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
     del payload
-    return setup(context.project_root)
+    return connect(context.project_root)
 
 
 @commands.register("project.migrate")
