@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            executable: dist/tb
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            executable: dist/tb
+          - os: macos-15-intel
+            platform: darwin-x64
+            executable: dist/tb
+          - os: macos-15
+            platform: darwin-arm64
+            executable: dist/tb
+          - os: windows-latest
+            platform: windows-x64
+            executable: dist/tb.exe
+          - os: windows-11-arm
+            platform: windows-arm64
+            executable: dist/tb.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test core
+        run: python -m unittest discover -s tests -v
+      - name: Build standalone tb
+        run: |
+          python -m pip install "pyinstaller==6.15.0"
+          pyinstaller --clean --noconfirm tools/ticketbunker.spec
+      - name: Build verified bundle
+        run: python tools/build_release.py --platform "${{ matrix.platform }}" --tb "${{ matrix.executable }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ticketbunker-${{ matrix.platform }}
+          path: |
+            dist/releases/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --generate-notes --verify-tag

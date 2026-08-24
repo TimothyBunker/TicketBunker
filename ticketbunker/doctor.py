@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from . import autoagent, commands, config, layout, project, projectconfig, ticketindex
+from . import agent_runtime, autoagent, commands, config, layout, project, projectconfig, ticketindex
 from .adapters.gitrun import GitError, git, git_status
 from .ledger import Ledger
 
@@ -221,6 +221,18 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
                 f"Git-event automation is incomplete; missing: {missing}.",
                 "tb init",
             )
+        )
+
+    agent = agent_runtime.state(root)
+    if not agent.get("enabled", True):
+        checks.append(
+            _check("agent_runtime", "Agent runtime", "info", agent["summary"], agent.get("action", ""))
+        )
+    elif agent["ready"]:
+        checks.append(_check("agent_runtime", "Agent runtime", "pass", agent["summary"]))
+    else:
+        checks.append(
+            _check("agent_runtime", "Agent runtime", "warn", agent["summary"], agent.get("action", "tb init"))
         )
 
     dirty = _git(root, ["status", "--porcelain", "--untracked-files=all"], ledger)

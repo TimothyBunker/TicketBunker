@@ -11,7 +11,7 @@
  * so the composition stays harness-neutral. The bunker path arrives via the
  * TB_BUNKER environment variable, set by `tb run`.
  *
- * Load with: pi -e harness/pi/tb.ts   (or install into .pi/extensions/)
+ * TicketBunker loads the packaged copy through pi's --extension flag.
  */
 
 import { appendFileSync } from "node:fs";

@@ -10,7 +10,6 @@ runs the ordinary gated agent pipeline.  No alternate publish path exists.
 from __future__ import annotations
 
 import datetime
-import fcntl
 import json
 import os
 import shlex
@@ -21,9 +20,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import config, layout
+from . import agent_runtime, config, layout
 from .ledger import Ledger
 from .processors import anchorcheck
+
+try:
+    import fcntl
+except ImportError:  # Windows Git hooks still invoke the same Python worker.
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt
 
 
 HOOK_MARKER = "# TicketBunker automatic agent hook"
@@ -73,17 +78,19 @@ def _state_dir(repo: Path) -> Path:
 
 
 def _launcher() -> list[str]:
-    # Pin the hook to the interpreter that installed it so GUI/non-interactive
-    # Git does not depend on a shell-specific PATH entry for ``tb``.
-    return [sys.executable, "-m", "ticketbunker.cli"]
+    # Pin the hook to the installed/frozen command so GUI Git does not depend
+    # on shell activation or a source checkout.
+    return agent_runtime.cli_argv()
 
 
 def _hook_body(event: str, original: Path) -> str:
     # Hooks are shared by linked worktrees; resolve the active one at runtime.
-    launch = " ".join(shlex.quote(value) for value in _launcher())
+    shell_values = [value.replace("\\", "/") if os.name == "nt" else value for value in _launcher()]
+    launch = " ".join(shlex.quote(value) for value in shell_values)
     original_call = ""
     if original.exists():
-        quoted = shlex.quote(str(original))
+        original_value = str(original).replace("\\", "/") if os.name == "nt" else str(original)
+        quoted = shlex.quote(original_value)
         original_call = (
             f"if [ -x {quoted} ]; then\n"
             f"  {quoted} \"$@\" || exit $?\n"
@@ -131,14 +138,15 @@ def install(repo: Path) -> dict[str, list[str]]:
         installed.append(name)
     state = _state_dir(repo)
     state.mkdir(parents=True, exist_ok=True)
-    launchers = {
-        key: value
-        for key, value in {
-            "pi_bin": shutil.which("pi"),
-            "codex_bin": shutil.which("codex"),
-        }.items()
-        if value
-    }
+    runtime = agent_runtime.discover()
+    launchers = {}
+    if runtime.ready:
+        launchers["pi_bin"] = runtime.path
+        launchers["pi_version"] = runtime.version
+        launchers["pi_origin"] = runtime.origin
+    codex = shutil.which("codex")
+    if codex:
+        launchers["codex_bin"] = codex
     if launchers:
         launchers["default_harness"] = "pi" if launchers.get("pi_bin") else "codex"
         _write_json(state / "profile.json", launchers)
@@ -236,8 +244,27 @@ def resolve_bunker(repo: Path, branch: str) -> Path | None:
 def _locked_file(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+", encoding="utf-8")
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    _acquire_lock(handle)
     return handle
+
+
+def _acquire_lock(handle, *, nonblocking: bool = False) -> None:
+    if fcntl is not None:
+        flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0)
+        fcntl.flock(handle.fileno(), flags)
+        return
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write("\0")
+        handle.flush()
+    handle.seek(0)
+    mode = msvcrt.LK_NBLCK if nonblocking else msvcrt.LK_LOCK
+    try:
+        msvcrt.locking(handle.fileno(), mode, 1)
+    except OSError as exc:
+        if nonblocking:
+            raise BlockingIOError from exc
+        raise
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -251,13 +278,16 @@ def _spawn_worker(repo: Path) -> None:
     state.mkdir(parents=True, exist_ok=True)
     log = (state / "agent.log").open("ab")
     env = dict(os.environ)
+    # A PyInstaller one-file parent removes its extraction directory on exit.
+    # The detached worker outlives that parent, so it must unpack independently.
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     package_parent = str(Path(__file__).resolve().parent.parent)
     env["PYTHONPATH"] = os.pathsep.join(
         value for value in (package_parent, env.get("PYTHONPATH", "")) if value
     )
     try:
         subprocess.Popen(
-            [sys.executable, "-m", "ticketbunker.cli", "_agent-worker", "--repo", str(repo)],
+            [*_launcher(), "_agent-worker", "--repo", str(repo)],
             cwd=str(repo),
             stdin=subprocess.DEVNULL,
             stdout=log,
@@ -273,6 +303,9 @@ def _spawn_worker(repo: Path) -> None:
 def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
     """Coalesce one Git event and ensure a background worker exists."""
     repo = Path(repo).resolve()
+    selected = config.load().get("agent") or {}
+    if isinstance(selected, dict) and selected.get("enabled") is False:
+        return {"queued": False, "reason": "agent_disabled"}
     branch, status = _git(repo, "branch", "--show-current")
     if status != 0 or not branch:
         return {"queued": False, "reason": "detached_or_missing_branch"}
@@ -357,19 +390,26 @@ def _profile(repo: Path, bunker: Path, branch: str) -> dict[str, str]:
             value = stamp.get(key)
         if value:
             profile[key] = str(value)
+    runtime = agent_runtime.discover()
+    if "pi_bin" not in profile and runtime.ready:
+        profile["pi_bin"] = runtime.path
     harness = os.environ.get("TB_AGENT_HARNESS") or configured.get("harness")
     if not harness and stamp.get("harness") in {"pi", "codex"}:
         harness = stamp["harness"]
     if not harness:
         harness = local.get("default_harness")
     if not harness:
-        harness = "pi" if shutil.which("pi") else "codex" if shutil.which("codex") else "pi"
+        harness = "pi" if runtime.ready else "codex" if shutil.which("codex") else "pi"
     profile["harness"] = str(harness)
     if stamp.get("harness") != profile["harness"]:
         if not (os.environ.get("TB_AGENT_PROVIDER") or configured.get("provider")):
             profile.pop("provider", None)
         if not (os.environ.get("TB_AGENT_MODEL") or configured.get("model")):
             profile.pop("model", None)
+    if profile["harness"] != "pi":
+        profile.pop("provider", None)
+    if profile["harness"] == "command":
+        profile.pop("model", None)
     return profile
 
 
@@ -394,7 +434,7 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
         enqueue(repo, "head-advanced", spawn=False)
         return False, "HEAD advanced while the event was queued; coalesced the newer state"
     profile = _profile(repo, bunker, branch)
-    base = [sys.executable, "-m", "ticketbunker.cli"]
+    base = _launcher()
     refresh = [*base, "refresh", "--repo", str(repo), "--quiet", "--strict"]
     env = _cli_env()
     refreshed = subprocess.run(refresh, cwd=str(repo), env=env)
@@ -439,7 +479,7 @@ def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = F
     acquired = False
     try:
         try:
-            fcntl.flock(worker_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _acquire_lock(worker_lock, nonblocking=True)
         except BlockingIOError:
             return 0
         acquired = True

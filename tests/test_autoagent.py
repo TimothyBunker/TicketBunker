@@ -134,6 +134,15 @@ class AutomaticAgentTests(unittest.TestCase):
         self.assertEqual(status, 0)
         spawned.assert_called_once_with(self.repo.resolve())
 
+    def test_detached_worker_gets_an_independent_frozen_runtime(self) -> None:
+        state = self.repo / ".git" / autoagent.STATE_DIR
+        with mock.patch.object(autoagent, "_state_dir", return_value=state):
+            with mock.patch.object(autoagent.subprocess, "Popen") as started:
+                autoagent._spawn_worker(self.repo)
+
+        environment = started.call_args.kwargs["env"]
+        self.assertEqual(environment["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+
     def test_worker_uses_the_normal_gated_pipeline_without_manual_agent_command(self) -> None:
         source = self.repo / "position.py"
         source.write_text("POSITION = (0, 0, 0)\n", encoding="utf-8")
@@ -164,6 +173,35 @@ class AutomaticAgentTests(unittest.TestCase):
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
         self.assertTrue(any(value.get("type") == "automatic_agent_started" for value in events))
         self.assertTrue(any(value.get("type") == "automatic_agent_finished" for value in events))
+
+    def test_command_override_does_not_claim_the_saved_pi_provider_or_model(self) -> None:
+        config_path = Path(self.tmp.name) / "tbconfig.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agent": {
+                        "harness": "pi",
+                        "provider": "openai-codex",
+                        "model": "gpt-5.6-sol",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TB_CONFIG": str(config_path),
+                "TB_AGENT_HARNESS": "command",
+                "TB_AGENT_COMMAND": "stub {form}",
+            },
+        ):
+            profile = autoagent._profile(self.repo, self.bunker, "Ada/ECS-4-automatic")
+
+        self.assertEqual(profile["harness"], "command")
+        self.assertNotIn("provider", profile)
+        self.assertNotIn("model", profile)
 
     def test_superseded_agent_form_is_never_published_as_the_new_head(self) -> None:
         source = self.repo / "position.py"

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "name": "pi",
+  "version": "0.84.2",
+  "license": "MIT",
+  "source": {
+    "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-0.84.2-source.tar.gz",
+    "sha256": "96a9efad258fa6fa89f661bbf830c356dd3baf6cd06c6543ce4e8253c143460e"
+  },
+  "platforms": {
+    "darwin-arm64": {
+      "archive": "pi-darwin-arm64.tar.gz",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-darwin-arm64.tar.gz",
+      "sha256": "c996e888b7f7dce44bcf24f69176ac646c44139d3916bd49a6b28e5a8c5e3a65",
+      "format": "tar.gz",
+      "executable": "pi/pi"
+    },
+    "darwin-x64": {
+      "archive": "pi-darwin-x64.tar.gz",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-darwin-x64.tar.gz",
+      "sha256": "808cf02a93cd601d3ea05d47dc15c45074b120ac81decc8644cd3e40a35824e6",
+      "format": "tar.gz",
+      "executable": "pi/pi"
+    },
+    "linux-arm64": {
+      "archive": "pi-linux-arm64.tar.gz",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-linux-arm64.tar.gz",
+      "sha256": "d15372da9e4b4c5fef9fd15bed76d7f5f1720dd39fe7cde0ec62e5b65ad63ef1",
+      "format": "tar.gz",
+      "executable": "pi/pi"
+    },
+    "linux-x64": {
+      "archive": "pi-linux-x64.tar.gz",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-linux-x64.tar.gz",
+      "sha256": "906fbe787fd225c4ac624fe7ebd5b1d55a60e0f5c7ef51795d231564f9ee1c13",
+      "format": "tar.gz",
+      "executable": "pi/pi"
+    },
+    "windows-arm64": {
+      "archive": "pi-windows-arm64.zip",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-windows-arm64.zip",
+      "sha256": "092e2b276e0066efcb3d860465591c2e32ea48ee90395d34ceda0d84d8ff4470",
+      "format": "zip",
+      "executable": "pi/pi.exe"
+    },
+    "windows-x64": {
+      "archive": "pi-windows-x64.zip",
+      "url": "https://github.com/earendil-works/pi/releases/download/v0.84.2/pi-windows-x64.zip",
+      "sha256": "741fc1ae1afecb573ac2888e011188ff446b3940f4aabe1583f60bf55be8a3d0",
+      "format": "zip",
+      "executable": "pi/pi.exe"
+    }
+  }
+}

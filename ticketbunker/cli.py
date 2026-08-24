@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
+from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -180,21 +180,43 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"error: {exc.message}", file=sys.stderr)
         return 1
     if result["mode"] == "needs_initialization":
-        return _open_config_editor(source_root, args.port, not args.no_open, "repository")
+        editor_status = _open_config_editor(source_root, args.port, not args.no_open, "repository")
+        if editor_status or project_mod.load_locator(source_root) is None:
+            return editor_status
+        return _finish_agent_setup(source_root, args.core_only)
     if result["mode"] == "connected":
         if result.get("source_branch"):
             print(f"found the committed locator on origin/{result['source_branch']}; switched to {result['source_branch']}")
         print(f"connected {result['project']} to {result['bunker_repository']}")
         print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
         print("automatic agent: checkout, commit, merge, and rebase hooks ready")
-        print("ready: tb doctor")
-        return 0
+        agent_status = _finish_agent_setup(source_root, args.core_only)
+        if agent_status == 0:
+            print("ready: tb doctor")
+        return agent_status
     print(f"initialized {result['project']} in {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
     print("automatic agent: checkout, commit, merge, and rebase hooks ready")
-    print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
-    return 0
+    agent_status = _finish_agent_setup(source_root, args.core_only)
+    if agent_status == 0:
+        print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
+    return agent_status
+
+
+def _finish_agent_setup(source_root: Path, core_only: bool) -> int:
+    if core_only:
+        agent_runtime.set_core_only()
+        print("agent: core-only on this machine; Git hooks stay idle until a later tb init")
+        return 0
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    status = agent_runtime.onboard(source_root, interactive=interactive)
+    if status.get("ready") and status.get("enabled", True):
+        print(f"agent: {status['summary']}")
+        return 0
+    print(f"agent setup incomplete: {status.get('summary') or 'Pi is not ready.'}", file=sys.stderr)
+    print(f"next: {status.get('action') or 'run tb init in an interactive terminal'}", file=sys.stderr)
+    return 1
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -1659,6 +1681,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--base", default=None, help="source baseline branch (default: current branch)")
     s.add_argument("--port", type=int, default=8378, help="connection editor localhost port (default: 8378)")
     s.add_argument("--no-open", action="store_true", help="do not open the connection editor in a browser")
+    s.add_argument("--core-only", action="store_true",
+                   help="connect without configuring local automatic agent execution")
     s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("doctor", help="check connection, Git state, companion access, indexes, credentials, and hooks")

@@ -59,15 +59,37 @@ only what TicketBunker owns.
 
 ## Installing
 
-The core is a stdlib-only Python package. Two ways to get a plain `tb`
-command on your PATH — no `python something.py` calls in daily use:
+The normal download is one platform archive containing both `tb` and the
+pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 
 ```sh
-pip install .                 # installs the `tb` entry point
-# — or, where pip isn't an option —
-python3 tools/build_tb.py     # builds dist/tb, a single self-contained file
-cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.10+
+# unpack ticketbunker-<version>-<platform>.tar.gz, then:
+./install.sh                  # installs below ~/.local and puts tb in ~/.local/bin
+
+# Windows PowerShell, after unpacking the .zip:
+.\install.ps1                 # prints the one bin directory to add to PATH
 ```
+
+Release bundles cover Linux, macOS, and Windows on x64 and arm64. The build
+verifies the official pi archive checksum before extraction; the installed
+`tb` verifies the bundled pi executable against its own release manifest.
+Provider logins, API keys, OAuth tokens, and model weights are never bundled.
+
+The stdlib-only core remains available for constrained or air-gapped setups.
+These forms install TicketBunker without pi; point `TB_AGENT_PI_BIN` at an
+approved local runtime when agent execution is wanted:
+
+```sh
+pipx install .                # isolated Python CLI installation
+# — or —
+pip install .                 # installs the tb entry point in the active environment
+# — or —
+python3 tools/build_tb.py     # builds dist/tb, a Python 3.10+ zipapp
+cp dist/tb ~/bin/tb
+```
+
+Maintainers build a full archive with `python3 tools/build_release.py`; tag
+builds produce all six platform bundles and SHA-256 sidecars automatically.
 
 ## Usage
 
@@ -76,6 +98,7 @@ cp dist/tb ~/bin/tb           # drop it anywhere on PATH; runs on any Python 3.1
 # connects to that URL; it never creates the hosting repository.
 cd your-repo && tb init             # owner: connect a new companion; clone: use the committed locator
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
+tb init --core-only                 # explicit opt-out from local automatic agent execution
 tb config                           # remote-backed identity, storage, fields, integrations editor
 tb doctor                           # readiness checks with exact next commands (--json / --offline available)
 tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
@@ -236,11 +259,19 @@ same lint/anchor-gated publish path as every manual report. Git returns
 immediately and cannot be failed by a provider or network outage. The last
 result and background log live below `.git/ticketbunker/automatic-agent/`.
 
+`tb init` checks the shipped pi runtime, adopts pi's already-selected provider
+and model when they are authenticated, and saves only those two identifiers in
+`~/.tbconfig`. If either login or selection is missing, an interactive init
+opens pi once and asks for `/login`, `/model`, then `/exit`; init does not call
+the setup complete until pi's credential-safe `auth check` passes. A
+non-interactive init reports the exact interactive next step. `--core-only` is
+the explicit local opt-out, and a later ordinary `tb init` enables setup again.
+
 The automatic worker reuses the harness stamped on an existing branch report.
-For a first report it selects an available pi installation, then Codex. A local
-`~/.tbconfig` `agent` object or `TB_AGENT_*` environment values can pin
-`harness`, `provider`, `model`, executable paths, or a custom command template;
-provider authentication remains the harness's local responsibility.
+For a first report it uses the pinned pi selection. `TB_AGENT_*` environment
+values can still provide deliberate development/test overrides or a custom
+command harness. Provider authentication remains pi's local responsibility;
+TicketBunker never reads credential values.
 
 `tb run` remains available as a diagnostic/manual recovery surface. It drives
 the whole session: compose tb.md for the branch, scaffold
@@ -254,7 +285,7 @@ arguments: it reads the current branch, extracts the ticket ID, and finds
 the bunker (in the current directory, or under `tb config --bunker-root`).
 
 ```sh
-# reference harness: pi (https://pi.dev) — npm i -g @earendil-works/pi-coding-agent; pi /login once
+# reference harness: the pi bundled with TicketBunker
 tb run --harness pi --provider anthropic --model "claude-*"   # on branch Tim/TB-1267-...
 # or fully explicit:
 tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
@@ -268,7 +299,7 @@ tb run TB-1267_bunker --branch Tim/TB-1267-fourier-alg-impl --repo . \
     --harness command --cmd "python3 tools/stub_agent.py {form}"
 ```
 
-The pi adapter (harness/pi/tb.ts) mirrors every agent tool call into the
+The packaged pi adapter (`ticketbunker/harness/pi/tb.ts`) mirrors every agent tool call into the
 bunker ledger and marks harness session start/end — structurally, via pi's
 tool_call hook, never by the agent's own volition.
 

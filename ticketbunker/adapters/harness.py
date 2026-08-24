@@ -12,7 +12,7 @@ import os
 import shlex
 from pathlib import Path
 
-from .. import layout
+from .. import agent_runtime, layout
 from ..contracts import StageContract, run_stage
 from ..ledger import Ledger
 from . import proc
@@ -95,8 +95,10 @@ untouched. Save the file in place. Do not publish; republication happens
 outside your session. When the form is reconciled, you are done.
 """
 
-# The extension that mirrors agent tool calls into the bunker ledger.
-PI_EXTENSION = Path(__file__).resolve().parent.parent.parent / "harness" / "pi" / "tb.ts"
+# The extension that mirrors agent tool calls into the bunker ledger.  It is a
+# package asset so wheels, zipapps, and release bundles all carry the same
+# adapter; zipapps materialize it into TicketBunker's local data directory.
+PI_EXTENSION = agent_runtime.extension_path()
 
 
 def build_pi_argv(

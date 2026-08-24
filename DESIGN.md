@@ -972,6 +972,44 @@ The split already matches the layout: everything under `observations/`,
 everything a person or agent reads whole — `tb.md`, `reports/`,
 `tbroot.md`, `context/` — is markdown.
 
+### 3.18 Distribution and local agent readiness
+
+The ordinary end-user artifact is a self-contained platform bundle: a frozen
+`tb` executable, the official standalone pi executable, TicketBunker's thin pi
+adapter, the upstream license, and a per-file checksum manifest. TicketBunker
+pins one reviewed pi version. Release construction downloads the corresponding
+official platform archive and refuses to extract it unless its recorded
+SHA-256 digest matches; runtime discovery verifies the extracted pi executable
+against the bundle manifest before invoking it. Linux, macOS, and Windows on
+x64 and arm64 are first-class release targets. Updating the pi pin is an
+explicit, tested TicketBunker release change, never an ambient npm update.
+
+The **stdlib-only core stays independently installable** as a wheel, pipx
+application, or Python zipapp. It carries the adapter, pin manifest, and
+license, but not the large pi binary. A team may therefore provide an approved
+runtime with `TB_AGENT_PI_BIN`, install core-only, or construct its own bundle
+inside an air-gapped boundary. The core data model and every publish gate have
+no binary-runtime dependency.
+
+Agent authentication is machine-local. On `tb init`, TicketBunker discovers
+the bundled runtime before configured and PATH fallbacks, proves the runtime
+can start, and uses pi's credential-safe `auth check --no-refresh` for the
+selected provider/model. TicketBunker reads pi's non-secret default provider
+and model identifiers but never reads, copies, emits, or stores credential
+values. If selection or authentication is absent in an interactive terminal,
+init opens pi once for `/login` and `/model`, then checks again and saves only
+`harness`, `provider`, and `model` in `~/.tbconfig`. Non-interactive setup fails
+actionably rather than installing apparently-working automation. `--core-only`
+is the explicit local opt-out: repository hooks remain installed but enqueue
+nothing on that machine until a later ordinary init enables the agent.
+
+Git hooks pin the exact installed `tb` launcher rather than a Python module or
+shell-specific PATH. Detached workers invoke that same launcher and the
+resolved pi executable, so a packaged installation keeps working outside the
+terminal environment that ran init. Git events remain non-blocking: readiness
+is established during init/doctor, while any later provider outage is recorded
+by the existing background worker without failing Git.
+
 ## 4. Ordering & atomicity principles
 
 - **Observations before inference, always.** Enforced by the harness, not by
