@@ -766,13 +766,31 @@ artifact — `merge=ours` keeps a placeholder and the post-merge hook
 regenerates it from the actual children. The generated ticket index likewise
 uses `merge=ours` to avoid line-oriented JSON conflicts; after a rebase the
 publisher recomputes each locally changed ticket reference against the selected
-remote index, so concurrent additions remain discoverable. `tb hooks --install` writes
-`post-commit`/`post-merge` hooks that run `tb refresh` — resolve the
-current branch's ticket, re-run the observation pipeline, recompose,
-regenerate the master — never blocking git (a branch without a ticket, or
-any failure, is a silent no-op). This is the first slice of the §3.1
-trigger model: the viewer polls the database, the hooks keep the database
-current, so what a user is looking at tracks the repo as they work.
+remote index, so concurrent additions remain discoverable. `tb init`
+automatically installs `post-checkout`, `post-commit`, `post-merge`, and
+`post-rewrite` hooks. Branch creation/switching, commits (including
+cherry-picks), merges, rebases, and amended commits therefore enqueue the
+current ticket branch for an agent refresh without a user command. The hook
+does no network or agent work: it writes the newest branch/HEAD/event set below
+the Git directory, starts a detached worker, and returns success. Bursts of Git
+events coalesce at the newest HEAD, including the many rewrites inside a rebase;
+only one worker drains a checkout at a time. A branch that moves or is checked
+out elsewhere before processing is skipped safely and retried the next time it
+becomes active. The queued HEAD is also checked after the agent returns; a form
+for a superseded commit stays an unpublished local draft while the newer event
+is processed, so an old synthesis is never stamped as the new head.
+
+The worker first runs the deterministic observation refresh, then invokes the
+ordinary harness-neutral agent pipeline and its lint/anchor publish gate, then
+publishes through the companion data path. There is no automatic shortcut
+around typed intake or report verification. Existing successful components
+retain their harness on later refreshes; otherwise a local explicit profile is
+used, then an available pi or Codex harness is selected. Provider credentials
+remain local. Agent/provider failure is recorded in the local automatic-agent
+state and bunker ledger but never fails the Git operation that caused it.
+Pre-existing executable Git hooks are preserved and chained, and uninstalling
+TicketBunker's hooks restores them. The viewer continues to poll the database,
+so what a user sees follows repository work without a separate agent command.
 Ticket.json edits from two branches still conflict like source code — by
 design, they are declared data. **Semantic conflicts get a merge session
 in the same trust frame** (`tb merge`): merging is part of solving a
@@ -876,7 +894,8 @@ locator. Before connection the Repository page shows those three steps; after
 connection it renders the same local readiness checks as `tb doctor`. The
 doctor validates Git identity, the committed/ignored source contract, companion
 checkouts and canonical remote heads, resolved configuration, ticket index,
-local integration credential presence, refresh hooks, and worktree cleanliness.
+local integration credential presence, automatic agent hooks/last result, and
+worktree cleanliness.
 Every failure includes a concrete next command or Git action, `--json` exposes
 the same result to automation, and `--offline` skips only remote access. Remote
 probing disables terminal prompts and times out; diagnostics write only a local

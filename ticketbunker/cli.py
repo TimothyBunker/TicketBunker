@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
+from . import autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -186,11 +186,13 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"found the committed locator on origin/{result['source_branch']}; switched to {result['source_branch']}")
         print(f"connected {result['project']} to {result['bunker_repository']}")
         print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
+        print("automatic agent: checkout, commit, merge, and rebase hooks ready")
         print("ready: tb doctor")
         return 0
     print(f"initialized {result['project']} in {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
+    print("automatic agent: checkout, commit, merge, and rebase hooks ready")
     print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
     return 0
 
@@ -719,6 +721,32 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(output)
         print(f"error: harness exited {code}; form left at {form}", file=sys.stderr)
         return 1
+
+    # Automatic sessions are tied to the exact Git event that queued them.
+    # If development advanced while the agent was working, leave the form as
+    # a local draft and let the coalesced newer event run; never stamp stale
+    # synthesis as though it described the newer commit.
+    if args.expected_head:
+        current = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", args.branch],
+            capture_output=True,
+            text=True,
+        )
+        actual = current.stdout.strip() if current.returncode == 0 else ""
+        if actual != args.expected_head:
+            ledger.event(
+                "session_superseded",
+                branch=args.branch,
+                expected_head=args.expected_head,
+                actual_head=actual,
+            )
+            print(
+                f"automatic session superseded: {args.branch} moved from "
+                f"{args.expected_head[:12]} to {(actual or 'an unknown ref')[:12]}; "
+                "the queued newer state will replace it",
+                file=sys.stderr,
+            )
+            return 1
 
     # 3. Refuse to publish untouched work: a session that filled nothing is
     #    a failed session, not a report.
@@ -1301,7 +1329,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
                           capture_output=True, text=True)
     if proc.returncode != 0:
-        return 0
+        return 1 if args.strict else 0
     branch = proc.stdout.strip()
     project = layout.find_root(repo)
     bunker = None
@@ -1313,7 +1341,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         assigned = _bunkers_assigned(project, branch)
         bunker = assigned[0] if len(assigned) == 1 else None
     if bunker is None:
-        return 0
+        return 1 if args.strict else 0
     ticket = _ticket(bunker)
     ledger = _ledger(bunker)
     baseline = "main"
@@ -1339,60 +1367,57 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     except Exception as exc:  # a hook must never block a commit or merge
         if not args.quiet:
             print(f"tb refresh skipped: {exc}", file=sys.stderr)
-        return 0
+        return 1 if args.strict else 0
     if not args.quiet:
         print(f"refreshed {ticket['id']}: observations, tb.md, master")
     return 0
 
 
-_HOOK_MARKER = "# TicketBunker hook"
-_HOOK_NAMES = ("post-commit", "post-merge")
-_HOOK_BODY = f"""#!/bin/sh
-{_HOOK_MARKER} — refresh the current branch's ticket bunker. Never blocks git.
-tb refresh --quiet 2>/dev/null || true
-"""
-
-
 def cmd_hooks(args: argparse.Namespace) -> int:
+    repo = Path(args.repo).resolve()
+    try:
+        if args.uninstall:
+            result = autoagent.uninstall(repo)
+            print(f"removed: {', '.join(result['removed']) if result['removed'] else 'nothing'}")
+            if result["restored"]:
+                print(f"restored existing hooks: {', '.join(result['restored'])}")
+            return 0
+        result = autoagent.install(repo)
+    except (OSError, ValueError) as exc:
+        print(f"error: could not install automatic agent hooks: {exc}", file=sys.stderr)
+        return 1
     import subprocess
 
-    repo = Path(args.repo).resolve()
-    proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
-        print(f"error: {repo} is not a git repository", file=sys.stderr)
-        return 1
-    git_dir = Path(proc.stdout.strip())
-    if not git_dir.is_absolute():
-        git_dir = repo / git_dir
-    hooks_dir = git_dir / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
-
-    if args.uninstall:
-        removed = []
-        for name in _HOOK_NAMES:
-            path = hooks_dir / name
-            if path.exists() and _HOOK_MARKER in path.read_text(encoding="utf-8"):
-                path.unlink()
-                removed.append(name)
-        print(f"removed: {', '.join(removed) if removed else 'nothing (no TicketBunker hooks found)'}")
-        return 0
-
-    installed, skipped = [], []
-    for name in _HOOK_NAMES:
-        path = hooks_dir / name
-        if path.exists() and _HOOK_MARKER not in path.read_text(encoding="utf-8"):
-            skipped.append(name)
-            continue
-        path.write_text(_HOOK_BODY, encoding="utf-8")
-        path.chmod(path.stat().st_mode | 0o111)
-        installed.append(name)
     subprocess.run(["git", "-C", str(repo), "config", "merge.ours.driver", "true"], capture_output=True)
-    if installed:
-        print(f"installed: {', '.join(installed)} — observations and the master refresh on every commit and merge")
-    for name in skipped:
-        print(f"skipped {name}: a non-TicketBunker hook is already there — add 'tb refresh --quiet || true' to it yourself")
+    print(f"installed: {', '.join(result['installed'])} — Git activity now refreshes the agent automatically")
+    if result["preserved"]:
+        print(f"preserved and chained existing hooks: {', '.join(result['preserved'])}")
     return 0
+
+
+def cmd_git_event(args: argparse.Namespace) -> int:
+    try:
+        result = autoagent.enqueue(Path(args.repo), args.event)
+    except (OSError, ValueError) as exc:
+        if not args.quiet:
+            print(f"automatic agent event skipped: {exc}", file=sys.stderr)
+        return 0
+    if not args.quiet and result.get("queued"):
+        print(f"queued automatic agent refresh for {result['branch']} ({args.event})")
+    return 0
+
+
+def cmd_agent_worker(args: argparse.Namespace) -> int:
+    try:
+        return autoagent.run_worker(Path(args.repo))
+    except Exception as exc:  # detached workers report locally and never affect Git
+        try:
+            state = autoagent.read_state(Path(args.repo))
+            log = state.get("log") or "the automatic agent log below .git"
+        except Exception:
+            log = "the automatic agent log below .git"
+        print(f"automatic agent worker failed: {exc}; inspect {log}", file=sys.stderr)
+        return 1
 
 
 def cmd_view(args: argparse.Namespace) -> int:
@@ -1708,17 +1733,28 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
     s.set_defaults(fn=cmd_show)
 
-    s = sub.add_parser("refresh", help="refresh the current branch's ticket observations and master (hook-friendly; never fails)")
+    s = sub.add_parser("refresh", help="refresh the current branch's ticket observations and master")
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     s.add_argument("--quiet", action="store_true", help="print nothing (hook mode)")
+    s.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_refresh)
 
-    s = sub.add_parser("hooks", help="install git hooks that keep the bunker fresh on every commit and merge")
+    s = sub.add_parser("hooks", help="inspect or repair the automatic Git-event agent hooks installed by tb init")
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--install", action="store_true")
     g.add_argument("--uninstall", action="store_true")
     s.set_defaults(fn=cmd_hooks)
+
+    s = sub.add_parser("_git-event", help=argparse.SUPPRESS)
+    s.add_argument("--repo", required=True)
+    s.add_argument("--event", required=True)
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(fn=cmd_git_event)
+
+    s = sub.add_parser("_agent-worker", help=argparse.SUPPRESS)
+    s.add_argument("--repo", required=True)
+    s.set_defaults(fn=cmd_agent_worker)
 
     s = sub.add_parser(
         "view",
@@ -1813,6 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--codex-bin", default="codex", help="codex executable (default: codex on PATH)")
     s.add_argument("--provider", default=None, help="pi provider, e.g. anthropic")
     s.add_argument("--model", default=None, help="pi model pattern")
+    s.add_argument("--expected-head", default=None, help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("merge", help="promoted agent session reconciling divergent report components through the gates")
@@ -1874,7 +1911,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = args.fn(args)
     source_root = project_mod.find_source_root()
-    if args.cmd != "doctor" and source_root is not None and project_mod.load_locator(source_root) is not None:
+    if (
+        args.cmd != "doctor"
+        and not args.cmd.startswith("_")
+        and source_root is not None
+        and project_mod.load_locator(source_root) is not None
+    ):
         try:
             project_mod.publish_data(source_root, f"TicketBunker: tb {args.cmd}")
         except commands.CommandRejected as exc:

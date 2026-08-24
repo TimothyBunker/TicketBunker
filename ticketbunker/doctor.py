@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from . import commands, config, layout, project, projectconfig, ticketindex
+from . import autoagent, commands, config, layout, project, projectconfig, ticketindex
 from .adapters.gitrun import GitError, git, git_status
 from .ledger import Ledger
 
@@ -195,18 +195,33 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
         summary = f"Local tokens saved for {', '.join(configured)}." if configured else "No local integration tokens; manual and fixture intake still work."
         checks.append(_check("credentials", "Integration credentials", "info", summary, "tb config" if not configured else ""))
 
-    hook_status = []
-    for name_value in ("post-commit", "post-merge"):
-        path = root / ".git" / "hooks" / name_value
-        try:
-            installed = path.exists() and "# TicketBunker hook" in path.read_text(encoding="utf-8")
-        except OSError:
-            installed = False
-        hook_status.append(installed)
-    if all(hook_status):
-        checks.append(_check("hooks", "Refresh hooks", "pass", "Post-commit and post-merge refresh hooks are installed."))
+    automation = autoagent.hook_status(root)
+    if automation["ready"]:
+        summary = "Checkout, commit, merge, and rebase events update the agent automatically."
+        last = (automation.get("state") or {}).get("last") or {}
+        if last.get("status") == "fail":
+            checks.append(
+                _check(
+                    "hooks",
+                    "Automatic agent",
+                    "warn",
+                    f"Hooks are ready, but the last refresh failed: {last.get('detail') or 'unknown failure'}.",
+                    f"inspect {(automation.get('state') or {}).get('log') or 'the automatic agent log below .git'}; ordinary Git activity retries it",
+                )
+            )
+        else:
+            checks.append(_check("hooks", "Automatic agent", "pass", summary))
     else:
-        checks.append(_check("hooks", "Refresh hooks", "info", "Automatic local refresh hooks are not fully installed.", "tb hooks --install"))
+        missing = ", ".join(automation["missing"])
+        checks.append(
+            _check(
+                "hooks",
+                "Automatic agent",
+                "warn",
+                f"Git-event automation is incomplete; missing: {missing}.",
+                "tb init",
+            )
+        )
 
     dirty = _git(root, ["status", "--porcelain", "--untracked-files=all"], ledger)
     if dirty:

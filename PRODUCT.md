@@ -47,6 +47,7 @@ and report provenance easier to reach. It should disappear into the task.
 7. Separate reading from auditing. In each report category, lead with concise evidence-bounded synthesis and keep that category's unchanged trail one disclosure away.
 8. Make provenance structural. Ticket-owned information and agent-owned information live behind explicit Ticket and Agent views; Master and branch reports are selected, never visually blended.
 9. Treat integrations as compositions. Presets accelerate setup, but custom integrations use the same field matrix and command contract.
+10. Make maintenance implicit. Ordinary checkout, commit, merge, and rebase events refresh agent work through the trusted publish path; users should not operate the agent as a separate tool.
 
 ## Accessibility & Inclusion
 

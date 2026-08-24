@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import api, commands, layout, project, projectconfig, ticketcommands
+from ticketbunker import api, autoagent, commands, layout, project, projectconfig, ticketcommands
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -100,6 +100,7 @@ class CompanionProjectTests(unittest.TestCase):
         self.assertEqual(initialized["mode"], "initialized")
         self.assertEqual(connected["mode"], "connected")
         self.assertEqual(connected["project"], "ECS")
+        self.assertTrue(autoagent.hook_status(self.source)["ready"])
 
     def test_connect_finds_locator_branch_from_a_fresh_default_branch_clone(self) -> None:
         source_remote = Path(self.tmp.name) / "source.git"

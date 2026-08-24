@@ -56,7 +56,10 @@ also a unit test (`tests/test_mock_product_loop.py`).
 
 It does not prove live GitHub credentials, hosted branch-protection rules, or an
 agent report run. Those boundaries need their own live checks; this scenario is
-deliberately deterministic and credential-free.
+deliberately deterministic and credential-free, and sets `TB_AGENT_DISABLE`
+while exercising branch workflows. `tests/test_autoagent.py` separately drives
+the real post-commit hook through the deterministic stub and verifies that Git
+returns before the gated report appears in the background.
 
 To reproduce:
 

@@ -41,6 +41,13 @@ exercise unless a live boundary is explicitly called out.
   `ticketbunker/data`, then writes `.ticketbunker.json`; with a committed
   locator it connects or refreshes a collaborator checkout. `tb setup` remains
   only as an alias.
+- Every successful `tb init` installs checkout, commit, merge, and rewrite Git
+  hooks. They preserve and chain existing hooks, enqueue a detached automatic
+  agent refresh, and never wait on a provider. Events at the same/newer HEAD
+  coalesce; the worker always refreshes deterministic observations before the
+  ordinary lint/anchor-gated agent run and companion publication. A post-agent
+  HEAD check keeps superseded forms unpublished. Users do not need `tb run`
+  during ordinary work.
 - Remote Git probes are non-interactive and bounded. Transient DNS resolution
   is retried three times; DNS, timeout, authentication, access, and local
   fast-forward failures get distinct actionable rejections instead of raw Git
@@ -143,6 +150,9 @@ active/faceted catalog queries, zero-ticket sparse setup, one-ticket
 fetch-on-open, separate convention-named branches, remote reconciliation, two
 clean doctor reports, and the Work UI. Measurements and explicit live-boundary
 caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
+Automatic-agent tests separately cover event coalescing, existing-hook
+preservation/restoration, the gated worker path, and a real non-blocking
+post-commit hook with the deterministic stub.
 
 Browser QA was performed in headless Google Chrome at desktop and mobile sizes.
 The Work panel, base selector, readiness state, responsive stacking, and
@@ -150,11 +160,13 @@ JavaScript deep link were inspected. This does not replace the HTTP/CSRF tests.
 
 ## Existing agent pipeline
 
-The established agent loop remains green: ticket → branch → bootstrap → compose
-→ scaffold → harness → lint/anchor-gated publish → master regeneration.
+The established agent loop remains green: ticket → branch → Git event → queued
+bootstrap → compose → scaffold → harness → lint/anchor-gated publish → master
+regeneration.
 `tb merge` reconciles components through the same gates. `tb survey REPO --run`
-publishes a gated repository survey. Git hooks refresh deterministic
-observations/master state without launching paid agent sessions.
+publishes a gated repository survey. Git hooks now launch coalesced background
+agent refreshes after checkout, commit, merge, and rebase while never blocking
+Git; manual `tb run` is only a diagnostic/recovery surface.
 
 Codex has been live-verified. The pi adapter loads, but its provider login is an
 external prerequisite; do not describe a Codex-backed pi profile as pi-provider
@@ -170,8 +182,6 @@ not run an agent report.
    anchor, speculation rank, and cold-read Where/Why result.
 3. Warn when composed `tb.md` exceeds a documented token budget.
 4. Add age-based archival policy for closed tickets without deleting data.
-5. Decide the cost-aware policy for rerunning stale agent reports. Discuss it
-   with Tim before implementing; per-commit agent sessions are not acceptable.
 
 ## Non-negotiable implementation rules
 

@@ -957,7 +957,18 @@ def connect(source_root: Path, payload: dict[str, Any] | None = None) -> dict[st
                 f"Git switched to {switched_branch}, but {LOCATOR_FILE} is absent. Repair the branch, then run 'tb init'.",
             )
     if locator is None:
-        return {**initialize(source_root, supplied), "mode": "initialized"}
+        result = {**initialize(source_root, supplied), "mode": "initialized"}
+        from . import autoagent
+
+        try:
+            result["automation"] = autoagent.install(source_root)
+        except (OSError, ValueError) as exc:
+            raise ProjectError(
+                "agent_hooks_failed",
+                f"TicketBunker connected the companion repository but could not install its automatic "
+                f"agent hooks: {exc}. Repair the hook path, then run 'tb init' again.",
+            ) from exc
+        return result
     requested_remote = str(supplied.get("bunker_repo") or "").strip()
     canonical_remote = str(locator.get("bunker_repository") or "").strip()
     if requested_remote and requested_remote != canonical_remote:
@@ -966,11 +977,22 @@ def connect(source_root: Path, payload: dict[str, Any] | None = None) -> dict[st
             "This checkout already has a committed TicketBunker locator. "
             "Run 'tb init' without repository options to use its canonical companion.",
         )
-    return {
+    result = {
         **setup(source_root),
         "mode": "connected",
         "source_branch": switched_branch,
     }
+    from . import autoagent
+
+    try:
+        result["automation"] = autoagent.install(source_root)
+    except (OSError, ValueError) as exc:
+        raise ProjectError(
+            "agent_hooks_failed",
+            f"TicketBunker refreshed the companion repository but could not install its automatic "
+            f"agent hooks: {exc}. Repair the hook path, then run 'tb init' again.",
+        ) from exc
+    return result
 
 
 def sparse_data_enabled(source_root: Path) -> bool:

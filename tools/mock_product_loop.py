@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,8 @@ def run_mock(workspace: Path) -> dict[str, Any]:
     _git(owner, "push", "-u", "origin", "ecs")
 
     old_config = config.GLOBAL_CONFIG
+    old_agent_disable = os.environ.get("TB_AGENT_DISABLE")
+    os.environ["TB_AGENT_DISABLE"] = "1"
     config.GLOBAL_CONFIG = workspace / "tbconfig.json"
     config.save({"credentials_file": str(workspace / "credentials.env")})
     try:
@@ -280,6 +283,10 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         }
     finally:
         config.GLOBAL_CONFIG = old_config
+        if old_agent_disable is None:
+            os.environ.pop("TB_AGENT_DISABLE", None)
+        else:
+            os.environ["TB_AGENT_DISABLE"] = old_agent_disable
 
 
 def main(argv: list[str] | None = None) -> int:

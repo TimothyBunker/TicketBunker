@@ -93,11 +93,10 @@ tb list                                            # every ticket, grouped by st
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
 tb view                                            # Tickets / Projects / Ticket / Agent + guarded local Work at 127.0.0.1:8377
-tb hooks --install                                 # git hooks: observations + master refresh on every commit/merge
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
-tb run                             # on the ticket branch: everything else is inferred
+tb run                             # optional diagnostic/manual retry; normal Git work invokes it automatically
 
 # the pieces tb run drives, individually addressable by ticket ID:
 tb session TB-1267 --branch Tim/TB-1267-fourier-alg-impl --data enclave=high
@@ -230,7 +229,21 @@ offline for tests and demos. The JSON-only copy/paste wrapper remains under
 
 ## Running the agent
 
-`tb run` drives the whole session: compose tb.md for the branch, scaffold
+The user normally never runs the agent. `tb init` installs local Git hooks for
+checkout, commit, merge, and rebase events. Each event queues a detached,
+coalescing refresh: observations update first, then the agent runs through the
+same lint/anchor-gated publish path as every manual report. Git returns
+immediately and cannot be failed by a provider or network outage. The last
+result and background log live below `.git/ticketbunker/automatic-agent/`.
+
+The automatic worker reuses the harness stamped on an existing branch report.
+For a first report it selects an available pi installation, then Codex. A local
+`~/.tbconfig` `agent` object or `TB_AGENT_*` environment values can pin
+`harness`, `provider`, `model`, executable paths, or a custom command template;
+provider authentication remains the harness's local responsibility.
+
+`tb run` remains available as a diagnostic/manual recovery surface. It drives
+the whole session: compose tb.md for the branch, scaffold
 the pre-filled form, invoke the harness headless, publish the filled form
 through the gate, regenerate the master. The publish stamp records the harness,
 provider, and model values orchestration actually knows; the viewer shows those
@@ -262,9 +275,10 @@ tool_call hook, never by the agent's own volition.
 ## Status
 
 The full loop is implemented and verified with both a deterministic stub and
-a live Codex session: init → tracker JSON intake → branch resolution → bootstrap
-→ run (compose, scaffold, agent session, gated publish, master regeneration) →
-sync. Git refresh hooks and the gated root-surveyor runner are implemented.
+a live Codex session: init → tracker JSON intake → branch resolution → Git
+event → queued bootstrap/run (compose, scaffold, agent session, gated publish,
+master regeneration) → sync. Automatic Git-event agent hooks and the gated
+root-surveyor runner are implemented.
 Pi remains an optional reference harness; using it requires the `pi` binary and
 that harness's own provider login, while Codex is independently supported and
 records its identity on accepted reports.
