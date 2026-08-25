@@ -1008,6 +1008,15 @@ automation. `--core-only` is the explicit local opt-out: repository hooks
 remain installed but enqueue nothing on that machine until a later ordinary
 init enables the agent.
 
+Provider/model selection is also a machine-local control surface, never shared
+ticket configuration. `tb init` accepts optional `--provider` and `--model`
+values and otherwise adopts Pi's authenticated defaults. Later, `tb agent
+model` opens Pi's picker, while the same optional flags provide a scriptable
+route; `tb agent login` and `tb agent status` complete that small lifecycle.
+All routes call the same credential-safe validation and only replace the saved
+selection after it passes. Successful init always names `tb agent model` as the
+way to change the selection.
+
 Git hooks pin the exact installed `tb` launcher rather than a Python module or
 shell-specific PATH. Detached workers invoke that same launcher and the
 resolved pi executable, so a packaged installation keeps working outside the

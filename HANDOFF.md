@@ -55,6 +55,11 @@ exercise unless a live boundary is explicitly called out.
   init opens pi once for `/login`, `/model`, and `/exit`, then checks again.
   Only harness/provider/model identifiers enter `~/.tbconfig`; credential
   values remain wholly owned by pi. `--core-only` is the explicit local opt-out.
+- The selection lifecycle is explicit after init: `tb agent status`, `tb agent
+  model`, and `tb agent login`. Model changes may instead use optional
+  `--provider`/`--model` arguments on either `tb init` or `tb agent model`.
+  Every route validates authentication before replacing the last working
+  machine-local selection, and successful init prints the later change command.
 - Remote Git probes are non-interactive and bounded. Transient DNS resolution
   is retried three times; DNS, timeout, authentication, access, and local
   fast-forward failures get distinct actionable rejections instead of raw Git
@@ -143,7 +148,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.1 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.2 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -183,7 +188,7 @@ caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
 Automatic-agent tests separately cover event coalescing, existing-hook
 preservation/restoration, the gated worker path, frozen-worker isolation, and
 a real non-blocking post-commit hook with the deterministic stub. The full
-suite is 97 tests.
+suite is 106 tests.
 
 Browser QA was performed in headless Google Chrome at desktop and mobile sizes.
 The Work panel, base selector, readiness state, responsive stacking, and

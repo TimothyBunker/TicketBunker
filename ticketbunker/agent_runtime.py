@@ -522,7 +522,7 @@ def state(repo: Path | None = None) -> dict[str, Any]:
         result.update(
             status="selection-required",
             summary="No Pi provider and model have been selected.",
-            action="run tb init in an interactive terminal and choose /login then /model",
+            action="run tb agent model, or pass --provider PROVIDER --model MODEL",
         )
         return result
     authentication = auth_check(runtime, provider, model, repo=repo)
@@ -531,7 +531,7 @@ def state(repo: Path | None = None) -> dict[str, Any]:
         result.update(
             status="login-required",
             summary=f"Pi is not logged in for {provider} / {model}.",
-            action="run tb init in an interactive terminal and choose /login then /model",
+            action="run tb agent login",
         )
         return result
     result.update(
@@ -558,6 +558,83 @@ def save_selection(provider: str, model: str) -> None:
     config.save(cfg)
 
 
+def _selection(provider: str | None = None, model: str | None = None) -> tuple[str, str]:
+    """Compose optional overrides with the machine's current selection."""
+    cfg = config.load()
+    selected = cfg.get("agent") or {}
+    if not isinstance(selected, dict):
+        selected = {}
+    default_provider, default_model = pi_defaults()
+    resolved_model = str(model or selected.get("model") or default_model or "").strip()
+    resolved_provider = str(provider or selected.get("provider") or default_provider or "").strip()
+    if not resolved_provider and "/" in resolved_model:
+        resolved_provider, resolved_model = resolved_model.split("/", 1)
+    return resolved_provider, resolved_model
+
+
+def configure_selection(
+    runtime: Runtime,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    repo: Path | None = None,
+) -> dict[str, Any]:
+    """Validate and persist one machine-local provider/model selection."""
+    resolved_provider, resolved_model = _selection(provider, model)
+    base: dict[str, Any] = {
+        "ready": False,
+        "enabled": True,
+        "runtime": runtime.as_dict(),
+        "provider": resolved_provider,
+        "model": resolved_model,
+    }
+    if not runtime.ready:
+        return {
+            **base,
+            "status": "runtime-unavailable",
+            "summary": f"Pi cannot start ({runtime.detail}).",
+            "action": "run tb init to repair the managed runtime",
+        }
+    if not resolved_provider or not resolved_model:
+        return {
+            **base,
+            "status": "selection-required",
+            "summary": "A provider and model are both required.",
+            "action": "run tb agent model interactively, or pass --provider PROVIDER --model MODEL",
+        }
+    authentication = auth_check(runtime, resolved_provider, resolved_model, repo=repo)
+    if not authentication["ready"]:
+        detail = authentication.get("detail") or "Pi could not use that selection"
+        return {
+            **base,
+            "status": "login-required",
+            "authentication": authentication,
+            "summary": f"Pi cannot use {resolved_provider} / {resolved_model} ({detail}).",
+            "action": "run tb agent login, then retry tb agent model",
+        }
+    try:
+        save_selection(resolved_provider, resolved_model)
+    except OSError as exc:
+        return {
+            **base,
+            "status": "config-write-failed",
+            "authentication": authentication,
+            "summary": f"The model is valid, but TicketBunker could not save it ({exc}).",
+            "action": f"make {config.GLOBAL_CONFIG.parent} writable, then retry",
+        }
+    return {
+        **base,
+        "ready": True,
+        "status": "ready",
+        "authentication": authentication,
+        "summary": (
+            f"Pi {runtime.version} · {resolved_provider} / {resolved_model} · "
+            f"{authentication.get('auth_type') or 'authenticated'}"
+        ),
+        "action": "",
+    }
+
+
 def set_core_only() -> None:
     cfg = config.load()
     prior = cfg.get("agent") or {}
@@ -567,7 +644,103 @@ def set_core_only() -> None:
     config.save(cfg)
 
 
-def onboard(repo: Path, *, interactive: bool) -> dict[str, Any]:
+def _open_pi(runtime: Runtime, repo: Path, instruction: str) -> bool:
+    print(instruction)
+    try:
+        completed = subprocess.run([runtime.path], cwd=str(Path(repo).resolve()))
+    except OSError:
+        return False
+    return completed.returncode in (0, 130)
+
+
+def change_selection(
+    repo: Path,
+    *,
+    interactive: bool,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Change the saved model explicitly or through Pi's interactive picker."""
+    runtime = discover()
+    if not runtime.ready:
+        return state(repo)
+    if provider is not None or model is not None:
+        return configure_selection(runtime, provider=provider, model=model, repo=repo)
+    if not interactive:
+        selected_provider, selected_model = _selection()
+        return {
+            "ready": False,
+            "enabled": True,
+            "status": "interactive-required",
+            "runtime": runtime.as_dict(),
+            "provider": selected_provider,
+            "model": selected_model,
+            "summary": "Interactive model selection needs a terminal.",
+            "action": "pass --provider PROVIDER --model MODEL",
+        }
+    if not _open_pi(
+        runtime,
+        repo,
+        "agent model: Pi will open; use /model to choose, then /exit",
+    ):
+        return {
+            "ready": False,
+            "enabled": True,
+            "status": "selection-failed",
+            "runtime": runtime.as_dict(),
+            "provider": "",
+            "model": "",
+            "summary": "Pi exited before TicketBunker could confirm a model.",
+            "action": "run tb agent model again",
+        }
+    selected_provider, selected_model = pi_defaults()
+    return configure_selection(
+        runtime,
+        provider=selected_provider,
+        model=selected_model,
+        repo=repo,
+    )
+
+
+def login(repo: Path, *, interactive: bool) -> dict[str, Any]:
+    """Open Pi's credential UI, then adopt its authenticated selection."""
+    runtime = discover()
+    if not runtime.ready:
+        return state(repo)
+    if not interactive:
+        selected_provider, selected_model = _selection()
+        return {
+            "ready": False,
+            "enabled": True,
+            "status": "interactive-required",
+            "runtime": runtime.as_dict(),
+            "provider": selected_provider,
+            "model": selected_model,
+            "summary": "Pi login needs an interactive terminal.",
+            "action": "run tb agent login in a terminal",
+        }
+    if not _open_pi(
+        runtime,
+        repo,
+        "agent login: Pi will open; use /login, choose /model if needed, then /exit",
+    ):
+        return state(repo)
+    selected_provider, selected_model = pi_defaults()
+    return configure_selection(
+        runtime,
+        provider=selected_provider,
+        model=selected_model,
+        repo=repo,
+    )
+
+
+def onboard(
+    repo: Path,
+    *,
+    interactive: bool,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """Adopt a ready pi selection or open pi once for login/model setup."""
     current = state(repo)
     if not current.get("enabled", True):
@@ -578,6 +751,10 @@ def onboard(repo: Path, *, interactive: bool) -> dict[str, Any]:
         cfg["agent"] = {**selected, "enabled": True}
         config.save(cfg)
         current = state(repo)
+    if provider is not None or model is not None:
+        runtime_value = current.get("runtime") or {}
+        runtime = Runtime(**runtime_value) if runtime_value else discover()
+        return configure_selection(runtime, provider=provider, model=model, repo=repo)
     if current["ready"] and current.get("enabled", True):
         if current.get("provider") and current.get("model"):
             save_selection(str(current["provider"]), str(current["model"]))
@@ -586,12 +763,11 @@ def onboard(repo: Path, *, interactive: bool) -> dict[str, Any]:
     runtime = Runtime(**runtime_value) if runtime_value else discover()
     if not runtime.ready or not interactive:
         return current
-    print("agent setup: Pi will open once; use /login, then /model, then /exit")
-    try:
-        completed = subprocess.run([runtime.path], cwd=str(Path(repo).resolve()))
-    except OSError:
-        return state(repo)
-    if completed.returncode not in (0, 130):
+    if not _open_pi(
+        runtime,
+        repo,
+        "agent setup: Pi will open once; use /login, then /model, then /exit",
+    ):
         return state(repo)
     provider, model = pi_defaults()
     if provider and model:

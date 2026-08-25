@@ -165,6 +165,85 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(result["ready"])
         self.assertTrue(config.load()["agent"]["enabled"])
 
+    def test_explicit_selection_is_validated_then_saved(self) -> None:
+        runtime = agent_runtime.Runtime(
+            str(self.pi), "override", version="0.84.2", ready=True
+        )
+
+        with self.environment():
+            result = agent_runtime.configure_selection(
+                runtime,
+                provider="another-provider",
+                model="model-2",
+                repo=self.root,
+            )
+
+        self.assertTrue(result["ready"])
+        saved = config.load()["agent"]
+        self.assertEqual(saved["provider"], "another-provider")
+        self.assertEqual(saved["model"], "model-2")
+
+    def test_model_only_override_retains_the_current_provider(self) -> None:
+        config.save(
+            {"agent": {"provider": "example", "model": "model-1", "harness": "pi"}}
+        )
+        runtime = agent_runtime.Runtime(
+            str(self.pi), "override", version="0.84.2", ready=True
+        )
+
+        with self.environment():
+            result = agent_runtime.configure_selection(
+                runtime,
+                model="model-2",
+                repo=self.root,
+            )
+
+        self.assertTrue(result["ready"])
+        saved = config.load()["agent"]
+        self.assertEqual(saved["provider"], "example")
+        self.assertEqual(saved["model"], "model-2")
+
+    def test_failed_selection_does_not_replace_the_working_model(self) -> None:
+        config.save(
+            {"agent": {"provider": "example", "model": "model-1", "harness": "pi"}}
+        )
+        runtime = agent_runtime.Runtime(
+            str(self.pi), "override", version="0.84.2", ready=True
+        )
+        rejected = {
+            "ready": False,
+            "status": "missing",
+            "detail": "model is unavailable",
+        }
+
+        with mock.patch.object(agent_runtime, "auth_check", return_value=rejected):
+            result = agent_runtime.configure_selection(
+                runtime,
+                provider="another-provider",
+                model="missing-model",
+                repo=self.root,
+            )
+
+        self.assertFalse(result["ready"])
+        saved = config.load()["agent"]
+        self.assertEqual(saved["provider"], "example")
+        self.assertEqual(saved["model"], "model-1")
+
+    def test_interactive_model_change_adopts_pi_default_after_exit(self) -> None:
+        def choose_model(*_args, **_kwargs):
+            self.settings.write_text(
+                json.dumps({"defaultProvider": "example", "defaultModel": "model-2"}),
+                encoding="utf-8",
+            )
+            return True
+
+        with self.environment():
+            with mock.patch.object(agent_runtime, "_open_pi", side_effect=choose_model):
+                result = agent_runtime.change_selection(self.root, interactive=True)
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(config.load()["agent"]["model"], "model-2")
+
     def _runtime_archive(self, *, approved: bool = True):
         payload = self.root / "payload" / "pi"
         payload.mkdir(parents=True)

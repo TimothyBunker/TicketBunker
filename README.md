@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.1-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.1-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.2-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.2-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -116,7 +116,12 @@ builds produce all six platform bundles and SHA-256 sidecars automatically.
 # connects to that URL; it never creates the hosting repository.
 cd your-repo && tb init             # owner: connect a new companion; clone: use the committed locator
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
+tb init --provider openai-codex --model gpt-5.6-sol  # optional first-setup selection
 tb init --core-only                 # explicit opt-out from local automatic agent execution
+tb agent status                     # active runtime, provider, model, and login state
+tb agent model                      # open Pi's model picker; selection is saved after validation
+tb agent model --provider openai-codex --model gpt-5.6-sol  # scriptable equivalent
+tb agent login                      # open Pi login, then validate and adopt its selection
 tb config                           # remote-backed identity, storage, fields, integrations editor
 tb doctor                           # readiness checks with exact next commands (--json / --offline available)
 tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
@@ -282,7 +287,12 @@ resolved executable path, adopts pi's already-selected provider and model when
 they are authenticated, and saves only those non-secret identifiers in
 `~/.tbconfig`. If either login or selection is missing, an interactive init
 opens pi once and asks for `/login`, `/model`, then `/exit`; init does not call
-the setup complete until pi's credential-safe `auth check` passes. A
+the setup complete until pi's credential-safe `auth check` passes. Optional
+`--provider` and `--model` init arguments compose with the current selection,
+so either, both, or neither can be supplied. Every successful init prints
+`tb agent model` as the later change path. A replacement selection is validated
+before it replaces the working one; `tb agent status --json` exposes the same
+machine-local result for scripts. A
 non-interactive init reports the exact interactive next step. `--core-only` is
 the explicit local opt-out, and a later ordinary `tb init` enables setup again.
 

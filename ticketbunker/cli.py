@@ -158,6 +158,12 @@ def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    if args.core_only and (args.provider is not None or args.model is not None):
+        print(
+            "error: --core-only disables the agent; do not combine it with --provider or --model",
+            file=sys.stderr,
+        )
+        return 1
     source_root = project_mod.find_source_root()
     if source_root is None:
         print("error: not inside a git repository — tb init roots itself in a git repo, like git does",
@@ -183,14 +189,14 @@ def cmd_init(args: argparse.Namespace) -> int:
         editor_status = _open_config_editor(source_root, args.port, not args.no_open, "repository")
         if editor_status or project_mod.load_locator(source_root) is None:
             return editor_status
-        return _finish_agent_setup(source_root, args.core_only)
+        return _finish_agent_setup(source_root, args.core_only, args.provider, args.model)
     if result["mode"] == "connected":
         if result.get("source_branch"):
             print(f"found the committed locator on origin/{result['source_branch']}; switched to {result['source_branch']}")
         print(f"connected {result['project']} to {result['bunker_repository']}")
         print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
         print("automatic agent: checkout, commit, merge, and rebase hooks ready")
-        agent_status = _finish_agent_setup(source_root, args.core_only)
+        agent_status = _finish_agent_setup(source_root, args.core_only, args.provider, args.model)
         if agent_status == 0:
             print("ready: tb doctor")
         return agent_status
@@ -198,16 +204,22 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
     print("automatic agent: checkout, commit, merge, and rebase hooks ready")
-    agent_status = _finish_agent_setup(source_root, args.core_only)
+    agent_status = _finish_agent_setup(source_root, args.core_only, args.provider, args.model)
     if agent_status == 0:
         print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
     return agent_status
 
 
-def _finish_agent_setup(source_root: Path, core_only: bool) -> int:
+def _finish_agent_setup(
+    source_root: Path,
+    core_only: bool,
+    provider: str | None = None,
+    model: str | None = None,
+) -> int:
     if core_only:
         agent_runtime.set_core_only()
         print("agent: core-only on this machine; Git hooks stay idle until a later tb init")
+        print("enable or choose a model later: tb agent model")
         return 0
     try:
         agent_runtime.ensure_runtime(reporter=print)
@@ -216,13 +228,57 @@ def _finish_agent_setup(source_root: Path, core_only: bool) -> int:
         print(f"next: {exc.action}", file=sys.stderr)
         return 1
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    status = agent_runtime.onboard(source_root, interactive=interactive)
+    status = agent_runtime.onboard(
+        source_root,
+        interactive=interactive,
+        provider=provider,
+        model=model,
+    )
     if status.get("ready") and status.get("enabled", True):
         print(f"agent: {status['summary']}")
+        print("change model: tb agent model (or rerun tb init with optional --provider and --model)")
         return 0
     print(f"agent setup incomplete: {status.get('summary') or 'Pi is not ready.'}", file=sys.stderr)
     print(f"next: {status.get('action') or 'run tb init in an interactive terminal'}", file=sys.stderr)
     return 1
+
+
+def _print_agent_status(status: dict, *, json_output: bool = False) -> int:
+    if json_output:
+        print(json.dumps(status, indent=2, ensure_ascii=False))
+    elif status.get("ready"):
+        print(f"agent: {status.get('summary') or 'ready'}")
+    else:
+        print(f"agent: {status.get('summary') or 'not ready'}", file=sys.stderr)
+        if status.get("action"):
+            print(f"next: {status['action']}", file=sys.stderr)
+    return 0 if status.get("ready") else 1
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    source_root = project_mod.find_source_root() or Path.cwd()
+    if args.agent_command == "status":
+        return _print_agent_status(agent_runtime.state(source_root), json_output=args.json)
+    try:
+        agent_runtime.ensure_runtime(reporter=print)
+    except agent_runtime.RuntimeInstallError as exc:
+        print(f"agent: {exc.summary}", file=sys.stderr)
+        print(f"next: {exc.action}", file=sys.stderr)
+        return 1
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if args.agent_command == "login":
+        status = agent_runtime.login(source_root, interactive=interactive)
+    else:
+        status = agent_runtime.change_selection(
+            source_root,
+            interactive=interactive,
+            provider=args.provider,
+            model=args.model,
+        )
+    code = _print_agent_status(status)
+    if code == 0 and args.agent_command == "login":
+        print("change model: tb agent model")
+    return code
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -1689,7 +1745,28 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--no-open", action="store_true", help="do not open the connection editor in a browser")
     s.add_argument("--core-only", action="store_true",
                    help="connect without configuring local automatic agent execution")
+    s.add_argument("--provider", default=None,
+                   help="optional machine-local Pi provider selection")
+    s.add_argument("--model", default=None,
+                   help="optional machine-local Pi model selection")
     s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser("agent", help="show or change this machine's automatic agent")
+    agent_sub = s.add_subparsers(dest="agent_command", required=True)
+
+    a = agent_sub.add_parser("status", help="show the active runtime, provider, model, and login state")
+    a.add_argument("--json", action="store_true")
+    a.set_defaults(fn=cmd_agent)
+
+    a = agent_sub.add_parser("model", help="change the automatic agent model")
+    a.add_argument("--provider", default=None,
+                   help="provider override; omitted values retain the current selection")
+    a.add_argument("--model", default=None,
+                   help="model override; with no overrides, open Pi's interactive picker")
+    a.set_defaults(fn=cmd_agent)
+
+    a = agent_sub.add_parser("login", help="open Pi login and adopt its authenticated selection")
+    a.set_defaults(fn=cmd_agent)
 
     s = sub.add_parser("doctor", help="check connection, Git state, companion access, indexes, credentials, and hooks")
     s.add_argument("--offline", action="store_true", help="skip the companion remote access check")
@@ -1942,7 +2019,7 @@ def main(argv: list[str] | None = None) -> int:
     result = args.fn(args)
     source_root = project_mod.find_source_root()
     if (
-        args.cmd != "doctor"
+        args.cmd not in {"doctor", "agent"}
         and not args.cmd.startswith("_")
         and source_root is not None
         and project_mod.load_locator(source_root) is not None
