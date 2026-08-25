@@ -55,6 +55,8 @@ def current_platform() -> str:
 
 
 def safe_member(name: str) -> PurePosixPath:
+    if "\\" in name:
+        raise ValueError(f"unsafe archive member: {name}")
     value = PurePosixPath(name)
     if value.is_absolute() or ".." in value.parts:
         raise ValueError(f"unsafe archive member: {name}")

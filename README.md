@@ -62,13 +62,25 @@ only what TicketBunker owns.
 The normal download is one platform archive containing both `tb` and the
 pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 
+1. Open [TicketBunker Releases](https://github.com/TimothyBunker/TicketBunker/releases).
+2. Download the archive whose name matches your machine: `linux`, `darwin`
+   (macOS), or `windows`, followed by `x64` or `arm64`.
+3. Download its adjacent `.sha256` file and verify it.
+4. Unpack the archive and run the installer inside it:
+
 ```sh
-# unpack ticketbunker-<version>-<platform>.tar.gz, then:
+# Linux/macOS, after checking the adjacent digest with sha256sum or shasum:
 ./install.sh                  # installs below ~/.local and puts tb in ~/.local/bin
 
 # Windows PowerShell, after unpacking the .zip:
 .\install.ps1                 # prints the one bin directory to add to PATH
 ```
+
+For example, Linux can verify an archive with
+`sha256sum -c ticketbunker-0.2.1-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.1-windows-x64.zip -Algorithm SHA256`
+with the value in its `.sha256` file. The installer prints the installed path
+and the only PATH change, if one is needed.
 
 Release bundles cover Linux, macOS, and Windows on x64 and arm64. The build
 verifies the official pi archive checksum before extraction; the installed
@@ -76,8 +88,7 @@ verifies the official pi archive checksum before extraction; the installed
 Provider logins, API keys, OAuth tokens, and model weights are never bundled.
 
 The stdlib-only core remains available for constrained or air-gapped setups.
-These forms install TicketBunker without pi; point `TB_AGENT_PI_BIN` at an
-approved local runtime when agent execution is wanted:
+These forms initially install TicketBunker without the large pi runtime:
 
 ```sh
 pipx install .                # isolated Python CLI installation
@@ -87,6 +98,13 @@ pip install .                 # installs the tb entry point in the active enviro
 python3 tools/build_tb.py     # builds dist/tb, a Python 3.10+ zipapp
 cp dist/tb ~/bin/tb
 ```
+
+On the first ordinary `tb init`, a core installation automatically downloads
+the pinned pi distribution for that machine, verifies the upstream SHA-256,
+installs it below TicketBunker's local data directory, and records `pi_bin` in
+`~/.tbconfig`. The user does not set `TB_AGENT_PI_BIN`; that variable is only
+an explicit administrator/developer override. `tb init --core-only` prevents
+the download and disables local agent execution intentionally.
 
 Maintainers build a full archive with `python3 tools/build_release.py`; tag
 builds produce all six platform bundles and SHA-256 sidecars automatically.
@@ -259,8 +277,9 @@ same lint/anchor-gated publish path as every manual report. Git returns
 immediately and cannot be failed by a provider or network outage. The last
 result and background log live below `.git/ticketbunker/automatic-agent/`.
 
-`tb init` checks the shipped pi runtime, adopts pi's already-selected provider
-and model when they are authenticated, and saves only those two identifiers in
+`tb init` checks the shipped or automatically managed pi runtime, records its
+resolved executable path, adopts pi's already-selected provider and model when
+they are authenticated, and saves only those non-secret identifiers in
 `~/.tbconfig`. If either login or selection is missing, an interactive init
 opens pi once and asks for `/login`, `/model`, then `/exit`; init does not call
 the setup complete until pi's credential-safe `auth check` passes. A

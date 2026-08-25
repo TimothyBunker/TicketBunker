@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -163,6 +164,83 @@ class AgentRuntimeTests(unittest.TestCase):
 
         self.assertTrue(result["ready"])
         self.assertTrue(config.load()["agent"]["enabled"])
+
+    def _runtime_archive(self, *, approved: bool = True):
+        payload = self.root / "payload" / "pi"
+        payload.mkdir(parents=True)
+        executable = payload / ("pi.exe" if os.name == "nt" else "pi")
+        executable.write_bytes(self.pi.read_bytes())
+        asset = payload / "package.json"
+        asset.write_text('{"version":"0.84.2"}\n', encoding="utf-8")
+        archive = self.root / "pi.tar.gz"
+        with tarfile.open(archive, "w:gz") as value:
+            value.add(payload, arcname="pi")
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        value = {
+            "version": "0.84.2",
+            "platforms": {
+                "test-platform": {
+                    "archive": archive.name,
+                    "url": archive.as_uri(),
+                    "sha256": digest if approved else "0" * 64,
+                    "format": "tar.gz",
+                    "executable": f"pi/{executable.name}",
+                }
+            },
+        }
+        return value, executable.name
+
+    def test_missing_runtime_is_downloaded_verified_and_configured_automatically(self) -> None:
+        runtime_manifest, executable_name = self._runtime_archive()
+        messages = []
+
+        def inspect(path, origin):
+            resolved = Path(path).resolve()
+            if origin == "managed" and resolved.is_file():
+                error = agent_runtime._managed_integrity_error(resolved)
+                return agent_runtime.Runtime(
+                    str(resolved), origin, version="0.84.2", ready=not error,
+                    detail=error, integrity="verified" if not error else "failed",
+                )
+            return agent_runtime.Runtime(str(resolved), origin, detail="not ready")
+
+        environment = {
+            "TB_DATA_HOME": str(self.root / "data"),
+            "PI_CODING_AGENT_DIR": str(self.settings.parent),
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            with mock.patch.object(agent_runtime, "manifest", return_value=runtime_manifest):
+                with mock.patch.object(agent_runtime, "platform_key", return_value="test-platform"):
+                    with mock.patch.object(agent_runtime, "_inspect", side_effect=inspect):
+                        installed = agent_runtime.ensure_runtime(messages.append)
+
+        expected = self.root / "data" / "runtime" / "pi" / "0.84.2" / "pi" / executable_name
+        self.assertTrue(installed.ready)
+        self.assertEqual(Path(installed.path), expected)
+        self.assertEqual(config.load()["agent"]["pi_bin"], str(expected))
+        self.assertTrue((expected.parents[1] / "manifest.json").is_file())
+        self.assertTrue(any("downloading verified Pi" in value for value in messages))
+        self.assertTrue(any("installed and configured" in value for value in messages))
+
+    def test_bad_runtime_download_is_rejected_with_exact_manual_route(self) -> None:
+        runtime_manifest, _executable_name = self._runtime_archive(approved=False)
+        environment = {"TB_DATA_HOME": str(self.root / "data")}
+
+        with mock.patch.dict(os.environ, environment, clear=False):
+            with mock.patch.object(agent_runtime, "manifest", return_value=runtime_manifest):
+                with mock.patch.object(agent_runtime, "platform_key", return_value="test-platform"):
+                    with mock.patch.object(
+                        agent_runtime, "discover",
+                        return_value=agent_runtime.Runtime("", "missing", detail="not found"),
+                    ):
+                        with self.assertRaises(agent_runtime.RuntimeInstallError) as caught:
+                            agent_runtime.ensure_runtime()
+
+        entry = runtime_manifest["platforms"]["test-platform"]
+        self.assertIn("checksum", caught.exception.summary)
+        self.assertIn(entry["url"], caught.exception.action)
+        self.assertIn("verify SHA-256", caught.exception.action)
+        self.assertNotIn("pi_bin", config.load().get("agent") or {})
 
 
 if __name__ == "__main__":

@@ -209,6 +209,12 @@ def _finish_agent_setup(source_root: Path, core_only: bool) -> int:
         agent_runtime.set_core_only()
         print("agent: core-only on this machine; Git hooks stay idle until a later tb init")
         return 0
+    try:
+        agent_runtime.ensure_runtime(reporter=print)
+    except agent_runtime.RuntimeInstallError as exc:
+        print(f"agent setup incomplete: {exc.summary}", file=sys.stderr)
+        print(f"next: {exc.action}", file=sys.stderr)
+        return 1
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     status = agent_runtime.onboard(source_root, interactive=interactive)
     if status.get("ready") and status.get("enabled", True):

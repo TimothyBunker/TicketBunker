@@ -13,12 +13,18 @@ import json
 import os
 import platform
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from dataclasses import asdict, dataclass
 from importlib import resources
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable
 
 from . import config
 
@@ -27,6 +33,7 @@ MANIFEST_RESOURCE = ("runtime", "pi-runtime.json")
 EXTENSION_RESOURCE = ("harness", "pi", "tb.ts")
 AUTH_TIMEOUT_SECONDS = 20
 VERSION_TIMEOUT_SECONDS = 10
+DOWNLOAD_TIMEOUT_SECONDS = 90
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,13 @@ class Runtime:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+class RuntimeInstallError(Exception):
+    def __init__(self, summary: str, action: str):
+        super().__init__(summary)
+        self.summary = summary
+        self.action = action
 
 
 def manifest() -> dict[str, Any]:
@@ -123,6 +137,10 @@ def _bundle_candidates() -> list[tuple[Path, str]]:
     return candidates
 
 
+def managed_root() -> Path:
+    return data_root() / "runtime" / "pi" / pinned_pi_version()
+
+
 def _sha256(path: Path) -> str:
     value = hashlib.sha256()
     with path.open("rb") as handle:
@@ -160,6 +178,32 @@ def _bundle_integrity_error(path: Path) -> str:
     return "bundle manifest is missing"
 
 
+def _managed_integrity_error(path: Path) -> str:
+    root = managed_root()
+    candidate = root / "manifest.json"
+    try:
+        value = json.loads(candidate.read_text(encoding="utf-8"))
+        files = value.get("files") or {}
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+        if relative not in files:
+            return "managed runtime manifest has no pi executable checksum"
+        prefix = relative.rsplit("/", 1)[0] + "/"
+        runtime_files = {name: details for name, details in files.items() if name.startswith(prefix)}
+        if not runtime_files:
+            return "managed runtime manifest has no pi files"
+        for name, details in runtime_files.items():
+            managed = root / name
+            if not managed.is_file():
+                return f"managed pi file is missing: {name}"
+            if _sha256(managed) != str(details.get("sha256") or ""):
+                return f"managed pi checksum does not match: {name}"
+        return ""
+    except FileNotFoundError:
+        return "managed runtime manifest is missing"
+    except (OSError, ValueError, TypeError):
+        return "managed runtime manifest is invalid"
+
+
 def _inspect(path: str | Path, origin: str) -> Runtime:
     resolved = Path(path).expanduser()
     if not resolved.exists():
@@ -172,16 +216,10 @@ def _inspect(path: str | Path, origin: str) -> Runtime:
             return Runtime(str(resolved.resolve()), origin, detail=integrity_error, integrity=state)
         integrity = "verified"
     elif origin == "managed":
-        digest_file = resolved.with_name(f"{resolved.name}.sha256")
-        if not digest_file.exists():
-            return Runtime(
-                str(resolved.resolve()), origin, detail="managed pi checksum is missing", integrity="missing"
-            )
-        expected = digest_file.read_text(encoding="utf-8").split()[0]
-        if _sha256(resolved) != expected:
-            return Runtime(
-                str(resolved.resolve()), origin, detail="managed pi checksum does not match", integrity="failed"
-            )
+        integrity_error = _managed_integrity_error(resolved)
+        if integrity_error:
+            state = "missing" if "missing" in integrity_error or "no pi" in integrity_error else "failed"
+            return Runtime(str(resolved.resolve()), origin, detail=integrity_error, integrity=state)
         integrity = "verified"
     try:
         completed = subprocess.run(
@@ -223,6 +261,175 @@ def discover() -> Runtime:
     if found:
         return _inspect(found, "system")
     return Runtime("", "missing", detail="no pi runtime found")
+
+
+def _safe_member(name: str) -> PurePosixPath:
+    if "\\" in name:
+        raise ValueError(f"unsafe archive member: {name}")
+    value = PurePosixPath(name)
+    if value.is_absolute() or ".." in value.parts:
+        raise ValueError(f"unsafe archive member: {name}")
+    return value
+
+
+def _safe_extract(archive: Path, destination: Path, archive_format: str) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    if archive_format == "zip":
+        with zipfile.ZipFile(archive) as source:
+            for info in source.infolist():
+                member = _safe_member(info.filename)
+                target = destination.joinpath(*member.parts)
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == stat.S_IFLNK:
+                    raise ValueError(f"archive links are not permitted: {info.filename}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with source.open(info) as incoming, target.open("wb") as output:
+                    shutil.copyfileobj(incoming, output)
+    else:
+        with tarfile.open(archive, "r:gz") as source:
+            for info in source.getmembers():
+                member = _safe_member(info.name)
+                target = destination.joinpath(*member.parts)
+                if info.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                if not info.isfile() or info.issym() or info.islnk():
+                    raise ValueError(f"archive links and special files are not permitted: {info.name}")
+                incoming = source.extractfile(info)
+                if incoming is None:
+                    raise ValueError(f"cannot read archive member: {info.name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with incoming, target.open("wb") as output:
+                    shutil.copyfileobj(incoming, output)
+                target.chmod(info.mode & 0o777)
+
+
+def _write_managed_manifest(root: Path, platform_name: str, archive_sha256: str) -> None:
+    files = {}
+    for path in sorted(value for value in root.rglob("*") if value.is_file() and value.name != "manifest.json"):
+        files[path.relative_to(root).as_posix()] = {"sha256": _sha256(path), "bytes": path.stat().st_size}
+    value = {
+        "schema_version": 1,
+        "pi_version": pinned_pi_version(),
+        "platform": platform_name,
+        "upstream_archive_sha256": archive_sha256,
+        "files": files,
+    }
+    (root / "manifest.json").write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _save_runtime_path(runtime: Runtime) -> None:
+    cfg = config.load()
+    selected = cfg.get("agent") or {}
+    if not isinstance(selected, dict):
+        selected = {}
+    cfg["agent"] = {
+        **selected,
+        "enabled": True,
+        "harness": "pi",
+        "pi_bin": runtime.path,
+    }
+    config.save(cfg)
+
+
+def _record_runtime_path(runtime: Runtime) -> None:
+    try:
+        _save_runtime_path(runtime)
+    except OSError as exc:
+        raise RuntimeInstallError(
+            f"Pi is ready, but TicketBunker could not save its path: {exc}",
+            f"make {config.GLOBAL_CONFIG.parent} writable, then run tb init again",
+        ) from exc
+
+
+def _manual_runtime_action(entry: dict[str, Any], executable: Path) -> str:
+    return (
+        f"download {entry['url']}, verify SHA-256 {entry['sha256']}, and extract it so "
+        f"{executable} exists; then run tb init again, or use tb init --core-only"
+    )
+
+
+def ensure_runtime(reporter: Callable[[str], None] | None = None) -> Runtime:
+    """Return a healthy pi runtime, installing the pinned distribution if needed."""
+    current = discover()
+    explicit = os.environ.get("TB_AGENT_PI_BIN") or os.environ.get("TB_PI_BIN")
+    pinned_or_deliberate = current.origin != "system" or current.version == pinned_pi_version()
+    if current.ready and (pinned_or_deliberate or explicit):
+        _record_runtime_path(current)
+        return current
+    if explicit:
+        raise RuntimeInstallError(
+            f"The explicit Pi runtime cannot start ({current.detail}).",
+            f"fix or unset TB_AGENT_PI_BIN={explicit!r}, then run tb init again",
+        )
+    platform_name = platform_key()
+    runtime_manifest = manifest()
+    entry = (runtime_manifest.get("platforms") or {}).get(platform_name or "")
+    destination = managed_root()
+    executable = destination / Path(str(entry["executable"])) if isinstance(entry, dict) else destination / "pi"
+    if not platform_name or not isinstance(entry, dict):
+        supported = ", ".join(sorted((runtime_manifest.get("platforms") or {}).keys()))
+        raise RuntimeInstallError(
+            f"No automatic Pi runtime is published for {sys.platform}/{platform.machine()}.",
+            f"supported platforms: {supported}; provide TB_AGENT_PI_BIN or run tb init --core-only",
+        )
+    if reporter:
+        reporter(f"agent runtime: downloading verified Pi {pinned_pi_version()} for {platform_name}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix=".pi-install-", dir=destination.parent) as temporary_name:
+            temporary = Path(temporary_name)
+            archive = temporary / str(entry["archive"])
+            request = urllib.request.Request(
+                str(entry["url"]),
+                headers={"User-Agent": "TicketBunker runtime installer"},
+            )
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            actual = _sha256(archive)
+            if actual != str(entry["sha256"]):
+                raise ValueError(f"downloaded archive checksum was {actual}, expected {entry['sha256']}")
+            staging = temporary / "runtime"
+            _safe_extract(archive, staging, str(entry["format"]))
+            staged_executable = staging / Path(str(entry["executable"]))
+            if not staged_executable.is_file():
+                raise ValueError(f"archive lacks {entry['executable']}")
+            staged_executable.chmod(
+                staged_executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            )
+            _write_managed_manifest(staging, platform_name, str(entry["sha256"]))
+            if destination.exists():
+                concurrent = _inspect(executable, "managed") if executable.is_file() else None
+                if concurrent is not None and concurrent.ready:
+                    _record_runtime_path(concurrent)
+                    if reporter:
+                        reporter(f"agent runtime: another init installed and configured {concurrent.path}")
+                    return concurrent
+                backup = destination.with_name(f"{destination.name}.invalid-{os.getpid()}")
+                if backup.exists():
+                    raise ValueError(f"cannot preserve invalid runtime because {backup} already exists")
+                destination.replace(backup)
+                if reporter:
+                    reporter(f"agent runtime: preserved the invalid prior copy at {backup}")
+            staging.replace(destination)
+    except (OSError, ValueError, KeyError, tarfile.TarError, zipfile.BadZipFile, urllib.error.URLError) as exc:
+        raise RuntimeInstallError(
+            f"Could not install Pi {pinned_pi_version()}: {exc}",
+            _manual_runtime_action(entry, executable),
+        ) from exc
+    installed = _inspect(executable, "managed")
+    if not installed.ready:
+        raise RuntimeInstallError(
+            f"Pi was downloaded but cannot start ({installed.detail}).",
+            _manual_runtime_action(entry, executable),
+        )
+    _record_runtime_path(installed)
+    if reporter:
+        reporter(f"agent runtime: installed and configured {installed.path}")
+    return installed
 
 
 def _pi_settings_dir() -> Path:
@@ -300,9 +507,15 @@ def state(repo: Path | None = None) -> dict[str, Any]:
         "model": model,
     }
     if not runtime.ready:
+        explicit = os.environ.get("TB_AGENT_PI_BIN") or os.environ.get("TB_PI_BIN")
+        action = (
+            f"fix or unset TB_AGENT_PI_BIN={explicit!r}, then run tb init again"
+            if explicit
+            else "run tb init to download and configure the pinned Pi runtime automatically, or use tb init --core-only"
+        )
         result.update(
             summary=f"Pi cannot start ({runtime.detail}).",
-            action="install the TicketBunker bundle, set TB_AGENT_PI_BIN, or run tb init --core-only",
+            action=action,
         )
         return result
     if not provider or not model:

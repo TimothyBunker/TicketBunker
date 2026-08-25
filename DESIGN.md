@@ -986,22 +986,27 @@ explicit, tested TicketBunker release change, never an ambient npm update.
 
 The **stdlib-only core stays independently installable** as a wheel, pipx
 application, or Python zipapp. It carries the adapter, pin manifest, and
-license, but not the large pi binary. A team may therefore provide an approved
-runtime with `TB_AGENT_PI_BIN`, install core-only, or construct its own bundle
-inside an air-gapped boundary. The core data model and every publish gate have
-no binary-runtime dependency.
+license, but not the large pi binary. On its first ordinary `tb init`, it
+downloads the pinned platform archive, verifies the recorded upstream digest,
+safely extracts the complete distribution into TicketBunker's machine-local
+data directory, writes a per-file manifest, and records the resolved `pi_bin`
+in `~/.tbconfig`. A team may instead provide an approved runtime with the
+explicit `TB_AGENT_PI_BIN` override, choose `--core-only`, or construct its own
+bundle inside an air-gapped boundary. The core data model and every publish
+gate have no binary-runtime dependency.
 
 Agent authentication is machine-local. On `tb init`, TicketBunker discovers
-the bundled runtime before configured and PATH fallbacks, proves the runtime
-can start, and uses pi's credential-safe `auth check --no-refresh` for the
-selected provider/model. TicketBunker reads pi's non-secret default provider
-and model identifiers but never reads, copies, emits, or stores credential
-values. If selection or authentication is absent in an interactive terminal,
-init opens pi once for `/login` and `/model`, then checks again and saves only
-`harness`, `provider`, and `model` in `~/.tbconfig`. Non-interactive setup fails
-actionably rather than installing apparently-working automation. `--core-only`
-is the explicit local opt-out: repository hooks remain installed but enqueue
-nothing on that machine until a later ordinary init enables the agent.
+the bundled or managed runtime before configured and PATH fallbacks, proves the
+runtime can start, and uses pi's credential-safe `auth check --no-refresh` for
+the selected provider/model. TicketBunker reads pi's non-secret default
+provider and model identifiers but never reads, copies, emits, or stores
+credential values. If selection or authentication is absent in an interactive
+terminal, init opens pi once for `/login` and `/model`, then checks again and
+saves only `pi_bin`, `harness`, `provider`, and `model` in `~/.tbconfig`.
+Non-interactive setup fails actionably rather than installing apparently-working
+automation. `--core-only` is the explicit local opt-out: repository hooks
+remain installed but enqueue nothing on that machine until a later ordinary
+init enables the agent.
 
 Git hooks pin the exact installed `tb` launcher rather than a Python module or
 shell-specific PATH. Detached workers invoke that same launcher and the

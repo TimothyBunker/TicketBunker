@@ -143,7 +143,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.0 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.1 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -152,8 +152,9 @@ exercise unless a live boundary is explicitly called out.
   emitted for users.
 - The wheel/pipx package and stdlib zipapp remain small core-only options. They
   now correctly include the pi adapter, version/checksum manifest, and license;
-  they accept an approved local runtime through `TB_AGENT_PI_BIN` without
-  adding a Python dependency.
+  an ordinary `tb init` automatically downloads, verifies, installs, and
+  records the pinned platform runtime. `TB_AGENT_PI_BIN` remains only an
+  explicit override; `--core-only` is the no-download choice.
 - Frozen hooks pin the installed `tb` launcher. Detached one-file workers reset
   their PyInstaller environment so the parent's temporary extraction cleanup
   cannot strand them. This was exercised from an unpacked release: init
@@ -182,7 +183,7 @@ caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
 Automatic-agent tests separately cover event coalescing, existing-hook
 preservation/restoration, the gated worker path, frozen-worker isolation, and
 a real non-blocking post-commit hook with the deterministic stub. The full
-suite is 95 tests.
+suite is 97 tests.
 
 Browser QA was performed in headless Google Chrome at desktop and mobile sizes.
 The Work panel, base selector, readiness state, responsive stacking, and
