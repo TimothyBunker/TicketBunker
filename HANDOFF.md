@@ -145,10 +145,11 @@ exercise unless a live boundary is explicitly called out.
   Jira-shaped read surface: project, title, mapped status, labels, source update
   time, rich description/acceptance criteria, activity, useful details, and a
   Metadata disclosure for transport fields.
-- Agent shows Lifecycle, Branches, and Agent work. Master separates each branch
-  visibly; Who/What/Where/Why synthesis appears before each collapsible full
-  evidence trail. Branch selection narrows the view. Before the first report,
-  there is a direct empty state rather than a meaningless Master selector.
+- One Lifecycle and Branches rail persists beside both tabs. Agent work owns
+  only the center Agent surface. Master separates each branch visibly;
+  Who/What/Where/Why synthesis appears before each collapsible full evidence
+  trail. Branch selection narrows the view. Before the first report, there is a
+  direct empty state rather than a meaningless Master selector.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -157,7 +158,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.4 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.5 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,

@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.4-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.4-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.5-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.5-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -233,6 +233,10 @@ closed tickets appear only when requested. Projects uses the same controls and
 pages through lightweight ticket references before a specific ticket is
 opened. Listing never composes report bodies or claims a ticket into the source
 repository.
+
+On a ticket, Lifecycle and Branches remain in one right rail while Ticket and
+Agent switch the center view. Branch state and the Work control therefore stay
+in the same place while reading tracker details or agent evidence.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

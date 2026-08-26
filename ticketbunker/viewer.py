@@ -104,8 +104,9 @@ p { margin: 0 0 12px; }
 .badge.stale, .badge.open { color: var(--warning); background: var(--warning-soft); }
 .badge.unverified, .badge.missing { color: var(--danger); background: var(--danger-soft); }
 .ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 0; }
+.ticket-view-stack { min-width: 0; }
 .ticket-main { min-width: 0; padding: 31px 42px 0 0; }
-.ticket-page { max-width: 78ch; padding-right: 0; }
+.ticket-page { max-width: 78ch; }
 .ticket-rail { min-width: 0; padding: 31px 0 0 30px; border-left: 1px solid var(--line); }
 .view-tabs { display: flex; gap: 20px; margin: 0; border-bottom: 1px solid var(--line); }
 .view-tab {
@@ -391,7 +392,6 @@ li { margin: 3px 0; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
   .ticket-main { padding-right: 24px; }
-  .ticket-page { padding-right: 0; }
   .ticket-rail { padding-left: 20px; }
   .report-picker select { min-width: min(210px, 30vw); }
   .ticket-filters, .ticket-filters.with-project { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1676,17 +1676,21 @@ def page_ticket(
         '<button class="view-tab" id="agent-tab" type="button" role="tab" tabindex="-1" '
         'aria-selected="false" aria-controls="agent-panel" data-view-tab="agent">Agent</button></div>'
     )
+    rail = (
+        f'<aside class="ticket-rail">{_lifecycle(ticket)}'
+        f'{_branches(ticket, work_token if project_key and (root / layout.LOCATOR_FILE).exists() else "")}'
+        '</aside>'
+    )
     panels = (
+        '<div class="ticket-layout"><div class="ticket-view-stack">'
         '<div class="view-panel" id="ticket-panel" role="tabpanel" aria-labelledby="ticket-tab" '
         'data-view-panel="ticket">'
         '<article class="ticket-main ticket-page">'
         f'{"".join(ticket_sections)}{details}</article></div>'
         '<div class="view-panel" id="agent-panel" role="tabpanel" aria-labelledby="agent-tab" '
-        'data-view-panel="agent" hidden><div class="ticket-layout">'
-        f'<div class="ticket-main">{_agent_work(ticket)}</div>'
-        f'<aside class="ticket-rail">{_lifecycle(ticket)}'
-        f'{_branches(ticket, work_token if project_key and (root / layout.LOCATOR_FILE).exists() else "")}'
-        '</aside></div></div>'
+        'data-view-panel="agent" hidden>'
+        f'<div class="ticket-main">{_agent_work(ticket)}</div></div>'
+        f'</div>{rail}</div>'
     )
 
     if project_key:

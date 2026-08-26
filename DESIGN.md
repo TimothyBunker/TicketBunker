@@ -377,9 +377,11 @@ timestamps already promoted into the header/details, mapped status fields, and
 project ordinals are omitted. Classification is semantic (project, timestamp,
 status, ID, URL), never a GitHub/Jira/GitLab-specific view branch. Nested provider
 metadata is flattened into readable field paths instead of exposed as a JSON
-blob. Agent owns Agent work and never mixes those fields into its report surface;
-declared lifecycle and the persistent Branches rail appear there beside the
-observed work, not on the ticket's tracker surface.
+blob. Agent owns Agent work and never mixes those fields into its report surface.
+Lifecycle and Branches form one persistent right rail outside the tab panels,
+so the reader keeps the same ticket and Git orientation while moving between
+Ticket and Agent. The rail is rendered once; the Work control and branch links
+are never duplicated between views.
 
 Agent work defaults to **Master** and provides one native report selector at the
 right of its heading: Master followed by each branch report. Master presents each

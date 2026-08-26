@@ -204,11 +204,23 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("Branches", page)
         self.assertIn("Details", page)
         ticket_panel = page.split('id="ticket-panel"', 1)[1].split('id="agent-panel"', 1)[0]
-        agent_panel = page.split('id="agent-panel"', 1)[1]
+        agent_panel = page.split('id="agent-panel"', 1)[1].split(
+            '<aside class="ticket-rail">', 1
+        )[0]
+        ticket_layout = page.split('<div class="ticket-layout">', 1)[1]
+        persistent_rail = ticket_layout.split('<aside class="ticket-rail">', 1)[1]
         self.assertIn('<section class="issue-details"><div class="details-heading"><h2>Details</h2>', ticket_panel)
         self.assertEqual(ticket_panel.count('<section class="issue-details">'), 1)
         self.assertNotIn("More fields", ticket_panel)
-        self.assertNotIn('class="ticket-rail', ticket_panel)
+        self.assertEqual(page.count('<aside class="ticket-rail">'), 1)
+        self.assertLess(
+            ticket_layout.index('id="ticket-panel"'),
+            ticket_layout.index('<aside class="ticket-rail">'),
+        )
+        self.assertLess(
+            ticket_layout.index('id="agent-panel"'),
+            ticket_layout.index('<aside class="ticket-rail">'),
+        )
         self.assertLess(ticket_panel.index("Description"), ticket_panel.index("Activity"))
         self.assertLess(ticket_panel.index("Activity"), ticket_panel.index("Details"))
         self.assertIn('<dt>Type</dt><dd><span>Task</span></dd>', ticket_panel)
@@ -216,8 +228,10 @@ class ViewerTests(unittest.TestCase):
         self.assertNotIn('<details class="details">', ticket_panel)
         self.assertNotIn("Lifecycle", ticket_panel)
         self.assertNotIn("Branches", ticket_panel)
-        self.assertIn("Lifecycle", agent_panel)
-        self.assertIn("Branches", agent_panel)
+        self.assertIn("Lifecycle", persistent_rail)
+        self.assertIn("Branches", persistent_rail)
+        self.assertNotIn("Lifecycle", agent_panel)
+        self.assertNotIn("Branches", agent_panel)
         self.assertIn("Activity", ticket_panel)
         self.assertIn("Please check <code>viewer.py</code> first.", ticket_panel)
         self.assertIn('<span class="activity-kind">Comment</span>', ticket_panel)
