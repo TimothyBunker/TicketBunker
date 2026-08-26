@@ -85,15 +85,15 @@ class AutomaticAgentTests(unittest.TestCase):
         self.assertEqual(removed["restored"], ["post-commit"])
         self.assertEqual(existing.read_text(encoding="utf-8"), original_text)
 
-    def test_repeated_events_coalesce_at_the_same_head(self) -> None:
-        first = autoagent.enqueue(self.repo, "post-commit", spawn=False)
-        second = autoagent.enqueue(self.repo, "post-merge", spawn=False)
+    def test_repeated_requests_coalesce_at_the_same_head(self) -> None:
+        first = autoagent.enqueue(self.repo, "viewer-synthesis", spawn=False)
+        second = autoagent.enqueue(self.repo, "cli-synthesis", spawn=False)
 
         self.assertTrue(first["queued"])
         self.assertTrue(second["queued"])
         queued = autoagent.read_state(self.repo)["queued"]
         self.assertEqual(queued["branch"], "Ada/ECS-4-automatic")
-        self.assertEqual(queued["events"], ["post-commit", "post-merge"])
+        self.assertEqual(queued["events"], ["cli-synthesis", "viewer-synthesis"])
         self.assertGreater(queued["generation"], first["generation"])
 
     def test_indexed_sparse_ticket_can_queue_before_its_body_is_loaded(self) -> None:
@@ -143,7 +143,7 @@ class AutomaticAgentTests(unittest.TestCase):
         environment = started.call_args.kwargs["env"]
         self.assertEqual(environment["PYINSTALLER_RESET_ENVIRONMENT"], "1")
 
-    def test_worker_uses_the_normal_gated_pipeline_without_manual_agent_command(self) -> None:
+    def test_requested_worker_uses_the_normal_gated_pipeline(self) -> None:
         source = self.repo / "position.py"
         source.write_text("POSITION = (0, 0, 0)\n", encoding="utf-8")
         git(self.repo, "add", "position.py")
@@ -160,7 +160,7 @@ class AutomaticAgentTests(unittest.TestCase):
                 "TB_AGENT_COMMAND": command,
             },
         ):
-            autoagent.enqueue(self.repo, "post-commit", spawn=False)
+            autoagent.enqueue(self.repo, "user-requested-synthesis", spawn=False)
             status = autoagent.run_worker(self.repo, debounce=0, once=True)
 
         state = autoagent.read_state(self.repo)["last"]
@@ -171,8 +171,8 @@ class AutomaticAgentTests(unittest.TestCase):
         self.assertTrue(report.exists())
         self.assertIn("<!-- tb:verified", report.read_text(encoding="utf-8"))
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
-        self.assertTrue(any(value.get("type") == "automatic_agent_started" for value in events))
-        self.assertTrue(any(value.get("type") == "automatic_agent_finished" for value in events))
+        self.assertTrue(any(value.get("type") == "synthesis_started" for value in events))
+        self.assertTrue(any(value.get("type") == "synthesis_finished" for value in events))
 
     def test_unchanged_durable_inputs_skip_the_provider(self) -> None:
         source = self.repo / "position.py"
@@ -189,7 +189,7 @@ class AutomaticAgentTests(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, environment):
-            autoagent.enqueue(self.repo, "post-commit", spawn=False)
+            autoagent.enqueue(self.repo, "user-requested-synthesis", spawn=False)
             self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
 
             original_run = subprocess.run
@@ -199,7 +199,7 @@ class AutomaticAgentTests(unittest.TestCase):
                 calls.append(list(argv))
                 return original_run(argv, *args, **kwargs)
 
-            autoagent.enqueue(self.repo, "post-checkout", spawn=False)
+            autoagent.enqueue(self.repo, "user-requested-synthesis", spawn=False)
             with mock.patch.object(autoagent.subprocess, "run", side_effect=record):
                 self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
 
@@ -285,7 +285,7 @@ class AutomaticAgentTests(unittest.TestCase):
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
         self.assertTrue(any(value.get("type") == "session_superseded" for value in events))
 
-    def test_real_post_commit_hook_returns_then_publishes_in_background(self) -> None:
+    def test_real_post_commit_hook_records_change_without_calling_agent(self) -> None:
         autoagent.install(self.repo)
         source = self.repo / "velocity.py"
         source.write_text("VELOCITY = 1\n", encoding="utf-8")
@@ -312,17 +312,12 @@ class AutomaticAgentTests(unittest.TestCase):
         )
         commit_seconds = time.monotonic() - started
         report = layout.child_report(self.bunker, "Ada/ECS-4-automatic")
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            state = autoagent.read_state(self.repo).get("last") or {}
-            if state.get("status") == "pass" and report.exists():
-                break
-            time.sleep(0.1)
-        else:
-            self.fail(f"background report did not complete: {autoagent.read_state(self.repo)}")
-
+        state = autoagent.read_state(self.repo)
         self.assertLess(commit_seconds, 1.0)
-        self.assertIn("<!-- tb:verified", report.read_text(encoding="utf-8"))
+        self.assertFalse(report.exists())
+        self.assertEqual(state["changes"]["branch"], "Ada/ECS-4-automatic")
+        self.assertEqual(state["changes"]["events"], ["post-commit"])
+        self.assertNotIn("queued", state)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
@@ -77,12 +78,12 @@ class SharedTruthTests(unittest.TestCase):
     def test_refresh_names_the_companion_git_and_synthesis_state(self) -> None:
         synthesis = {
             "status": "missing",
-            "label": "No synthesis published",
-            "detail": f"{self.branch} has no accepted report yet.",
-            "action": "Generate synthesis",
+            "label": "Not synthesized",
+            "detail": f"{self.branch} has not been synthesized yet.",
+            "action": "Synthesize",
         }
         with mock.patch.object(project, "refresh_source_refs", return_value=(True, "")):
-            with mock.patch.object(truth, "_synthesis_queue", return_value={"queued": True}):
+            with mock.patch.object(autoagent, "enqueue") as enqueue:
                 with mock.patch.object(truth, "synthesis_state", return_value=synthesis):
                     result = truth.command_refresh(
                         commands.CommandContext(self.root, transport="test"),
@@ -91,8 +92,9 @@ class SharedTruthTests(unittest.TestCase):
 
         self.assertEqual(result["companion"]["label"], "Local ticket data")
         self.assertEqual(result["git"]["label"], "Git refs fetched")
-        self.assertEqual(result["synthesis"]["label"], "No synthesis published")
+        self.assertEqual(result["synthesis"]["label"], "Not synthesized")
         self.assertIn("source worktree was not changed", result["git"]["detail"])
+        enqueue.assert_not_called()
 
     def test_ref_change_updates_the_page_content_revision(self) -> None:
         ticket = TicketDatabase(self.root).get_ticket("TB-9", refresh_branches=True)
@@ -102,22 +104,85 @@ class SharedTruthTests(unittest.TestCase):
 
         self.assertNotEqual(before, after)
 
-    def test_changed_refs_queue_refresh_even_when_the_last_inputs_were_current(self) -> None:
+    def test_synthesis_runs_only_after_the_user_requests_it(self) -> None:
+        with mock.patch.object(
+            autoagent,
+            "enqueue",
+            return_value={"queued": True, "branch": self.branch},
+        ) as enqueue:
+            result = truth.command_synthesize(
+                commands.CommandContext(self.root, transport="test"),
+                {"ticket": "TB-9"},
+            )
+
+        self.assertTrue(result["queued"])
+        enqueue.assert_called_once_with(self.root, "user-requested-synthesis")
+
+    def test_stopped_synthesis_exposes_retry_and_local_log(self) -> None:
+        with mock.patch.object(
+            autoagent,
+            "read_state",
+            return_value={
+                "last": {
+                    "status": "fail",
+                    "branch": self.branch,
+                    "detail": "pi synthesis failed",
+                }
+            },
+        ):
+            ticket = TicketDatabase(self.root).get_ticket("TB-9", refresh_branches=True)
+            value = truth.synthesis_state(self.root, ticket)
+
+        self.assertEqual(value["label"], "Synthesis stopped")
+        self.assertEqual(value["action"], "Retry synthesis")
+        self.assertEqual(value["command"], "synthesize")
+        self.assertEqual(value["log_url"], "/truth/agent-log")
+
+    def test_outdated_synthesis_names_age_and_commit_count(self) -> None:
+        published = git(self.root, "rev-parse", "HEAD")
+        verified_at = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+        ).isoformat(timespec="seconds")
+        layout.child_report(self.bunker, self.branch).write_text(
+            f"""<!-- tb:verified branch={self.branch} commit={published} ts={verified_at} -->
+## Who
+
+- [observation] Ada owns the branch.
+
+## What
+
+- [observation] The ticket has a report.
+
+## Where
+
+- [observation] source.py changed.
+
+## Why
+
+- [observation] The ticket requests it.
+
+## State
+
+- [observation] Work is in progress.
+""",
+            encoding="utf-8",
+        )
+        (self.root / "source.py").write_text("VALUE = 2\n", encoding="utf-8")
+        git(self.root, "add", "source.py")
+        git(self.root, "commit", "-m", "Change ticket work")
+
         ticket = TicketDatabase(self.root).get_ticket("TB-9", refresh_branches=True)
         with mock.patch.object(
             autoagent,
             "synthesis_input_state",
-            return_value={"status": "current"},
+            return_value={"status": "changed", "published_at": verified_at},
         ):
-            with mock.patch.object(
-                autoagent,
-                "enqueue",
-                return_value={"queued": True, "branch": self.branch},
-            ) as enqueue:
-                result = truth._synthesis_queue(self.root, ticket, force=True)
+            value = truth.synthesis_state(self.root, ticket)
 
-        self.assertTrue(result["queued"])
-        enqueue.assert_called_once_with(self.root, "ticket-refs-changed")
+        self.assertEqual(value["label"], "Synthesis needs update")
+        self.assertEqual(value["changes"], 1)
+        self.assertIn("Updated 2 hours ago", value["detail"])
+        self.assertIn("1 commit since", value["detail"])
 
     def test_background_failure_hides_raw_exception_detail(self) -> None:
         secret = "BrokenPipeError: internal transport detail"

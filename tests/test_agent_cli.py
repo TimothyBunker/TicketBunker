@@ -111,6 +111,25 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("--core-only disables the agent", stderr)
 
+    def test_synthesize_cli_dispatches_the_same_command_as_the_viewer(self) -> None:
+        response = {
+            "queued": True,
+            "synthesis": {
+                "label": "Synthesizing",
+                "detail": "TicketBunker is updating Ada/TB-9-work because you requested it.",
+            },
+        }
+        with mock.patch.object(cli.layout, "find_root", return_value=self.root):
+            with mock.patch.object(cli.project_mod, "load_locator", return_value={"project": "TB"}):
+                with mock.patch.object(cli.commands, "dispatch", return_value=response) as dispatched:
+                    code, stdout, stderr = self._run(["synthesize", "TB-9"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("Synthesizing", stdout)
+        self.assertEqual(dispatched.call_args.args[0], "truth.synthesize")
+        self.assertEqual(dispatched.call_args.args[1], {"project": "TB", "ticket": "TB-9"})
+        self.assertEqual(dispatched.call_args.args[2].transport, "cli")
+
 
 if __name__ == "__main__":
     unittest.main()

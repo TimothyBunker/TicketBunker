@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.6-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.6-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.7-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.7-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -117,7 +117,7 @@ builds produce all six platform bundles and SHA-256 sidecars automatically.
 cd your-repo && tb init             # owner: connect a new companion; clone: use the committed locator
 tb init --project TB --bunker-repo git@host:team/project-ticketbunker.git  # direct equivalent
 tb init --provider openai-codex --model gpt-5.6-sol  # optional first-setup selection
-tb init --core-only                 # explicit opt-out from local automatic agent execution
+tb init --core-only                 # explicit opt-out from local synthesis execution
 tb agent status                     # active runtime, provider, model, and login state
 tb agent model                      # open Pi's model picker; selection is saved after validation
 tb agent model --provider openai-codex --model gpt-5.6-sol  # scriptable equivalent
@@ -142,7 +142,8 @@ tb view                                            # Ticket/Agent views, shared-
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
-tb run                             # optional diagnostic/manual retry; normal Git work invokes it automatically
+tb synthesize TB-1267                # same explicit synthesis request as the viewer button
+tb run                             # direct CLI synthesis path; the viewer button is the ordinary route
 
 # the pieces tb run drives, individually addressable by ticket ID:
 tb session TB-1267 --branch Tim/TB-1267-fourier-alg-impl --data enclave=high
@@ -167,7 +168,8 @@ the background. It then rebuilds Branches from matching local branches,
 remote-tracking branches, and explicit assignments. Fetch does not touch the
 worktree, so uncommitted files are preserved and no pull, rebase, switch,
 merge, reset, or stash occurs. Offline opens keep the ticket on screen with
-local and cached refs plus a direct retry action.
+local and cached refs plus a direct retry action. This background refresh never
+calls the synthesis agent.
 
 `tb init` performs its own remote probe. It retries transient DNS resolution,
 uses bounded non-interactive Git operations, and distinguishes DNS, timeout,
@@ -241,7 +243,12 @@ On a ticket, Lifecycle and Branches remain in one right rail while Ticket and
 Agent switch the center view. Branch state and the Work control therefore stay
 in the same place while reading tracker details or agent evidence. A quiet
 Companion / Git refs / Synthesis strip says which shared state is current,
-cached, updating, or stopped and names what to do next. Branches without a
+cached, updating, or stopped and names what to do next. Synthesis is explicitly
+user-triggered from that strip: **Synthesize**, **Update synthesis**, or
+**Retry synthesis**. It shows when the last synthesis finished and the number
+of commits since whenever those facts are available. A failed run includes a
+**View log** link; the localhost page shows a bounded, escaped tail and the
+exact `.git/ticketbunker/automatic-agent/agent.log` path. Branches without a
 generated comparison say **Needs Git state**, which names the missing program
 output.
 
@@ -308,18 +315,22 @@ local extensions remain intact. `--fixture snapshot.json` uses the same path
 offline for tests and demos. The JSON-only copy/paste wrapper remains under
 [examples/github_projects](examples/github_projects/README.md).
 
-## Running the agent
+## Running synthesis
 
-The user normally never runs the agent. `tb init` installs local Git hooks for
-checkout, commit, merge, and rebase events. Each event queues a detached,
-coalescing refresh: observations update first, then the agent runs through the
-same lint/anchor-gated publish path as every manual report. Git returns
-immediately and cannot be failed by a provider or network outage. The last
-result and background log live below `.git/ticketbunker/automatic-agent/`.
-After deterministic refresh, the worker compares the branch's durable
-ticket/Git/context fingerprint with the last successful publication. Identical
-inputs skip the provider, so opening a current ticket or receiving a redundant
-Git event does not spend another agent call.
+The user chooses when synthesis is worth the model call. `tb init` installs
+local Git hooks for checkout, commit, merge, and rebase events, but each hook
+only records the newest ticket branch, HEAD, event, and change time below
+`.git`. It performs no network, observation, or agent work. Opening a ticket
+also refreshes companion data and Git refs without calling the model.
+
+Press **Synthesize** or **Update synthesis** in the ticket state hub to queue
+the detached worker. It refreshes deterministic observations first, then runs
+the same lint/anchor-gated publish path as every report. A claimed request stays
+visibly **Synthesizing** until it finishes. The worker compares the branch's
+durable ticket/Git/context fingerprint with the last successful publication,
+so an already-current request does not spend another provider call. The last
+result and exact log path are visible from the state hub; the file remains at
+`.git/ticketbunker/automatic-agent/agent.log` for direct inspection.
 
 `tb init` checks the shipped or automatically managed pi runtime, records its
 resolved executable path, adopts pi's already-selected provider and model when
@@ -335,7 +346,7 @@ machine-local result for scripts. A
 non-interactive init reports the exact interactive next step. `--core-only` is
 the explicit local opt-out, and a later ordinary `tb init` enables setup again.
 
-The automatic worker reuses the harness stamped on an existing branch report.
+The requested worker reuses the harness stamped on an existing branch report.
 For a first report it uses the pinned pi selection. `TB_AGENT_*` environment
 values can still provide deliberate development/test overrides or a custom
 command harness. Provider authentication remains pi's local responsibility;
@@ -375,9 +386,9 @@ tool_call hook, never by the agent's own volition.
 
 The full loop is implemented and verified with both a deterministic stub and
 a live Codex session: init → tracker JSON intake → branch resolution → Git
-event → queued bootstrap/run (compose, scaffold, agent session, gated publish,
-master regeneration) → sync. Automatic Git-event agent hooks and the gated
-root-surveyor runner are implemented.
+event marks staleness → user-requested bootstrap/run (compose, scaffold, agent
+session, gated publish, master regeneration) → sync. Git-event change tracking
+and the gated root-surveyor runner are implemented.
 Pi remains an optional reference harness; using it requires the `pi` binary and
 that harness's own provider login, while Codex is independently supported and
 records its identity on accepted reports.

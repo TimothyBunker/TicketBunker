@@ -126,9 +126,10 @@ ledger, reports — and nothing the harness owns.
 
 - **manually** (a user pastes / uploads the ticket context — the known drawback,
   see §7), or
-- **automatically**, when new branches matching the ticket key appear on the
-  remote but are not yet known to the service — the session ingests them and
-  refreshes its observations.
+- **on request**, after TicketBunker detects a new branch matching the ticket
+  key. Git lifecycle hooks mark the ticket as changed without calling a model;
+  the user presses Synthesize in the ticket state hub when a fresh report is
+  useful.
 
 Report state is queryable by **authorized users only** (see §6).
 
@@ -148,11 +149,10 @@ belongs to the TicketBunker backend (§2). The two meet in both directions:
 
 - **Backend → session:** the backend manages the stateful information — ticket
   registry, branch state, prior observations, report status — and **passes it
-  to the pi session to populate it** with the relevant context. This happens at
-  instantiation (the session starts pre-loaded from backend state, not empty)
-  and on events afterward: e.g. a git command (via a hook) triggers the
-  backend, which updates the session with the new state — a fresh push on a
-  ticket branch flows into the bunker without anyone re-entering it.
+  to the pi session to populate it** with the relevant context. A Git lifecycle
+  hook records that the branch changed, but never invokes the session. When the
+  user requests synthesis, the session starts pre-loaded from current backend
+  and Git state rather than reconstructing context by hand.
 - **Session → backend:** the executing hooks write ledger entries and publish
   reports through the API (§3.8).
 
@@ -313,11 +313,14 @@ this schema; every newly scaffolded session must fill it.
 
 ### 3.5 Report-first UX
 
-**Users consume the report first.** A user never has to operate the automatic
-generation agent as a separate tool:
+**Users consume the report first.** A user explicitly chooses when synthesis is
+worth running, but never has to operate the generation harness as a separate
+tool:
 
-- The session is created and driven headlessly (branch creation triggers it; the
-  bootstrap extensions and command-fed agent do the rest).
+- The state hub's Synthesize or Update synthesis button creates and drives the
+  session headlessly; the bootstrap extensions and command-fed agent do the
+  rest. Branch creation and ordinary Git activity only mark synthesis as
+  missing or changed.
 - The report is the sole user-facing artifact — it must be complete enough that
   reading it answers who/what/where/why without a follow-up conversation.
 - The generation transcript/session is retained as **provenance**: if a report claim
@@ -427,10 +430,13 @@ comment, report, or lifecycle editor. Every ticket page renders immediately
 from cached companion data and local or already-fetched Git refs. After the
 response is sent, one coalesced background command fast-forwards the ignored
 companion checkouts when safe, fetches source remote-tracking refs without
-touching the source worktree, and queues synthesis only when the durable
-ticket/Git/context fingerprint differs from the last successful publication.
-A quiet three-part strip names Companion, Git refs, and Synthesis state,
-including the preserved state and direct next action whenever work stops.
+touching the source worktree, and never queues synthesis. A quiet three-part
+strip names Companion, Git refs, and Synthesis state. Synthesis shows when it
+last succeeded and the number of commits since that report; its button is the
+only viewer route that starts the model. While running, the state stays visibly
+busy. On failure, Retry synthesis and View log sit together; the localhost-only
+log page escapes and bounds the output and names the exact local path. Every
+stopped state preserves the prior report and names the next action.
 Pages poll that local state and reload only when ticket content or refs change.
 All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.
@@ -495,7 +501,7 @@ v1 checks, in rough priority order:
 | Check | Mechanical? | When | On failure |
 |---|---|---|---|
 | **Schema** — required who/what/where/why/state sections present; every claim carries a stratum label; every inference cites ≥1 observation | yes | gate: before a child is accepted into `reports/branches/` | block the write; agent must rewrite |
-| **Staleness** — child's recorded commit SHA vs branch head; master's recorded child digests vs actual children | yes | on branch push events and on read | mark stale prominently; trigger refresh |
+| **Staleness** — child's recorded commit SHA vs branch head; master's recorded child digests vs actual children | yes | on branch push events and on read | mark stale prominently; offer Update synthesis |
 | **Dead references** — paths/symbols named in the report that no longer exist on the branch or baseline | yes | on master regeneration | strike through + warn |
 | **Duplication** — same observation restated across children (e.g. shared merge-base facts); child content re-narrated in the master | yes (digest/similarity) | on master regeneration | hoist shared facts to the master; children keep references |
 | **Length budget** — per-section size ceilings; a report that outgrows them is summarizing badly | yes | gate, same as schema | block; agent must compress |
@@ -807,28 +813,27 @@ publisher recomputes each locally changed ticket reference against the selected
 remote index, so concurrent additions remain discoverable. `tb init`
 automatically installs `post-checkout`, `post-commit`, `post-merge`, and
 `post-rewrite` hooks. Branch creation/switching, commits (including
-cherry-picks), merges, rebases, and amended commits therefore enqueue the
-current ticket branch for an agent refresh without a user command. The hook
-does no network or agent work: it writes the newest branch/HEAD/event set below
-the Git directory, starts a detached worker, and returns success. Bursts of Git
-events coalesce at the newest HEAD, including the many rewrites inside a rebase;
-only one worker drains a checkout at a time. A branch that moves or is checked
-out elsewhere before processing is skipped safely and retried the next time it
-becomes active. The queued HEAD is also checked after the agent returns; a form
-for a superseded commit stays an unpublished local draft while the newer event
-is processed, so an old synthesis is never stamped as the new head.
+cherry-picks), merges, rebases, and amended commits therefore record the newest
+ticket branch, HEAD, event set, and change time below the Git directory. The
+hook does no network, observation, or agent work and never starts a worker. It
+returns success immediately, so Git activity cannot spend model calls or be
+failed by a provider.
 
-The worker first runs the deterministic observation refresh, then invokes the
-ordinary harness-neutral agent pipeline and its lint/anchor publish gate, then
-publishes through the companion data path. There is no automatic shortcut
-around typed intake or report verification. Existing successful components
-retain their harness on later refreshes; otherwise a local explicit profile is
-used, then an available pi or Codex harness is selected. Provider credentials
-remain local. Agent/provider failure is recorded in the local automatic-agent
-state and bunker ledger but never fails the Git operation that caused it.
-Pre-existing executable Git hooks are preserved and chained, and uninstalling
-TicketBunker's hooks restores them. The viewer continues to poll the database,
-so what a user sees follows repository work without a separate agent command.
+The viewer compares the current branch against the last accepted report and
+durable input fingerprint. It shows the last synthesis time and, when the
+verified commit is known, the number of commits since. Only an explicit
+Synthesize, Update synthesis, or Retry synthesis command queues the detached
+worker. The worker first runs the deterministic observation refresh, then the
+ordinary harness-neutral agent pipeline and lint/anchor publish gate, then
+publishes through the companion data path. Existing successful components
+retain their harness on later requests; otherwise the local selected Pi or
+Codex profile is used. A queued or claimed request is represented by a durable
+running state so the state hub cannot offer a second request while work is in
+flight. The queued HEAD is checked after the agent returns; a form for a
+superseded commit stays an unpublished local draft. Provider failure preserves
+the prior report, records the failure in the bunker ledger, and exposes the
+bounded local log through View log. Pre-existing executable Git hooks are
+preserved and chained, and uninstalling TicketBunker's hooks restores them.
 Ticket.json edits from two branches still conflict like source code — by
 design, they are declared data. **Semantic conflicts get a merge session
 in the same trust frame** (`tb merge`): merging is part of solving a
@@ -943,7 +948,7 @@ locator. Before connection the Repository page shows those three steps; after
 connection it renders the same local readiness checks as `tb doctor`. The
 doctor validates Git identity, the committed/ignored source contract, companion
 checkouts and canonical remote heads, resolved configuration, ticket index,
-local integration credential presence, automatic agent hooks/last result, and
+local integration credential presence, synthesis change hooks/last result, and
 worktree cleanliness.
 Every failure includes a concrete next command or Git action, `--json` exposes
 the same result to automation, and `--offline` skips only remote access. Remote
@@ -1053,9 +1058,9 @@ credential values. If selection or authentication is absent in an interactive
 terminal, init opens pi once for `/login` and `/model`, then checks again and
 saves only `pi_bin`, `harness`, `provider`, and `model` in `~/.tbconfig`.
 Non-interactive setup fails actionably rather than installing apparently-working
-automation. `--core-only` is the explicit local opt-out: repository hooks
-remain installed but enqueue nothing on that machine until a later ordinary
-init enables the agent.
+automation. `--core-only` is the explicit local opt-out: repository hooks still
+record ticket changes, while the state hub explains that synthesis is
+unavailable until a later ordinary init enables the agent.
 
 Provider/model selection is also a machine-local control surface, never shared
 ticket configuration. `tb init` accepts optional `--provider` and `--model`
@@ -1136,7 +1141,7 @@ extensions and the CLI are clients of it, never owners of state:
 |---|---|
 | Tracker APIs and field shapes differ | Normalize at a provider-neutral typed batch boundary; publish editable field-path matrices, retain provider metadata, and keep offline/manual JSON intake available. GitHub Issues/Projects is the first packaged transport. |
 | Branch-per-ticket naming is a convention, not guaranteed | Fuzzy matching + explicit manual branch association as fallback; report "no branches found" honestly rather than guessing. |
-| Reports go stale as branches move | Sessions refresh on branch push events; reports are timestamped against a commit SHA so staleness is visible. |
+| Reports go stale as branches move | Git events mark staleness without spending a model call; reports show their timestamp and commits since, and the state hub offers Update synthesis. |
 
 ## 8. Non-goals (v1)
 

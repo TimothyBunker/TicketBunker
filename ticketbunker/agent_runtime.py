@@ -488,7 +488,7 @@ def state(repo: Path | None = None) -> dict[str, Any]:
             "ready": True,
             "enabled": False,
             "status": "disabled",
-            "summary": "Automatic agent execution is disabled on this machine.",
+            "summary": "Synthesis execution is disabled on this machine.",
             "action": "run tb init without --core-only to configure it",
         }
     runtime = discover()

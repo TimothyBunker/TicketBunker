@@ -1,10 +1,10 @@
-"""Automatic agent refreshes driven by Git lifecycle events.
+"""User-requested synthesis with lightweight Git lifecycle tracking.
 
-Git hooks must stay fast and must never make a commit, checkout, merge, or
-rebase depend on an agent provider.  A hook therefore records the newest
-ticket-branch state below ``.git`` and starts a detached worker.  The worker
-coalesces bursts of events, refreshes deterministic observations first, then
-runs the ordinary gated agent pipeline.  No alternate publish path exists.
+Git hooks must stay fast and must never spend an agent call.  They record the
+newest ticket-branch state below ``.git`` so the viewer can explain that work
+changed after the last synthesis.  Only an explicit user request queues the
+detached worker, which refreshes deterministic observations before running the
+ordinary gated agent pipeline.  No alternate publish path exists.
 """
 
 from __future__ import annotations
@@ -38,6 +38,8 @@ HOOK_NAMES = ("post-checkout", "post-commit", "post-merge", "post-rewrite")
 DEBOUNCE_SECONDS = 1.0
 STATE_DIR = "ticketbunker/automatic-agent"
 FINGERPRINT_FILE = "fingerprints.json"
+CHANGE_FILE = "changes.json"
+RUNNING_FILE = "running.json"
 
 
 def _now() -> str:
@@ -79,6 +81,11 @@ def _state_dir(repo: Path) -> Path:
     return _git_dir(repo) / STATE_DIR
 
 
+def log_path(repo: Path) -> Path:
+    """Return the exact machine-local synthesis log path."""
+    return _state_dir(Path(repo).resolve()) / "agent.log"
+
+
 def _launcher() -> list[str]:
     # Pin the hook to the installed/frozen command so GUI Git does not depend
     # on shell activation or a source checkout.
@@ -112,7 +119,7 @@ def _hook_body(event: str, original: Path) -> str:
 
 
 def install(repo: Path) -> dict[str, list[str]]:
-    """Install all automatic-agent hooks while preserving foreign hooks."""
+    """Install lifecycle tracking hooks while preserving foreign hooks."""
     repo = Path(repo).resolve()
     hooks = _hooks_dir(repo)
     hooks.mkdir(parents=True, exist_ok=True)
@@ -362,20 +369,24 @@ def _record_input_fingerprint(
     bunker: Path,
     branch: str,
     fingerprint: str,
+    head: str,
 ) -> None:
+    target = _state_dir(Path(repo).resolve())
+    target.mkdir(parents=True, exist_ok=True)
     state = _fingerprints(repo)
     branches = state.setdefault("branches", {})
     branches[_fingerprint_key(bunker, branch)] = {
         "fingerprint": fingerprint,
+        "head": head,
         "published_at": _now(),
     }
-    _write_json(_state_dir(Path(repo).resolve()) / FINGERPRINT_FILE, state)
+    _write_json(target / FINGERPRINT_FILE, state)
 
 
 def _spawn_worker(repo: Path) -> None:
     state = _state_dir(repo)
     state.mkdir(parents=True, exist_ok=True)
-    log = (state / "agent.log").open("ab")
+    log = log_path(repo).open("ab")
     env = dict(os.environ)
     # A PyInstaller one-file parent removes its extraction directory on exit.
     # The detached worker outlives that parent, so it must unpack independently.
@@ -400,7 +411,7 @@ def _spawn_worker(repo: Path) -> None:
 
 
 def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
-    """Coalesce one Git event and ensure a background worker exists."""
+    """Coalesce one explicit synthesis request and start its worker."""
     repo = Path(repo).resolve()
     selected = config.load().get("agent") or {}
     if isinstance(selected, dict) and selected.get("enabled") is False:
@@ -439,6 +450,42 @@ def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
     if spawn:
         _spawn_worker(repo)
     return {"queued": True, **payload}
+
+
+def record_change(repo: Path, event: str) -> dict[str, Any]:
+    """Record a Git lifecycle change without queuing or invoking an agent."""
+    repo = Path(repo).resolve()
+    branch, status = _git(repo, "branch", "--show-current")
+    if status != 0 or not branch:
+        return {"recorded": False, "reason": "detached_or_missing_branch"}
+    bunker = resolve_bunker(repo, branch)
+    if bunker is None:
+        return {"recorded": False, "reason": "branch_has_no_ticket", "branch": branch}
+    head, _ = _git(repo, "rev-parse", "HEAD")
+    state = _state_dir(repo)
+    path = state / CHANGE_FILE
+    with _locked_file(state / "changes.lock"):
+        prior: dict[str, Any] = {}
+        if path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                prior = loaded if isinstance(loaded, dict) else {}
+            except (OSError, ValueError):
+                prior = {}
+        same_target = prior.get("branch") == branch and prior.get("head") == head
+        events = set(prior.get("events") or []) if same_target else set()
+        events.add(event)
+        payload = {
+            "schema_version": 1,
+            "repo": str(repo),
+            "bunker": str(bunker.resolve()),
+            "branch": branch,
+            "head": head,
+            "events": sorted(events),
+            "changed_at": _now(),
+        }
+        _write_json(path, payload)
+    return {"recorded": True, **payload}
 
 
 def _claim(repo: Path) -> dict[str, Any] | None:
@@ -527,18 +574,17 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     bunker = Path(str(payload.get("bunker") or ""))
     current, status = _git(repo, "branch", "--show-current")
     if status != 0 or current != branch:
-        return False, f"branch moved to {current or 'detached HEAD'} before refresh; the next checkout will retry"
+        return False, f"branch moved to {current or 'detached HEAD'} before synthesis; switch back and retry"
     head, _ = _git(repo, "rev-parse", "HEAD")
     if head != payload.get("head"):
-        enqueue(repo, "head-advanced", spawn=False)
-        return False, "HEAD advanced while the event was queued; coalesced the newer state"
+        return False, "HEAD changed before synthesis started; press Update synthesis to use the newer state"
     profile = _profile(repo, bunker, branch)
     base = _launcher()
     refresh = [*base, "refresh", "--repo", str(repo), "--quiet", "--strict"]
     env = _cli_env()
     refreshed = subprocess.run(refresh, cwd=str(repo), env=env)
     if refreshed.returncode != 0:
-        return False, "deterministic refresh failed; no agent session was published"
+        return False, "deterministic refresh failed; no synthesis was published"
     fingerprint = input_fingerprint(repo, bunker, branch, head=head)
     prior = synthesis_input_state(repo, bunker, branch)
     if prior.get("status") == "current" and prior.get("published") == fingerprint:
@@ -568,9 +614,9 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     if completed.returncode != 0:
         latest, _ = _git(repo, "rev-parse", "HEAD")
         if latest and latest != payload.get("head"):
-            enqueue(repo, "head-advanced", spawn=False)
-        return False, f"automatic {profile['harness']} agent session failed; inspect the local agent log"
-    _record_input_fingerprint(repo, bunker, branch, fingerprint)
+            return False, "HEAD changed during synthesis; press Update synthesis to use the newer state"
+        return False, f"{profile['harness']} synthesis failed"
+    _record_input_fingerprint(repo, bunker, branch, fingerprint, head)
     return True, f"published {branch} through {profile['harness']}"
 
 
@@ -619,13 +665,24 @@ def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = F
                         return 1
                     continue
             ledger = Ledger(layout.paths(bunker)["ledger"])
+            running = {
+                "status": "running",
+                "branch": payload.get("branch"),
+                "head": payload.get("head"),
+                "events": payload.get("events") or [],
+                "started_at": _now(),
+            }
+            _write_json(state / RUNNING_FILE, running)
             ledger.event(
-                "automatic_agent_started",
+                "synthesis_started",
                 branch=payload.get("branch"),
                 head=payload.get("head"),
                 events=payload.get("events") or [],
             )
-            ok, detail = _run_pipeline(repo, payload)
+            try:
+                ok, detail = _run_pipeline(repo, payload)
+            finally:
+                (state / RUNNING_FILE).unlink(missing_ok=True)
             result = {
                 "status": "pass" if ok else "fail",
                 "branch": payload.get("branch"),
@@ -634,12 +691,12 @@ def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = F
                 "detail": detail,
                 "finished_at": _now(),
             }
-            ledger.event("automatic_agent_finished", **result)
+            ledger.event("synthesis_finished", **result)
             if (repo / layout.LOCATOR_FILE).exists():
                 try:
                     from . import project
 
-                    project.publish_data(repo, f"Automatic agent: {payload.get('branch')}")
+                    project.publish_data(repo, f"Synthesize {payload.get('branch')}")
                 except Exception as exc:
                     result["publication_warning"] = str(exc)
             _write_json(state / "last.json", result)
@@ -660,6 +717,8 @@ def read_state(repo: Path) -> dict[str, Any]:
     value: dict[str, Any] = {}
     last = state / "last.json"
     queue = state / "queue.json"
+    running = state / RUNNING_FILE
+    changes = state / CHANGE_FILE
     if last.exists():
         try:
             loaded = json.loads(last.read_text(encoding="utf-8"))
@@ -674,7 +733,21 @@ def read_state(repo: Path) -> dict[str, Any]:
                 value["queued"] = loaded
         except (OSError, ValueError):
             pass
-    log = state / "agent.log"
+    if running.exists():
+        try:
+            loaded = json.loads(running.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                value["running"] = loaded
+        except (OSError, ValueError):
+            pass
+    if changes.exists():
+        try:
+            loaded = json.loads(changes.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                value["changes"] = loaded
+        except (OSError, ValueError):
+            pass
+    log = log_path(repo)
     if log.exists():
         value["log"] = str(log)
     return value

@@ -143,8 +143,60 @@ def _same_branch(left: str, right: str) -> bool:
     return left.removeprefix("origin/") == right.removeprefix("origin/")
 
 
-def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, str]:
-    """Describe published synthesis and automatic work in user-facing terms."""
+def _relative_age(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return ""
+    seconds = max(0, int((datetime.datetime.now(datetime.timezone.utc) - parsed).total_seconds()))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    if days < 30:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    months = days // 30
+    return f"{months} month{'s' if months != 1 else ''} ago"
+
+
+def _commit_changes(root: Path, previous: str, branch: str) -> int | None:
+    if not previous or not branch:
+        return None
+    proc = subprocess.run(
+        ["git", "-C", str(Path(root).resolve()), "rev-list", "--count", f"{previous}..{branch}"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return int(proc.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _synthesis_detail(updated_at: str, changes: int | None, fallback: str) -> str:
+    age = _relative_age(updated_at)
+    if age and changes is not None:
+        if changes == 0:
+            return f"Updated {age} · no commits since."
+        return f"Updated {age} · {changes} commit{'s' if changes != 1 else ''} since."
+    if age:
+        return f"Updated {age}."
+    return fallback
+
+
+def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
+    """Describe user-requested synthesis, age, and changes since publication."""
     branch = _current_branch(root)
     selected = next(
         (item for item in ticket.branches if branch and _same_branch(item.name, branch)),
@@ -155,62 +207,106 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, str]:
     except (OSError, ValueError):
         automatic = {}
     queued = automatic.get("queued") or {}
+    running = automatic.get("running") or {}
     last = automatic.get("last") or {}
-    if isinstance(queued, dict) and branch and queued.get("branch") == branch:
+    active = running if isinstance(running, dict) and running.get("branch") == branch else queued
+    if isinstance(active, dict) and branch and active.get("branch") == branch:
         return {
             "status": "updating",
-            "label": "Synthesis updating",
-            "detail": f"TicketBunker is checking {branch}.",
+            "label": "Synthesizing",
+            "detail": f"TicketBunker is updating {branch} because you requested it.",
             "action": "",
         }
     if isinstance(last, dict) and selected and last.get("branch") == branch and last.get("status") == "fail":
         return {
             "status": "stopped",
-            "label": "Analysis stopped",
-            "detail": str(last.get("detail") or "The last ticket analysis did not finish."),
-            "action": "Retry analysis",
+            "label": "Synthesis stopped",
+            "detail": str(last.get("detail") or "The last synthesis did not finish."),
+            "action": "Retry synthesis",
+            "command": "synthesize",
+            "log_url": "/truth/agent-log",
         }
     if selected is not None:
         current = autoagent.synthesis_input_state(root, ticket.bunker, branch)
         status = str(current.get("status") or "")
+        report = next(
+            (item for item in ticket.reports if _same_branch(item.branch, branch)),
+            None,
+        )
+        updated_at = str(current.get("published_at") or (report.verified_at if report else ""))
+        previous = str(report.verified_commit if report else "")
+        changes = _commit_changes(root, previous, branch)
+        common = {"updated_at": updated_at, "changes": changes}
         if status == "current":
             return {
                 "status": "current",
                 "label": "Synthesis current",
-                "detail": f"The published report matches {branch}.",
+                "detail": _synthesis_detail(updated_at, changes, f"The synthesis matches {branch}."),
                 "action": "",
+                **common,
             }
         if status == "missing":
+            available = selected.ahead
+            detail = f"{branch} has not been synthesized yet."
+            if available is not None:
+                detail += f" {available} commit{'s' if available != 1 else ''} on this branch."
             return {
                 "status": "missing",
-                "label": "No synthesis published",
-                "detail": f"{branch} has no accepted report yet.",
-                "action": "Generate synthesis",
+                "label": "Not synthesized",
+                "detail": detail,
+                "action": "Synthesize",
+                "command": "synthesize",
+                "changes": available,
+            }
+        if (
+            status == "unchecked"
+            and report is not None
+            and report.verified_commit
+            and str(current.get("head") or "").startswith(report.verified_commit)
+            and not report.predates_development
+        ):
+            return {
+                "status": "current",
+                "label": "Synthesis current",
+                "detail": _synthesis_detail(updated_at, changes, f"The synthesis matches {branch}."),
+                "action": "",
+                **common,
             }
         return {
             "status": "outdated",
-            "label": "Synthesis outdated",
-            "detail": f"{branch} changed after its last checked inputs.",
+            "label": "Synthesis needs update",
+            "detail": _synthesis_detail(
+                updated_at,
+                changes,
+                f"{branch} or its ticket context changed after the last synthesis.",
+            ),
             "action": "Update synthesis",
+            "command": "synthesize",
+            **common,
         }
     if not ticket.reports:
         return {
             "status": "missing",
-            "label": "No synthesis published",
-            "detail": "Open a ticket branch to generate its first report.",
+            "label": "Not synthesized",
+            "detail": "Switch to a ticket branch, then press Synthesize.",
             "action": "",
         }
-    if any(report.stale_in_master or report.predates_development for report in ticket.reports):
+    stale = next(
+        (report for report in ticket.reports if report.stale_in_master or report.predates_development),
+        None,
+    )
+    if stale is not None:
         return {
             "status": "outdated",
-            "label": "Synthesis outdated",
-            "detail": "At least one branch developed after its published report.",
-            "action": "Open that branch to update synthesis",
+            "label": "Synthesis needs update",
+            "detail": f"Switch to {stale.branch}, then press Update synthesis.",
+            "action": "",
         }
+    latest = max((report.verified_at for report in ticket.reports if report.verified_at), default="")
     return {
         "status": "current",
         "label": "Synthesis current",
-        "detail": "Published branch reports match the cached observations.",
+        "detail": _synthesis_detail(latest, None, "Published branch reports match cached Git state."),
         "action": "",
     }
 
@@ -287,21 +383,6 @@ def record_companion_publication(
     _update(root, project_key, ticket_id, companion=companion)
 
 
-def _synthesis_queue(
-    root: Path,
-    ticket: TicketSnapshot,
-    *,
-    force: bool = False,
-) -> dict[str, Any]:
-    branch = _current_branch(root)
-    if not branch or not any(_same_branch(item.name, branch) for item in ticket.branches):
-        return {"queued": False, "reason": "current_branch_has_another_ticket"}
-    current = autoagent.synthesis_input_state(root, ticket.bunker, branch)
-    if current.get("status") == "current" and not force:
-        return {"queued": False, "reason": "inputs_unchanged", "branch": branch}
-    return autoagent.enqueue(root, "ticket-refs-changed" if force else "ticket-open")
-
-
 @commands.register("truth.refresh")
 def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
     root = Path(context.project_root).resolve()
@@ -309,12 +390,6 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
     ticket_id = str(payload.get("ticket") or "").strip()
     if not ticket_id:
         raise commands.CommandRejected("ticket_required", "Choose a ticket to refresh.")
-
-    try:
-        before_ticket = _ticket(root, project_key, ticket_id)
-        before_revision = _content_revision(root, before_ticket)
-    except (FileNotFoundError, KeyError, ValueError, commands.CommandRejected):
-        before_revision = ""
 
     companion: dict[str, str]
     if project.load_locator(root) is not None:
@@ -372,15 +447,9 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
             "checked_at": _now(),
         }
     # Resolve branches again from the now-current local and remote-tracking
-    # refs. This remains a local read and lets the synthesis queue see a branch
-    # discovered by the fetch that just completed.
+    # refs. This remains a local read. Synthesis is a separate user action.
     ticket = _ticket(root, project_key, ticket_id, live_branches=True)
     content_revision = _content_revision(root, ticket)
-    queued = _synthesis_queue(
-        root,
-        ticket,
-        force=bool(before_revision and before_revision != content_revision),
-    )
     result = {
         "companion": companion,
         "git": git_state,
@@ -388,10 +457,48 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
         "content_revision": content_revision,
         "refresh": "idle",
         "completed_at": _now(),
-        "agent": queued,
     }
     _update(root, project_key, ticket_id, **result)
     return result
+
+
+@commands.register("truth.synthesize")
+def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    """Queue synthesis only after an explicit user action."""
+    root = Path(context.project_root).resolve()
+    project_key = str(payload.get("project") or "").strip()
+    ticket_id = str(payload.get("ticket") or "").strip()
+    if not ticket_id:
+        raise commands.CommandRejected("ticket_required", "Choose a ticket to synthesize.")
+    ticket = _ticket(root, project_key, ticket_id, live_branches=True)
+    branch = _current_branch(root)
+    branches = [item.name for item in ticket.branches]
+    if not branch or not any(_same_branch(name, branch) for name in branches):
+        available = ", ".join(branches[:3]) or "a branch assigned to this ticket"
+        raise commands.CommandRejected(
+            "synthesis_branch_required",
+            f"Synthesis runs against the checked-out ticket branch.\n"
+            f"Next: Switch to {available}, then press Synthesize again.",
+        )
+    automatic = autoagent.read_state(root)
+    for key in ("queued", "running"):
+        active = automatic.get(key) or {}
+        if isinstance(active, dict) and active.get("branch") == branch:
+            return {"queued": False, **state(root, project_key, ticket_id)}
+    queued = autoagent.enqueue(root, "user-requested-synthesis")
+    if not queued.get("queued"):
+        if queued.get("reason") == "agent_disabled":
+            raise commands.CommandRejected(
+                "synthesis_disabled",
+                "Synthesis is disabled on this machine.\n"
+                "Next: Run tb init without --core-only, then press Synthesize again.",
+            )
+        raise commands.CommandRejected(
+            "synthesis_not_started",
+            "Synthesis could not start for the checked-out branch.\n"
+            "Next: Run tb agent status, resolve the named issue, then retry.",
+        )
+    return {"queued": True, **state(root, project_key, ticket_id)}
 
 
 def _background(root: Path, project_key: str, ticket_id: str) -> None:
@@ -498,6 +605,7 @@ def command_queue(context: commands.CommandContext, payload: dict[str, Any]) -> 
 __all__ = [
     "command_queue",
     "command_refresh",
+    "command_synthesize",
     "queue_refresh",
     "record_companion_publication",
     "state",

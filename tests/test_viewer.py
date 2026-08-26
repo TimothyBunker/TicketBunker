@@ -280,6 +280,40 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-coworker-form', page)
         self.assertIn("Accepting updates the named child reports through the report gate", page)
 
+    def test_state_hub_uses_an_explicit_synthesis_action_and_log_link(self) -> None:
+        value = {
+            "content_revision": "revision",
+            "refresh": "idle",
+            "companion": {"status": "current", "label": "Companion current", "detail": "Ready", "action": ""},
+            "git": {"status": "current", "label": "Git refs fetched", "detail": "Ready", "action": ""},
+            "synthesis": {
+                "status": "stopped",
+                "label": "Synthesis stopped",
+                "detail": "pi synthesis failed",
+                "action": "Retry synthesis",
+                "command": "synthesize",
+                "log_url": "/truth/agent-log",
+            },
+        }
+        with mock.patch.object(viewer.truth, "state", return_value=value):
+            rendered = page_ticket(self.root, "TB-9", "fingerprint", work_token="csrf-token")
+
+        self.assertIsNotNone(rendered)
+        page = rendered.decode("utf-8")
+        self.assertIn('data-truth-command="synthesize"', page)
+        self.assertIn(">Retry synthesis</button>", page)
+        self.assertIn('href="/truth/agent-log">View log</a>', page)
+
+    def test_synthesis_log_page_shows_exact_path_and_escapes_output(self) -> None:
+        log = self.root / "agent.log"
+        log.write_text("failed <private>\n", encoding="utf-8")
+        with mock.patch.object(viewer.autoagent, "log_path", return_value=log):
+            page = viewer._agent_log_page(self.root, "fingerprint").decode("utf-8")
+
+        self.assertIn(str(log), page)
+        self.assertIn("failed &lt;private&gt;", page)
+        self.assertNotIn("failed <private>", page)
+
     def test_coworker_http_routes_use_shared_backend_commands(self) -> None:
         server = serve(self.root, 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -336,6 +370,40 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(chat["command"], "coworker.chat")
         self.assertEqual(dispatched.call_args.args[0], "coworker.chat")
         self.assertEqual(dispatched.call_args.args[1]["message"], "Explain this summary.")
+        self.assertEqual(dispatched.call_args.args[2].transport, "http")
+
+    def test_synthesis_http_route_uses_the_shared_backend_command(self) -> None:
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        token = server.RequestHandlerClass.token
+        try:
+            with mock.patch.object(
+                commands,
+                "dispatch",
+                return_value={"ok": True, "queued": True},
+            ) as dispatched:
+                request = Request(
+                    f"{base}/truth/synthesize",
+                    data=json.dumps({"ticket": "TB-9", "project": ""}).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-TicketBunker-Token": token,
+                    },
+                    method="POST",
+                )
+                with urlopen(request) as response:
+                    value = json.loads(response.read().decode("utf-8"))
+                    status = response.status
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(status, 202)
+        self.assertTrue(value["queued"])
+        self.assertEqual(dispatched.call_args.args[0], "truth.synthesize")
         self.assertEqual(dispatched.call_args.args[2].transport, "http")
 
     def test_index_uses_the_same_ticket_database(self) -> None:

@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, types
+from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -195,7 +195,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"found the committed locator on origin/{result['source_branch']}; switched to {result['source_branch']}")
         print(f"connected {result['project']} to {result['bunker_repository']}")
         print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
-        print("automatic agent: checkout, commit, merge, and rebase hooks ready")
+        print("ticket tracking: checkout, commit, merge, and rebase hooks ready; synthesis runs on request")
         agent_status = _finish_agent_setup(source_root, args.core_only, args.provider, args.model)
         if agent_status == 0:
             print("ready: tb doctor")
@@ -203,7 +203,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"initialized {result['project']} in {result['bunker_repository']}")
     print(f"configuration: {result['config_branch']}; data: {result['data_branch']}")
     print(f"locator: {result['locator']}")
-    print("automatic agent: checkout, commit, merge, and rebase hooks ready")
+    print("ticket tracking: checkout, commit, merge, and rebase hooks ready; synthesis runs on request")
     agent_status = _finish_agent_setup(source_root, args.core_only, args.provider, args.model)
     if agent_status == 0:
         print("next: commit .ticketbunker.json and .gitignore, then run 'tb doctor'")
@@ -218,7 +218,7 @@ def _finish_agent_setup(
 ) -> int:
     if core_only:
         agent_runtime.set_core_only()
-        print("agent: core-only on this machine; Git hooks stay idle until a later tb init")
+        print("agent: core-only on this machine; synthesis stays unavailable until a later tb init")
         print("enable or choose a model later: tb agent model")
         return 0
     try:
@@ -1468,12 +1468,12 @@ def cmd_hooks(args: argparse.Namespace) -> int:
             return 0
         result = autoagent.install(repo)
     except (OSError, ValueError) as exc:
-        print(f"error: could not install automatic agent hooks: {exc}", file=sys.stderr)
+        print(f"error: could not install ticket change hooks: {exc}", file=sys.stderr)
         return 1
     import subprocess
 
     subprocess.run(["git", "-C", str(repo), "config", "merge.ours.driver", "true"], capture_output=True)
-    print(f"installed: {', '.join(result['installed'])} — Git activity now refreshes the agent automatically")
+    print(f"installed: {', '.join(result['installed'])} — Git activity now marks synthesis changes")
     if result["preserved"]:
         print(f"preserved and chained existing hooks: {', '.join(result['preserved'])}")
     return 0
@@ -1481,13 +1481,13 @@ def cmd_hooks(args: argparse.Namespace) -> int:
 
 def cmd_git_event(args: argparse.Namespace) -> int:
     try:
-        result = autoagent.enqueue(Path(args.repo), args.event)
+        result = autoagent.record_change(Path(args.repo), args.event)
     except (OSError, ValueError) as exc:
         if not args.quiet:
-            print(f"automatic agent event skipped: {exc}", file=sys.stderr)
+            print(f"ticket change event skipped: {exc}", file=sys.stderr)
         return 0
-    if not args.quiet and result.get("queued"):
-        print(f"queued automatic agent refresh for {result['branch']} ({args.event})")
+    if not args.quiet and result.get("recorded"):
+        print(f"recorded synthesis change for {result['branch']} ({args.event})")
     return 0
 
 
@@ -1497,11 +1497,33 @@ def cmd_agent_worker(args: argparse.Namespace) -> int:
     except Exception as exc:  # detached workers report locally and never affect Git
         try:
             state = autoagent.read_state(Path(args.repo))
-            log = state.get("log") or "the automatic agent log below .git"
+            log = state.get("log") or str(autoagent.log_path(Path(args.repo)))
         except Exception:
-            log = "the automatic agent log below .git"
-        print(f"automatic agent worker failed: {exc}; inspect {log}", file=sys.stderr)
+            log = str(Path(args.repo).resolve() / ".git" / autoagent.STATE_DIR / "agent.log")
+        print(f"synthesis worker failed: {exc}; log: {log}", file=sys.stderr)
         return 1
+
+
+def cmd_synthesize(args: argparse.Namespace) -> int:
+    root = layout.find_root() or project_mod.find_source_root()
+    if root is None:
+        print("error: run tb synthesize inside a TicketBunker project", file=sys.stderr)
+        return 1
+    locator = project_mod.load_locator(root) or {}
+    try:
+        result = commands.dispatch(
+            "truth.synthesize",
+            {"project": str(locator.get("project") or ""), "ticket": args.ticket},
+            commands.CommandContext(root, transport="cli"),
+        )
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 1
+    synthesis = result.get("synthesis") or {}
+    print(str(synthesis.get("label") or "Synthesis requested"))
+    if synthesis.get("detail"):
+        print(str(synthesis["detail"]))
+    return 0
 
 
 def cmd_view(args: argparse.Namespace) -> int:
@@ -1744,21 +1766,21 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=8378, help="connection editor localhost port (default: 8378)")
     s.add_argument("--no-open", action="store_true", help="do not open the connection editor in a browser")
     s.add_argument("--core-only", action="store_true",
-                   help="connect without configuring local automatic agent execution")
+                   help="connect without configuring local synthesis execution")
     s.add_argument("--provider", default=None,
                    help="optional machine-local Pi provider selection")
     s.add_argument("--model", default=None,
                    help="optional machine-local Pi model selection")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("agent", help="show or change this machine's automatic agent")
+    s = sub.add_parser("agent", help="show or change this machine's synthesis agent")
     agent_sub = s.add_subparsers(dest="agent_command", required=True)
 
     a = agent_sub.add_parser("status", help="show the active runtime, provider, model, and login state")
     a.add_argument("--json", action="store_true")
     a.set_defaults(fn=cmd_agent)
 
-    a = agent_sub.add_parser("model", help="change the automatic agent model")
+    a = agent_sub.add_parser("model", help="change the synthesis model")
     a.add_argument("--provider", default=None,
                    help="provider override; omitted values retain the current selection")
     a.add_argument("--model", default=None,
@@ -1846,7 +1868,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_refresh)
 
-    s = sub.add_parser("hooks", help="inspect or repair the automatic Git-event agent hooks installed by tb init")
+    s = sub.add_parser("synthesize", help="request synthesis for the checked-out ticket branch")
+    s.add_argument("ticket", help="ticket ID")
+    s.set_defaults(fn=cmd_synthesize)
+
+    s = sub.add_parser("hooks", help="inspect or repair the Git change-tracking hooks installed by tb init")
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--install", action="store_true")
@@ -2019,7 +2045,7 @@ def main(argv: list[str] | None = None) -> int:
     result = args.fn(args)
     source_root = project_mod.find_source_root()
     if (
-        args.cmd not in {"doctor", "agent"}
+        args.cmd not in {"doctor", "agent", "synthesize"}
         and not args.cmd.startswith("_")
         and source_root is not None
         and project_mod.load_locator(source_root) is not None

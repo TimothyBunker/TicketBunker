@@ -197,28 +197,29 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
 
     automation = autoagent.hook_status(root)
     if automation["ready"]:
-        summary = "Checkout, commit, merge, and rebase events update the agent automatically."
+        summary = "Checkout, commit, merge, and rebase events mark synthesis changes without calling the agent."
         last = (automation.get("state") or {}).get("last") or {}
         if last.get("status") == "fail":
+            log = (automation.get("state") or {}).get("log") or str(autoagent.log_path(root))
             checks.append(
                 _check(
                     "hooks",
-                    "Automatic agent",
+                    "Synthesis",
                     "warn",
-                    f"Hooks are ready, but the last refresh failed: {last.get('detail') or 'unknown failure'}.",
-                    f"inspect {(automation.get('state') or {}).get('log') or 'the automatic agent log below .git'}; ordinary Git activity retries it",
+                    f"Change tracking is ready, but the last requested synthesis failed: {last.get('detail') or 'unknown failure'}.",
+                    f"open {log}; then retry from the ticket state hub",
                 )
             )
         else:
-            checks.append(_check("hooks", "Automatic agent", "pass", summary))
+            checks.append(_check("hooks", "Synthesis tracking", "pass", summary))
     else:
         missing = ", ".join(automation["missing"])
         checks.append(
             _check(
                 "hooks",
-                "Automatic agent",
+                "Synthesis tracking",
                 "warn",
-                f"Git-event automation is incomplete; missing: {missing}.",
+                f"Git change tracking is incomplete; missing: {missing}.",
                 "tb init",
             )
         )

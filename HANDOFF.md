@@ -42,12 +42,12 @@ exercise unless a live boundary is explicitly called out.
   locator it connects or refreshes a collaborator checkout. `tb setup` remains
   only as an alias.
 - Every successful `tb init` installs checkout, commit, merge, and rewrite Git
-  hooks. They preserve and chain existing hooks, enqueue a detached automatic
-  agent refresh, and never wait on a provider. Events at the same/newer HEAD
-  coalesce; the worker always refreshes deterministic observations before the
-  ordinary lint/anchor-gated agent run and companion publication. A post-agent
-  HEAD check keeps superseded forms unpublished. Users do not need `tb run`
-  during ordinary work.
+  hooks. They preserve and chain existing hooks, record the newest ticket
+  branch/HEAD/event/change time below `.git`, and never call a provider or
+  start a worker. The user starts synthesis explicitly from the ticket state
+  hub. That request queues the detached worker, refreshes deterministic
+  observations, then follows the ordinary lint/anchor-gated agent and companion
+  publication path. A post-agent HEAD check keeps superseded forms unpublished.
 - `tb init` also establishes local agent readiness. The normal full release
   discovers its pinned bundled pi runtime, verifies every pi distribution file
   against the bundle manifest, adopts pi's selected provider/model, and calls
@@ -127,6 +127,7 @@ exercise unless a live boundary is explicitly called out.
   remote-tracking refs, and explicit assignments. It works with uncommitted
   source files because it never pulls, rebases, switches, merges, resets, or
   stashes; offline opens keep the rendered ticket and provide a retry action.
+  The background refresh never queues synthesis.
   A branch missing its computed comparison is labeled `Needs Git state`.
 - The localhost Work POST is explicit and CSRF-token protected. Viewer pages
   remain bound to `127.0.0.1`, escape ticket/agent content, disable caching,
@@ -154,8 +155,12 @@ exercise unless a live boundary is explicitly called out.
   trail. Branch selection narrows the view. Before the first report, there is a
   direct empty state rather than a meaningless Combined selector.
 - A Companion / Git refs / Synthesis strip exposes cached, refreshing, current,
-  outdated, stopped, and publication-pending states with direct actions. The
-  browser reloads only when the ticket data or refs revision changes.
+  outdated, stopped, and publication-pending states with direct actions.
+  Synthesis is explicitly started with Synthesize, Update synthesis, or Retry
+  synthesis. The state names the last successful age and commits since when
+  known. A failed run exposes View log; its localhost-only page shows a bounded,
+  escaped tail and the exact `.git/ticketbunker/automatic-agent/agent.log`
+  path. The browser reloads only when ticket data or refs change.
 - One local Pi coworker session exists per user and ticket across every branch.
   The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
   scope. Pi receives only read/search tools. Raw chat stays below `.git`; a
@@ -171,7 +176,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.6 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.7 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -185,12 +190,8 @@ exercise unless a live boundary is explicitly called out.
   explicit override; `--core-only` is the no-download choice.
 - Frozen hooks pin the installed `tb` launcher. Detached one-file workers reset
   their PyInstaller environment so the parent's temporary extraction cleanup
-  cannot strand them. This was exercised from an unpacked release: init
-  verified the bundled pi OAuth/model state, a ticket and convention branch
-  were created, and a Git commit caused the installed detached worker to
-  publish a gated report. The deterministic command stub was used for the
-  report body, so this proves distribution/automation rather than grading pi's
-  live synthesis.
+  cannot strand a user-requested synthesis. Git hooks themselves now record
+  staleness only and do not start that worker.
 
 ### Deterministic product exercise
 
@@ -208,12 +209,12 @@ active/faceted catalog queries, zero-ticket sparse setup, one-ticket
 fetch-on-open, separate convention-named branches, remote reconciliation, two
 clean doctor reports, and the Work UI. Measurements and explicit live-boundary
 caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
-Automatic-agent tests separately cover event coalescing, existing-hook
+Synthesis tests separately cover explicit request coalescing, existing-hook
 preservation/restoration, the gated worker path, frozen-worker isolation,
-durable-input provider skipping, and a real non-blocking post-commit hook with
-the deterministic stub. Focused tests also cover cached-first truth refresh,
+durable-input provider skipping, and a real post-commit hook that records a
+change without publishing. Focused tests also cover cached-first truth refresh,
 private coworker session reuse, read-only Pi tools, and gated child-only report
-updates. The current full suite is 122 tests.
+updates. The current full suite is 128 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
@@ -222,13 +223,13 @@ inspected. This does not replace the HTTP/CSRF tests.
 
 ## Existing agent pipeline
 
-The established agent loop remains green: ticket → branch → Git event → queued
-bootstrap → compose → scaffold → harness → lint/anchor-gated publish → master
-regeneration.
+The established agent loop remains green: ticket → branch → Git event marks
+staleness → user presses Synthesize → queued bootstrap → compose → scaffold →
+harness → lint/anchor-gated publish → master regeneration.
 `tb merge` reconciles components through the same gates. `tb survey REPO --run`
-publishes a gated repository survey. Git hooks now launch coalesced background
-agent refreshes after checkout, commit, merge, and rebase while never blocking
-Git; manual `tb run` is only a diagnostic/recovery surface.
+publishes a gated repository survey. Git hooks record checkout, commit, merge,
+and rebase changes without network or model work. The state-hub action is the
+ordinary synthesis route; `tb run` remains the direct CLI path.
 
 Codex has been live-verified. The bundled pi 0.84.2 runtime and its
 `openai-codex / gpt-5.6-sol` OAuth state have now been verified through pi's

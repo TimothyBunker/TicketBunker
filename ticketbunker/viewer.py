@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import commands, config, coworker, layout, truth, workflow
+from . import autoagent, commands, config, coworker, layout, truth, workflow
 from .api import (
     ReportSnapshot,
     TicketCatalog,
@@ -74,14 +74,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   outline-offset: 3px;
   border-radius: 2px;
 }
-main { max-width: 1320px; margin: 0 auto; padding: 30px 34px 72px; }
+main { width: 100%; min-width: 0; max-width: 1320px; margin: 0 auto; padding: 30px 34px 72px; }
 .crumbs { color: var(--muted); font-size: 12px; margin: 0 0 17px; }
 .crumbs a { color: inherit; }
 .ticket-head { padding-bottom: 18px; }
 .ticket-key { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
 .ticket-project { color: var(--body); }
 h1, h2, h3 { color: var(--fg); }
-h1 { font-size: 26px; line-height: 1.25; letter-spacing: -.018em; margin: 5px 0 15px; max-width: 920px; }
+h1 { min-width: 0; max-width: 920px; margin: 5px 0 15px; font-size: 26px; line-height: 1.25; letter-spacing: -.018em; overflow-wrap: anywhere; }
 h2 { font-size: 16px; line-height: 1.3; margin: 0 0 14px; }
 h3 { font-size: 13px; line-height: 1.35; margin: 0 0 8px; }
 p { margin: 0 0 12px; }
@@ -90,8 +90,8 @@ p { margin: 0 0 12px; }
 .head-badges { flex-wrap: wrap; }
 .head-updated { color: var(--muted); font-size: 12px; }
 .truth-strip {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
   gap: 0;
   margin: 18px 0 0;
@@ -129,7 +129,7 @@ p { margin: 0 0 12px; }
 .truth-item[data-state="missing"] .truth-dot { border-color: var(--danger); background: var(--danger); }
 .truth-copy { min-width: 0; }
 .truth-label { display: block; color: var(--fg); font-weight: 650; }
-.truth-detail { display: block; margin-top: 1px; color: var(--muted); }
+.truth-detail { display: block; min-width: 0; margin-top: 1px; color: var(--muted); overflow-wrap: anywhere; }
 .truth-action {
   min-height: 32px;
   margin: 4px 0 -4px;
@@ -141,6 +141,12 @@ p { margin: 0 0 12px; }
   font-weight: 650;
   text-align: left;
 }
+.truth-log {
+  display: inline-block; margin-top: 4px; margin-left: 10px; color: var(--muted);
+  font-size: .72rem; font-weight: 650; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.truth-log[hidden] { display: none; }
 .truth-action[hidden] { display: none; }
 .truth-action:disabled { color: var(--muted); cursor: wait; }
 .badge {
@@ -658,7 +664,7 @@ li { margin: 3px 0; }
   .project-link { grid-template-columns: 1fr; gap: 3px; }
   .project-meta { text-align: left; }
   .pagination { justify-content: space-between; }
-  .truth-strip { display: grid; }
+  .truth-strip { grid-template-columns: minmax(0, 1fr); }
   .truth-item { min-width: 0; }
   .truth-item + .truth-item { border-left: 0; border-top: 1px solid var(--line); }
   .coworker-panel {
@@ -867,7 +873,13 @@ function updateTruth(value) {
     if (action) {
       action.textContent = current.action || 'Refresh';
       action.hidden = !current.action;
-      action.disabled = value.refresh === 'running';
+      action.dataset.truthCommand = current.command || 'refresh';
+      action.disabled = value.refresh === 'running' || current.status === 'updating';
+    }
+    const log = item.querySelector('[data-truth-log]');
+    if (log) {
+      log.href = current.log_url || '/truth/agent-log';
+      log.hidden = !current.log_url;
     }
   });
 }
@@ -909,7 +921,10 @@ truthStrip?.addEventListener('click', async (event) => {
   if (!action) return;
   truthStrip.querySelectorAll('[data-truth-action]').forEach((button) => { button.disabled = true; });
   try {
-    const value = await jsonRequest('/truth/refresh', {
+    const endpoint = action.dataset.truthCommand === 'synthesize'
+      ? '/truth/synthesize'
+      : '/truth/refresh';
+    const value = await jsonRequest(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': truthStrip.dataset.token},
       body: JSON.stringify({project: truthStrip.dataset.project || '', ticket: truthStrip.dataset.ticket})
@@ -2246,12 +2261,18 @@ def _truth_bar(
         label = str(current.get("label") or key.capitalize())
         detail = str(current.get("detail") or "")
         action = str(current.get("action") or "")
+        command = str(current.get("command") or "refresh")
+        log_url = str(current.get("log_url") or "")
         action_html = ""
         if token:
             hidden = "" if action else " hidden"
+            log_hidden = "" if log_url else " hidden"
             action_html = (
-                f'<button class="truth-action" type="button" data-truth-action{hidden}>'
+                f'<button class="truth-action" type="button" data-truth-action '
+                f'data-truth-command="{html.escape(command, quote=True)}"{hidden}>'
                 f'{html.escape(action or "Refresh")}</button>'
+                f'<a class="truth-log" data-truth-log href="{html.escape(log_url or "/truth/agent-log", quote=True)}"'
+                f'{log_hidden}>View log</a>'
             )
         items.append(
             f'<div class="truth-item" data-truth-item="{key}" data-state="{html.escape(status, quote=True)}">'
@@ -2267,6 +2288,25 @@ def _truth_bar(
         f'data-revision="{html.escape(str(value.get("content_revision") or ""), quote=True)}">'
         f'{"".join(items)}</section>'
     )
+
+
+def _agent_log_page(root: Path, fp: str) -> bytes:
+    path = autoagent.log_path(root)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - 65536))
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()[-200:]
+        text = "\n".join(lines)
+    except OSError:
+        text = "No synthesis log has been written on this machine yet."
+    body = (
+        '<div class="crumbs"><a href="/">Tickets</a></div>'
+        '<article class="ticket-main ticket-page"><h1>Synthesis log</h1>'
+        f'<p class="muted">{html.escape(str(path))}</p>'
+        f'<pre><code>{html.escape(text)}</code></pre></article>'
+    )
+    return _page("Synthesis log — TicketBunker", body, fp)
 
 
 def _coworker_surface(
@@ -2634,6 +2674,9 @@ class _Handler(BaseHTTPRequestHandler):
             value = truth.state(root, str(params.get("project") or ""), str(params.get("ticket") or ""))
             self._send_json(200, {"ok": True, **value})
             return
+        if path == "/truth/agent-log":
+            self._send(200, _agent_log_page(root, fp))
+            return
         if path == "/coworker/state":
             value = coworker.state(
                 root,
@@ -2696,6 +2739,7 @@ class _Handler(BaseHTTPRequestHandler):
         commands_by_path = {
             "/work": "workflow.start",
             "/truth/refresh": "truth.queue",
+            "/truth/synthesize": "truth.synthesize",
             "/coworker/chat": "coworker.chat",
             "/coworker/proposal/accept": "coworker.proposal.accept",
             "/coworker/proposal/dismiss": "coworker.proposal.dismiss",
@@ -2742,7 +2786,7 @@ class _Handler(BaseHTTPRequestHandler):
             payload,
             commands.CommandContext(self.root, transport="http"),
         )
-        self._send_json(202 if command == "truth.queue" else 200, result)
+        self._send_json(202 if command in {"truth.queue", "truth.synthesize"} else 200, result)
 
     def _send_json(self, code: int, value: Mapping[str, Any]) -> None:
         self._send(
