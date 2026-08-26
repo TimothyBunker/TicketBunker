@@ -82,7 +82,7 @@ class TicketWorkflowTests(unittest.TestCase):
         self.assertEqual(session["user"], "Ada")
         self.assertEqual(session["baseline"], "ecs")
         opened = api.TicketCatalog(self.source).get_ticket("ECS", "ECS-4")
-        self.assertEqual([(branch.name, branch.state) for branch in opened.branches], [(result["branch"], "unobserved")])
+        self.assertEqual([(branch.name, branch.state) for branch in opened.branches], [(result["branch"], "comparison-missing")])
 
     def test_dirty_worktree_is_rejected_before_checkout(self) -> None:
         (self.source / "dirty.txt").write_text("unfinished\n", encoding="utf-8")
@@ -151,7 +151,7 @@ class TicketWorkflowTests(unittest.TestCase):
         self.assertEqual(result["base_branches"][0], "ecs")
         self.assertEqual(result["current_branch"], "ecs")
 
-    def test_ticket_open_fetches_remote_and_local_branches_without_rebase(self) -> None:
+    def test_ticket_refresh_fetches_remote_and_local_branches_without_rebase(self) -> None:
         run_git(self.source, "branch", "Ada/ECS-4-local", "ecs")
         collaborator = Path(self.tmp.name) / "collaborator"
         subprocess.run(
@@ -165,11 +165,21 @@ class TicketWorkflowTests(unittest.TestCase):
         dirty.write_text("keep this work\n", encoding="utf-8")
         before = run_git(self.source, "branch", "--show-current")
 
+        cached = api.TicketCatalog(self.source).get_ticket("ECS", "ECS-4")
+        cached_branches = {branch.name: branch.state for branch in cached.branches}
+        self.assertEqual(cached_branches["Ada/ECS-4-local"], "comparison-missing")
+        self.assertNotIn("origin/Lin/ECS-4-remote", cached_branches)
+
+        commands.dispatch(
+            "truth.refresh",
+            {"project": "ECS", "ticket": "ECS-4"},
+            commands.CommandContext(self.source, transport="test"),
+        )
         opened = api.TicketCatalog(self.source).get_ticket("ECS", "ECS-4")
 
         branches = {branch.name: branch.state for branch in opened.branches}
-        self.assertEqual(branches["Ada/ECS-4-local"], "unobserved")
-        self.assertEqual(branches["origin/Lin/ECS-4-remote"], "unobserved")
+        self.assertEqual(branches["Ada/ECS-4-local"], "comparison-missing")
+        self.assertEqual(branches["origin/Lin/ECS-4-remote"], "comparison-missing")
         page = viewer.page_ticket(
             self.source, "ECS-4", "fingerprint", "ECS"
         ).decode("utf-8")

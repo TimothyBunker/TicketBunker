@@ -7,9 +7,10 @@ reports into one typed snapshot without inventing a second source of truth.
 
 Writes go through :mod:`ticketbunker.commands`; those shared handlers route
 typed information through :mod:`ticketbunker.handlers`. Keeping this query
-module read-only by default makes that boundary explicit for API users. A
-ticket-open query may opt into refreshing remote-tracking refs; it never
-switches, merges, rebases, or edits the source worktree.
+module read-only makes that boundary explicit for API users. A ticket-open
+query may resolve local and already-fetched remote-tracking refs; network
+refresh is a separate shared-truth command and never switches, merges,
+rebases, or edits the source worktree.
 """
 
 from __future__ import annotations
@@ -57,15 +58,38 @@ def _branch_value(per_branch: Mapping[str, Any], branch: str) -> dict[str, Any]:
     return {}
 
 
+def _local_query_ledger(project_root: Path) -> Path:
+    """Keep ticket-open Git reads local without dirtying the source tree."""
+    root = Path(project_root).resolve()
+    marker = root / ".git"
+    if marker.is_dir():
+        return marker / "ticketbunker" / "ticket-open.jsonl"
+    if marker.is_file():
+        try:
+            value = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            value = ""
+        if value.startswith("gitdir:"):
+            target = Path(value.split(":", 1)[1].strip())
+            git_dir = target if target.is_absolute() else (root / target).resolve()
+            return git_dir / "ticketbunker" / "ticket-open.jsonl"
+    return root / layout.TB_DIR / "ticket-open.jsonl"
+
+
 def _live_branch_resolution(project_root: Path, data: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Fetch and resolve current local/remote ticket branches for one open."""
+    """Resolve current local and cached remote ticket branches without I/O.
+
+    Network refresh belongs to :mod:`ticketbunker.truth` after the first page
+    has rendered. This query stays a fast read over local refs, so a ticket can
+    never hang behind DNS, credentials, or a slow remote.
+    """
     candidates = []
     configured_repo = str(data.get("repo") or "").strip()
     if configured_repo:
         candidates.append(Path(configured_repo).expanduser())
     candidates.append(Path(project_root))
     repo = None
-    ledger = Ledger(Path(project_root) / layout.TB_DIR / "ticket-open.jsonl")
+    ledger = Ledger(_local_query_ledger(Path(project_root)))
     for candidate in candidates:
         resolved = candidate.resolve()
         inside, status = git_status(
@@ -80,10 +104,6 @@ def _live_branch_resolution(project_root: Path, data: Mapping[str, Any]) -> dict
     if repo is None:
         return None
 
-    # A failed network refresh intentionally falls back to cached origin refs
-    # plus every current local branch. The failure remains visible in the
-    # execution ledger without making an offline ticket disappear.
-    project.refresh_source_refs(repo, ledger)
     output, status = git_status(
         repo,
         ["branch", "--all", "--format=%(refname:short)"],
@@ -196,7 +216,7 @@ class BranchSnapshot:
             return "merged"
         if self.merged_back is False:
             return "open"
-        return "unobserved"
+        return "comparison-missing"
 
 
 @dataclass(frozen=True)
@@ -457,14 +477,14 @@ class TicketDatabase:
         # ticket assignments visible instead of making them disappear.
         assigned_value = data.get("assigned_branches")
         assigned = assigned_value if isinstance(assigned_value, list) else []
-        unobserved_names: list[str] = []
+        comparison_missing_names: list[str] = []
         for name in assigned:
             if isinstance(name, str) and name not in branch_names and name not in missing_names:
-                unobserved_names.append(name)
+                comparison_missing_names.append(name)
 
         branches: list[BranchSnapshot] = []
         resolved_names = [(name, False) for name in branch_names]
-        resolved_names += [(name, False) for name in unobserved_names]
+        resolved_names += [(name, False) for name in comparison_missing_names]
         resolved_names += [(name, True) for name in missing_names]
         for name, is_missing in resolved_names:
             merge = _branch_value(merge_per, name)

@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from ticketbunker import agent_runtime, commands, coworker, layout, project, truth
+from ticketbunker.builders import master
+from ticketbunker.ledger import Ledger
+
+
+def git(root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TB_AGENT_DISABLE": "1"},
+    )
+    return completed.stdout.strip()
+
+
+REPORT = """## Reader brief
+
+### Who
+
+- [speculation] grounded: Ada maintains this branch (observations/authorship.json).
+
+### What
+
+- [speculation] grounded: The branch documents its current behavior (observations/diff.json).
+
+### Where
+
+- [real] Start with `source.py:1`.
+
+### Why
+
+- [speculation] grounded: A concise report keeps the ticket readable (observations/diff.json).
+
+## Who
+
+- [observation] Ada authored the branch.
+
+## What
+
+- [observation] The branch has one source change.
+
+## Where
+
+- [real] The implementation is at `source.py:1`.
+
+## Why
+
+- [speculation] grounded: The ticket needs a checkable summary (observations/diff.json).
+
+## State
+
+- [observation] The branch report is published.
+"""
+
+
+class CoworkerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        git(self.root, "init", "-b", "main")
+        git(self.root, "config", "user.name", "Ada")
+        git(self.root, "config", "user.email", "ada@example.com")
+        (self.root / "source.py").write_text("VALUE = 1\n", encoding="utf-8")
+        git(self.root, "add", "source.py")
+        git(self.root, "commit", "-m", "Initial source")
+        self.branch = "Ada/TB-9-report"
+        git(self.root, "switch", "-c", self.branch)
+        self.head = git(self.root, "rev-parse", "HEAD")
+
+        self.bunker = layout.bunker_path(self.root, "TB-9")
+        layout.init_dirs(self.bunker)
+        paths = layout.paths(self.bunker)
+        paths["ticket"].write_text(
+            json.dumps(
+                {
+                    "id": "TB-9",
+                    "key": "TB-9",
+                    "title": "Keep one ticket conversation",
+                    "status": "in-progress",
+                    "repo": str(self.root),
+                    "assigned_branches": [self.branch],
+                }
+            ),
+            encoding="utf-8",
+        )
+        paths["branch_resolution"].write_text(
+            json.dumps(
+                {
+                    "branches": [self.branch],
+                    "assigned_missing": [],
+                    "match_rules": {self.branch: "explicit assignment"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (paths["observations"] / "baseline.json").write_text(
+            json.dumps(
+                {
+                    "baseline": self.head,
+                    "per_branch": {self.branch: {"merge_base": self.head}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (paths["observations"] / "diff.json").write_text(
+            json.dumps({"per_branch": {self.branch: {}}}), encoding="utf-8"
+        )
+        paths["authorship"].write_text(
+            json.dumps({"per_branch": {self.branch: {"authors": {"Ada": {}}}}}),
+            encoding="utf-8",
+        )
+        layout.child_report(self.bunker, self.branch).write_text(REPORT, encoding="utf-8")
+        master.regenerate(self.bunker, Ledger(paths["ledger"]))
+        self.config_path = self.root / "local-config.json"
+        self.config_path.write_text("{}\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    @staticmethod
+    def readiness() -> dict[str, object]:
+        return {
+            "ready": True,
+            "enabled": True,
+            "summary": "Pi ready",
+            "action": "",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-sol",
+            "runtime": {"path": "/managed/pi"},
+        }
+
+    def test_four_views_share_one_local_ticket_session_and_propose_without_writing(self) -> None:
+        before_report = layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8")
+        before_source = (self.root / "source.py").read_text(encoding="utf-8")
+        response = {
+            "reply": "The current summary is accurate, but it can state the boundary more directly.",
+            "proposal": {
+                "category": "what",
+                "changes": [
+                    {
+                        "branch": self.branch,
+                        "proposed_synthesis": (
+                            "- [speculation] grounded: The coworker maintains only the ticket report "
+                            "(observations/diff.json)."
+                        ),
+                    }
+                ],
+            },
+        }
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.dict(os.environ, {"TB_CONFIG": str(self.config_path)}):
+            with mock.patch.object(coworker, "_run_pi", return_value=(response, {"harness": "pi"})):
+                with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                    result = commands.dispatch(
+                        "coworker.chat",
+                        {
+                            "ticket": "TB-9",
+                            "category": "what",
+                            "scope": "combined",
+                            "message": "Make the work boundary clearer.",
+                        },
+                        context,
+                    )
+                    who = coworker.state(self.root, "", "TB-9", category="who", scope="combined")
+
+        self.assertEqual(len(result["messages"]), 2)
+        self.assertEqual(who["messages"], [])
+        identity = coworker._user(self.root)
+        self.assertEqual(result["title"], f"{identity} · TB-9")
+        self.assertEqual([scope["value"] for scope in result["scopes"]], ["combined", layout.branch_slug(self.branch)])
+        self.assertEqual(len(result["proposals"]), 1)
+        self.assertEqual((self.root / "source.py").read_text(encoding="utf-8"), before_source)
+        self.assertEqual(layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8"), before_report)
+        session = coworker._root(self.root, "", "TB-9", identity)
+        self.assertTrue((session / "messages.jsonl").is_file())
+        self.assertTrue(str(session).startswith(str(self.root / ".git")))
+
+    def test_accept_updates_only_the_child_brief_and_regenerates_combined(self) -> None:
+        response = {
+            "reply": "I prepared a narrower What synthesis.",
+            "proposal": {
+                "category": "what",
+                "changes": [
+                    {
+                        "branch": self.branch,
+                        "proposed_synthesis": (
+                            "- [speculation] grounded: The accepted report update stays inside the "
+                            "ticket layer (observations/diff.json)."
+                        ),
+                    }
+                ],
+            },
+        }
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.dict(os.environ, {"TB_CONFIG": str(self.config_path)}):
+            with mock.patch.object(coworker, "_run_pi", return_value=(response, {"harness": "pi"})):
+                with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                    chat = commands.dispatch(
+                        "coworker.chat",
+                        {
+                            "ticket": "TB-9",
+                            "category": "what",
+                            "scope": "combined",
+                            "message": "Narrow the What summary.",
+                        },
+                        context,
+                    )
+            proposal_id = chat["proposals"][0]["id"]
+            before = layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8")
+            evidence_before = coworker._section(before, "What")
+            with mock.patch.object(project, "publish_data", return_value={"published": True}):
+                accepted = commands.dispatch(
+                    "coworker.proposal.accept",
+                    {"ticket": "TB-9", "proposal": proposal_id},
+                    context,
+                )
+
+        after = layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8")
+        combined = layout.paths(self.bunker)["master"].read_text(encoding="utf-8")
+        self.assertIn("accepted report update stays inside", coworker._subsection(after, "Reader brief", "What"))
+        self.assertEqual(coworker._section(after, "What"), evidence_before)
+        self.assertIn("accepted report update stays inside", combined)
+        self.assertEqual(accepted["proposal"]["status"], "accepted")
+        self.assertTrue(accepted["combined_regenerated"])
+        self.assertNotIn("source.py", git(self.root, "status", "--porcelain"))
+
+    def test_pi_runtime_is_read_only_and_reuses_one_session_directory(self) -> None:
+        original_run = subprocess.run
+        pi_calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+            if argv and argv[0] == "/managed/pi":
+                environment = dict(kwargs.get("env") or {})
+                pi_calls.append((list(argv), environment))
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    stdout=b'{"reply":"Here is the ticket context.","proposal":null}',
+                    stderr=b"",
+                )
+            return original_run(argv, **kwargs)
+
+        with mock.patch.dict(os.environ, {"TB_CONFIG": str(self.config_path)}):
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                with mock.patch.object(agent_runtime, "extension_path", return_value=self.root / "tb.ts"):
+                    with mock.patch.object(coworker.subprocess, "run", side_effect=run):
+                        coworker._run_pi(self.root, "", coworker._ticket(self.root, "", "TB-9"), "who", "combined", "Who owns this?")
+                        coworker._run_pi(self.root, "", coworker._ticket(self.root, "", "TB-9"), "why", layout.branch_slug(self.branch), "Why this approach?")
+
+        self.assertEqual(len(pi_calls), 2)
+        first, second = (call[0] for call in pi_calls)
+        self.assertIn("--continue", first)
+        self.assertEqual(first[first.index("--session-dir") + 1], second[second.index("--session-dir") + 1])
+        self.assertEqual(first[first.index("--tools") + 1], "read,grep,find,ls")
+        self.assertNotIn("bash", first[first.index("--tools") + 1].split(","))
+        self.assertEqual(pi_calls[0][1]["TB_BUNKER"], pi_calls[1][1]["TB_BUNKER"])
+        self.assertNotEqual(pi_calls[0][1]["TB_BRANCH"], pi_calls[1][1]["TB_BRANCH"])
+
+    def test_failed_companion_publish_keeps_the_accepted_local_state_actionable(self) -> None:
+        response = {
+            "reply": "I prepared the correction.",
+            "proposal": {
+                "category": "why",
+                "changes": [
+                    {
+                        "branch": self.branch,
+                        "proposed_synthesis": (
+                            "- [speculation] grounded: The ticket needs an evidence-bounded reason "
+                            "(observations/diff.json)."
+                        ),
+                    }
+                ],
+            },
+        }
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.object(coworker, "_run_pi", return_value=(response, {"harness": "pi"})):
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                chat = commands.dispatch(
+                    "coworker.chat",
+                    {
+                        "ticket": "TB-9",
+                        "category": "why",
+                        "scope": "combined",
+                        "message": "Correct the reason.",
+                    },
+                    context,
+                )
+        failure = commands.CommandRejected(
+            "data_publish_rejected",
+            "The accepted report is committed locally but did not reach the companion remote.\n"
+            "Next: Run tb sync when remote access is restored.\n"
+            "Git said: credential detail that must stay local",
+        )
+        with mock.patch.object(project, "publish_data", side_effect=failure):
+            accepted = commands.dispatch(
+                "coworker.proposal.accept",
+                {"ticket": "TB-9", "proposal": chat["proposals"][0]["id"]},
+                context,
+            )
+
+        visible = truth.state(self.root, "", "TB-9")
+        self.assertEqual(accepted["proposal"]["status"], "accepted")
+        self.assertTrue(accepted["publication"]["pending"])
+        self.assertNotIn("credential detail", accepted["publication_warning"])
+        self.assertEqual(visible["companion"]["label"], "Companion publish pending")
+        self.assertIn("tb sync", visible["companion"]["action"])
+
+
+if __name__ == "__main__":
+    unittest.main()

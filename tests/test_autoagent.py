@@ -174,6 +174,40 @@ class AutomaticAgentTests(unittest.TestCase):
         self.assertTrue(any(value.get("type") == "automatic_agent_started" for value in events))
         self.assertTrue(any(value.get("type") == "automatic_agent_finished" for value in events))
 
+    def test_unchanged_durable_inputs_skip_the_provider(self) -> None:
+        source = self.repo / "position.py"
+        source.write_text("POSITION = (0, 0, 0)\n", encoding="utf-8")
+        git(self.repo, "add", "position.py")
+        git(self.repo, "commit", "-m", "Add position state")
+        config_path = Path(self.tmp.name) / "tbconfig.json"
+        config_path.write_text("{}\n", encoding="utf-8")
+        command = f"{sys.executable} {ROOT / 'tools' / 'stub_agent.py'} {{form}}"
+        environment = {
+            "TB_CONFIG": str(config_path),
+            "TB_AGENT_HARNESS": "command",
+            "TB_AGENT_COMMAND": command,
+        }
+
+        with mock.patch.dict(os.environ, environment):
+            autoagent.enqueue(self.repo, "post-commit", spawn=False)
+            self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
+
+            original_run = subprocess.run
+            calls: list[list[str]] = []
+
+            def record(argv: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess:
+                calls.append(list(argv))
+                return original_run(argv, *args, **kwargs)
+
+            autoagent.enqueue(self.repo, "post-checkout", spawn=False)
+            with mock.patch.object(autoagent.subprocess, "run", side_effect=record):
+                self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
+
+        ticketbunker_commands = [argv for argv in calls if "ticketbunker.cli" in argv]
+        self.assertTrue(any("refresh" in argv for argv in ticketbunker_commands))
+        self.assertFalse(any("run" in argv for argv in ticketbunker_commands))
+        self.assertIn("provider was not called", autoagent.read_state(self.repo)["last"]["detail"])
+
     def test_command_override_does_not_claim_the_saved_pi_provider_or_model(self) -> None:
         config_path = Path(self.tmp.name) / "tbconfig.json"
         config_path.write_text(

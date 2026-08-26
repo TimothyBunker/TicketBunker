@@ -281,12 +281,14 @@ consequences:
    back to State. A reader gets the whole ticket at a glance before the full
    components below. Selection is mechanical; the digest never rewrites a
    claim.
-3. **The report cannot live inside the session.** The session file is an
-   append-only conversation record; the report is a living document with its own
-   update lifecycle (children rewritten as branches move, master regenerated on
-   every child change) and its own audience (remote, authorized users). So
+3. **The report cannot live inside the generation session.** The generation
+   session file is an append-only provenance record; the report is a living
+   document with its own update lifecycle (children rewritten as branches move,
+   master regenerated on every child change) and its own audience (remote, authorized users). So
    reports sit beside the session in the bunker, and only `reports/` syncs
-   remotely.
+   remotely. The local ticket coworker described in §3.5 has a separate private
+   session below Git's administrative directory. That conversation can propose
+   report changes but is never itself shared report truth.
 4. **Components live together under the ticket, keyed by source branch.** A
    successful publish places the gated component on the companion data branch
    immediately. Every checkout can therefore see the complete child set after
@@ -311,22 +313,36 @@ this schema; every newly scaffolded session must fill it.
 
 ### 3.5 Report-first UX
 
-**Users consume the report, not the session.** Ideally a user never interacts
-with the agent at all:
+**Users consume the report first.** A user never has to operate the automatic
+generation agent as a separate tool:
 
 - The session is created and driven headlessly (branch creation triggers it; the
   bootstrap extensions and command-fed agent do the rest).
 - The report is the sole user-facing artifact — it must be complete enough that
   reading it answers who/what/where/why without a follow-up conversation.
-- The harness transcript/session is retained as **provenance**: if a report claim
+- The generation transcript/session is retained as **provenance**: if a report claim
   needs auditing, it shows exactly which commands produced which observations
   and how each inference was derived. The accepted component is also stamped by
   orchestration with every generator fact it actually knows — harness, provider,
   and model — rather than asking the agent to identify itself. Work authorship
-  and report generation are separate facts. The session is an audit log, not a
+  and report generation are separate facts. That session is an audit log, not a
   chat to resume.
-- If interactive follow-up is ever needed, that's a signal the report schema is
-  missing a section — fix the schema, don't normalize talking to the agent.
+- One local **ticket coworker** provides optional follow-up without becoming a
+  source-work agent. There is one underlying Pi session per local user and
+  ticket, shared across all ticket branches. The viewer presents it as four
+  clear Who, What, Where, and Why conversations; every message carries its
+  selected category and Combined-or-branch scope. The coworker receives the
+  ticket, the selected synthesis and evidence, exact child branches, and its
+  prior ticket conversation. It can explain, advise, accept corrections, and
+  prepare a report-update proposal. It cannot edit source, execute shell or Git
+  mutations, or directly edit Combined.
+- Raw coworker messages and Pi session files stay private below
+  `.git/ticketbunker/coworker/<project>/<ticket>/<user>/`. Pi is launched with
+  only `read`, `grep`, `find`, and `ls`. A proposal is inert until the user
+  accepts it. Acceptance rechecks the current child digest, report lint, and
+  every real anchor, updates only the named child Reader brief subsection, and
+  regenerates Combined mechanically. The ordinary companion publication path
+  remains the only way the accepted report becomes shared truth.
 
 **The ticket surface mirrors a tracker page, read-only and honest about
 provenance.** `tb list` shows every ticket grouped by declared status and
@@ -383,8 +399,9 @@ so the reader keeps the same ticket and Git orientation while moving between
 Ticket and Agent. The rail is rendered once; the Work control and branch links
 are never duplicated between views.
 
-Agent work defaults to **Master** and provides one native report selector at the
-right of its heading: Master followed by each branch report. Master presents each
+Agent work defaults to the mechanically assembled master, labeled **Combined**
+in the viewer, and provides one native report selector at the right of its
+heading: Combined followed by each branch report. Combined presents each
 category's concise Reader brief contributions in development-recency order, with
 the branch named and a visible rule between branch contributions; each category
 immediately follows its synthesis with a native disclosure for the unchanged
@@ -398,15 +415,24 @@ and freshness remain visible. Each child trail labels work authors separately
 from the harness/provider/model that generated the report; a selected branch also
 shows its known generator beside its branch identity. Unknown generator fields
 stay absent instead of being guessed. Before the first report, Agent work shows
-only its empty state rather than a meaningless Master selector. Trust tags render
-as chips. Ticket,
-Project, and Agent reading remains strictly read-only. The one exception is an
+only its empty state rather than a meaningless Combined selector. Trust tags
+render as chips. Ticket, Project, and Agent reading remains strictly read-only.
+Each Who, What, Where, and Why synthesis has an **Ask coworker** action, and the same ticket coworker
+is available from one bottom-right launcher. This is a local conversation and
+proposal surface, not a second report writer. The other exception is an
 explicit local **Work** control: a small plus beside Branches opens a form for a
 short branch name and a real base-branch choice. Its CSRF-protected POST
 dispatches the same `workflow.start` command as `tb branch`; it is not a ticket,
-comment, report, or lifecycle editor. Every page renders from `.tb/` on each request, and pages
-poll a database fingerprint so whatever the user is looking at reloads
-when the data changes. All content is HTML-escaped before the constrained
+comment, report, or lifecycle editor. Every ticket page renders immediately
+from cached companion data and local or already-fetched Git refs. After the
+response is sent, one coalesced background command fast-forwards the ignored
+companion checkouts when safe, fetches source remote-tracking refs without
+touching the source worktree, and queues synthesis only when the durable
+ticket/Git/context fingerprint differs from the last successful publication.
+A quiet three-part strip names Companion, Git refs, and Synthesis state,
+including the preserved state and direct next action whenever work stops.
+Pages poll that local state and reload only when ticket content or refs change.
+All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.
 Localhost-only is a decision, not a limitation: there is deliberately no
 bind option and no auth surface — remote viewing (phone, another machine)
@@ -846,14 +872,16 @@ the pattern is enforced by construction at the same place the branch is born.
 Failure messages name the state that stopped Git and what the user must do next;
 no reset, forced checkout, auto-stash, or non-fast-forward merge occurs.
 
-Opening a ticket performs a narrower safe refresh before rendering Branches:
-`git fetch --prune origin`, followed by one union of matching local and
-remote-tracking refs plus explicit ticket assignments. Fetch updates refs only,
-so it is allowed while the source worktree is dirty and never becomes an
-implicit pull, rebase, switch, merge, stash, or reset. If the network is
-unavailable, the ticket still opens from local branches and cached remote refs;
-the failed fetch remains ledgered. Newly discovered branches appear as
-unobserved until the deterministic pipeline computes their full metadata.
+Opening a ticket first renders Branches from local and already-fetched refs plus
+explicit assignments. The viewer then runs `git fetch --prune origin` in the
+background and recomposes the same union. Fetch updates refs only, so it is
+allowed while the source worktree is dirty and never becomes an implicit pull,
+rebase, switch, merge, stash, or reset. If the network is unavailable, the
+ticket remains open with local and cached remote refs and an explicit retry
+action; the failed fetch remains ledgered. A branch without computed ahead,
+behind, or merge state is labeled **Needs Git state** and says to open that
+branch to generate its comparison. This names the missing program output
+instead of an ambiguous human/agent observation state.
 
 **The ticket is the deliberate step, so creating one must not hurt.** A
 ticket mirrors the useful core of a tracker issue — id, title, description,

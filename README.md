@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.5-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.5-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.6-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.6-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -138,7 +138,7 @@ tb set TB-1267 --status in-review                  # move ticket fields through 
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
-tb view                                            # Tickets / Projects / Ticket / Agent + guarded local Work at 127.0.0.1:8377
+tb view                                            # Ticket/Agent views, shared-truth state, coworker, and guarded Work on 127.0.0.1:8377
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
@@ -160,11 +160,14 @@ sync`) and embedded legacy bunkers remain supported. On every later clone,
 out only committed ticket indexes; opening or changing a ticket fetches that
 one bunker without copying every ticket and report.
 
-Opening a ticket also runs a safe `git fetch --prune origin` in the source
-repository and rebuilds its Branches tab from matching local branches,
+Opening a ticket renders cached companion data and local or already-fetched
+Git refs immediately. After the response, TicketBunker refreshes the companion
+checkout and runs a safe `git fetch --prune origin` in the source repository in
+the background. It then rebuilds Branches from matching local branches,
 remote-tracking branches, and explicit assignments. Fetch does not touch the
 worktree, so uncommitted files are preserved and no pull, rebase, switch,
-merge, reset, or stash occurs. Offline opens use local and cached refs.
+merge, reset, or stash occurs. Offline opens keep the ticket on screen with
+local and cached refs plus a direct retry action.
 
 `tb init` performs its own remote probe. It retries transient DNS resolution,
 uses bounded non-interactive Git operations, and distinguishes DNS, timeout,
@@ -236,7 +239,23 @@ repository.
 
 On a ticket, Lifecycle and Branches remain in one right rail while Ticket and
 Agent switch the center view. Branch state and the Work control therefore stay
-in the same place while reading tracker details or agent evidence.
+in the same place while reading tracker details or agent evidence. A quiet
+Companion / Git refs / Synthesis strip says which shared state is current,
+cached, updating, or stopped and names what to do next. Branches without a
+generated comparison say **Needs Git state**, which names the missing program
+output.
+
+Agent defaults to **Combined**, the mechanically assembled master report, with
+each child branch kept visibly separate. Every Who, What, Where, and Why
+synthesis can open the same ticket coworker. The viewer presents four topic
+conversations, but all scopes and branches use one underlying Pi session for
+that local user and ticket. The coworker can read and search the repository,
+explain the current report, and prepare a child Reader-brief proposal. It has
+no shell, edit, write, or Git tool. Raw chat stays below
+`.git/ticketbunker/coworker/`; accepting a proposal rechecks the current child,
+lint, and real anchors before changing that child and regenerating Combined.
+If companion publication stops, the accepted local report remains visible as
+**Companion publish pending** with its next action.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:
@@ -297,6 +316,10 @@ coalescing refresh: observations update first, then the agent runs through the
 same lint/anchor-gated publish path as every manual report. Git returns
 immediately and cannot be failed by a provider or network outage. The last
 result and background log live below `.git/ticketbunker/automatic-agent/`.
+After deterministic refresh, the worker compares the branch's durable
+ticket/Git/context fingerprint with the last successful publication. Identical
+inputs skip the provider, so opening a current ticket or receiving a redundant
+Git event does not spend another agent call.
 
 `tb init` checks the shipped or automatically managed pi runtime, records its
 resolved executable path, adopts pi's already-selected provider and model when

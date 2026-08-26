@@ -10,6 +10,7 @@ runs the ordinary gated agent pipeline.  No alternate publish path exists.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import shlex
@@ -36,6 +37,7 @@ LEGACY_HOOK_MARKER = "# TicketBunker hook"
 HOOK_NAMES = ("post-checkout", "post-commit", "post-merge", "post-rewrite")
 DEBOUNCE_SECONDS = 1.0
 STATE_DIR = "ticketbunker/automatic-agent"
+FINGERPRINT_FILE = "fingerprints.json"
 
 
 def _now() -> str:
@@ -273,6 +275,103 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _fingerprint_key(bunker: Path, branch: str) -> str:
+    return f"{Path(bunker).resolve()}::{branch}"
+
+
+def _fingerprints(repo: Path) -> dict[str, Any]:
+    path = _state_dir(Path(repo).resolve()) / FINGERPRINT_FILE
+    if not path.exists():
+        return {"schema_version": 1, "branches": {}}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"schema_version": 1, "branches": {}}
+    if not isinstance(value, dict) or not isinstance(value.get("branches"), dict):
+        return {"schema_version": 1, "branches": {}}
+    return value
+
+
+def input_fingerprint(
+    repo: Path,
+    bunker: Path,
+    branch: str,
+    *,
+    head: str = "",
+) -> str:
+    """Digest every durable input that can change one branch synthesis.
+
+    The report itself and local conversation are deliberately excluded. A
+    successful agent publication records this digest locally; later Git or
+    ticket events can therefore skip the provider when the inputs are
+    identical instead of paying for a no-op report rewrite.
+    """
+    repo = Path(repo).resolve()
+    bunker = Path(bunker).resolve()
+    if not head:
+        head, _ = _git(repo, "rev-parse", branch)
+    digest = hashlib.sha256()
+    digest.update(f"ticketbunker-synthesis-v1\0{branch}\0{head}\0".encode())
+    paths = layout.paths(bunker)
+    candidates = [paths["ticket"], layout.session_config(bunker, branch)]
+    candidates.extend(sorted(paths["context"].glob("*.md")))
+    candidates.extend(sorted(paths["observations"].glob("*.json")))
+    for path in candidates:
+        try:
+            content = path.read_bytes()
+        except OSError:
+            content = b""
+        digest.update(str(path.relative_to(bunker)).encode(errors="replace"))
+        digest.update(b"\0")
+        digest.update(content)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def synthesis_input_state(repo: Path, bunker: Path, branch: str) -> dict[str, Any]:
+    """Compare current inputs with the last successfully published run."""
+    repo = Path(repo).resolve()
+    bunker = Path(bunker).resolve()
+    head, status = _git(repo, "rev-parse", branch)
+    if status != 0 or not head:
+        return {"status": "unavailable", "current": "", "published": ""}
+    current = input_fingerprint(repo, bunker, branch, head=head)
+    entry = (_fingerprints(repo).get("branches") or {}).get(
+        _fingerprint_key(bunker, branch), {}
+    )
+    published = str(entry.get("fingerprint") or "") if isinstance(entry, dict) else ""
+    if not layout.child_report(bunker, branch).is_file():
+        status_name = "missing"
+    elif not published:
+        status_name = "unchecked"
+    elif published != current:
+        status_name = "changed"
+    else:
+        status_name = "current"
+    return {
+        "status": status_name,
+        "current": current,
+        "published": published,
+        "head": head,
+        "published_at": str(entry.get("published_at") or "") if isinstance(entry, dict) else "",
+    }
+
+
+def _record_input_fingerprint(
+    repo: Path,
+    bunker: Path,
+    branch: str,
+    fingerprint: str,
+) -> None:
+    state = _fingerprints(repo)
+    branches = state.setdefault("branches", {})
+    branches[_fingerprint_key(bunker, branch)] = {
+        "fingerprint": fingerprint,
+        "published_at": _now(),
+    }
+    _write_json(_state_dir(Path(repo).resolve()) / FINGERPRINT_FILE, state)
+
+
 def _spawn_worker(repo: Path) -> None:
     state = _state_dir(repo)
     state.mkdir(parents=True, exist_ok=True)
@@ -440,6 +539,10 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     refreshed = subprocess.run(refresh, cwd=str(repo), env=env)
     if refreshed.returncode != 0:
         return False, "deterministic refresh failed; no agent session was published"
+    fingerprint = input_fingerprint(repo, bunker, branch, head=head)
+    prior = synthesis_input_state(repo, bunker, branch)
+    if prior.get("status") == "current" and prior.get("published") == fingerprint:
+        return True, f"synthesis already current for {branch}; provider was not called"
     command = [
         *base,
         "run",
@@ -467,6 +570,7 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
         if latest and latest != payload.get("head"):
             enqueue(repo, "head-advanced", spawn=False)
         return False, f"automatic {profile['harness']} agent session failed; inspect the local agent log"
+    _record_input_fingerprint(repo, bunker, branch, fingerprint)
     return True, f"published {branch} through {profile['harness']}"
 
 

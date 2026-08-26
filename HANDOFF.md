@@ -121,11 +121,13 @@ exercise unless a live boundary is explicitly called out.
 - An assignment/session is published only after Git succeeds. Existing
   branches use strict `workflow.attach`; a name without the bounded ticket key
   is rejected with a rename instruction.
-- Opening a ticket safely fetches/prunes `origin` refs, then rebuilds the
-  Branches view from the union of local refs, remote-tracking refs, and explicit
-  assignments. It works with uncommitted source files because it never pulls,
-  rebases, switches, merges, resets, or stashes; offline opens keep local and
-  cached refs. New refs are marked unobserved until the full pipeline runs.
+- Opening a ticket renders cached companion data and local/already-fetched refs
+  first. After the response, one background command refreshes companion state,
+  fetches/prunes `origin`, and rebuilds Branches from local refs,
+  remote-tracking refs, and explicit assignments. It works with uncommitted
+  source files because it never pulls, rebases, switches, merges, resets, or
+  stashes; offline opens keep the rendered ticket and provide a retry action.
+  A branch missing its computed comparison is labeled `Needs Git state`.
 - The localhost Work POST is explicit and CSRF-token protected. Viewer pages
   remain bound to `127.0.0.1`, escape ticket/agent content, disable caching,
   framing, referrer propagation, and MIME sniffing, and never expose ticket,
@@ -146,10 +148,21 @@ exercise unless a live boundary is explicitly called out.
   time, rich description/acceptance criteria, activity, useful details, and a
   Metadata disclosure for transport fields.
 - One Lifecycle and Branches rail persists beside both tabs. Agent work owns
-  only the center Agent surface. Master separates each branch visibly;
+  only the center Agent surface. Combined is the mechanically generated master
+  and separates each branch visibly;
   Who/What/Where/Why synthesis appears before each collapsible full evidence
   trail. Branch selection narrows the view. Before the first report, there is a
-  direct empty state rather than a meaningless Master selector.
+  direct empty state rather than a meaningless Combined selector.
+- A Companion / Git refs / Synthesis strip exposes cached, refreshing, current,
+  outdated, stopped, and publication-pending states with direct actions. The
+  browser reloads only when the ticket data or refs revision changes.
+- One local Pi coworker session exists per user and ticket across every branch.
+  The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
+  scope. Pi receives only read/search tools. Raw chat stays below `.git`; a
+  coworker reply can prepare an inert child Reader-brief proposal, and explicit
+  acceptance rechecks digest/lint/anchors, updates the named children, then
+  regenerates Combined. It cannot edit source, run Git mutations, or write
+  Combined directly.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -158,7 +171,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.5 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.6 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -196,13 +209,16 @@ fetch-on-open, separate convention-named branches, remote reconciliation, two
 clean doctor reports, and the Work UI. Measurements and explicit live-boundary
 caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
 Automatic-agent tests separately cover event coalescing, existing-hook
-preservation/restoration, the gated worker path, frozen-worker isolation, and
-a real non-blocking post-commit hook with the deterministic stub. The full
-suite is 110 tests.
+preservation/restoration, the gated worker path, frozen-worker isolation,
+durable-input provider skipping, and a real non-blocking post-commit hook with
+the deterministic stub. Focused tests also cover cached-first truth refresh,
+private coworker session reuse, read-only Pi tools, and gated child-only report
+updates. The current full suite is 122 tests.
 
-Browser QA was performed in headless Google Chrome at desktop and mobile sizes.
-The Work panel, base selector, readiness state, responsive stacking, and
-JavaScript deep link were inspected. This does not replace the HTTP/CSRF tests.
+Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
+the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
+scope selection, Work panel, responsive stacking, and JavaScript deep links are
+inspected. This does not replace the HTTP/CSRF tests.
 
 ## Existing agent pipeline
 

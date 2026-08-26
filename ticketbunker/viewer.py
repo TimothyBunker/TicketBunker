@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import commands, config, layout, workflow
+from . import commands, config, coworker, layout, truth, workflow
 from .api import (
     ReportSnapshot,
     TicketCatalog,
@@ -37,22 +37,25 @@ from .api import (
 _STYLE = """
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --panel: #f7f8fa;
-  --fg: #172b4d;
-  --body: #344563;
-  --muted: #6b778c;
-  --line: #dfe1e6;
-  --line-strong: #c1c7d0;
-  --accent: #0c66e4;
-  --accent-soft: #e9f2ff;
-  --success: #216e4e;
-  --success-soft: #dcfff1;
-  --warning: #7f5f01;
-  --warning-soft: #fff7d6;
-  --danger: #ae2e24;
-  --danger-soft: #ffeceb;
+  --bg: oklch(99.4% .004 252);
+  --panel: oklch(97.2% .006 252);
+  --fg: oklch(28% .055 255);
+  --body: oklch(40% .043 255);
+  --muted: oklch(54% .03 255);
+  --line: oklch(90% .012 252);
+  --line-strong: oklch(79% .02 252);
+  --accent: oklch(54% .205 255);
+  --accent-strong: oklch(47% .19 255);
+  --accent-soft: oklch(95% .025 255);
+  --success: oklch(43% .105 155);
+  --success-soft: oklch(96% .034 155);
+  --warning: oklch(47% .105 85);
+  --warning-soft: oklch(96.5% .045 85);
+  --danger: oklch(48% .16 28);
+  --danger-soft: oklch(96% .035 28);
+  --on-accent: oklch(98.5% .006 252);
   --radius: 5px;
+  --ease-out-quart: cubic-bezier(.25, 1, .5, 1);
 }
 * { box-sizing: border-box; }
 html { background: var(--bg); }
@@ -67,7 +70,7 @@ button, input, select { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
-  outline: 3px solid rgba(12, 102, 228, .28);
+  outline: 3px solid color-mix(in oklch, var(--accent) 30%, transparent);
   outline-offset: 3px;
   border-radius: 2px;
 }
@@ -86,6 +89,60 @@ p { margin: 0 0 12px; }
 .head-facts div { display: flex; align-items: center; gap: 7px; }
 .head-badges { flex-wrap: wrap; }
 .head-updated { color: var(--muted); font-size: 12px; }
+.truth-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  margin: 18px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.truth-item {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 190px;
+  padding: 9px 12px;
+  color: var(--body);
+  font-size: 12px;
+}
+.truth-item + .truth-item { border-left: 1px solid var(--line); }
+.truth-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: var(--bg);
+}
+.truth-item[data-state="current"] .truth-dot,
+.truth-item[data-state="local"] .truth-dot { border-color: var(--success); background: var(--success); }
+.truth-item[data-state="refreshing"] .truth-dot,
+.truth-item[data-state="updating"] .truth-dot { border-color: var(--accent); background: var(--accent); }
+.truth-item[data-state="cached"] .truth-dot,
+.truth-item[data-state="outdated"] .truth-dot { border-color: var(--warning); background: var(--warning); }
+.truth-item[data-state="failed"] .truth-dot,
+.truth-item[data-state="stopped"] .truth-dot,
+.truth-item[data-state="missing"] .truth-dot { border-color: var(--danger); background: var(--danger); }
+.truth-copy { min-width: 0; }
+.truth-label { display: block; color: var(--fg); font-weight: 650; }
+.truth-detail { display: block; margin-top: 1px; color: var(--muted); }
+.truth-action {
+  min-height: 32px;
+  margin: 4px 0 -4px;
+  padding: 3px 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 650;
+  text-align: left;
+}
+.truth-action[hidden] { display: none; }
+.truth-action:disabled { color: var(--muted); cursor: wait; }
 .badge {
   display: inline-flex;
   align-items: center;
@@ -98,7 +155,7 @@ p { margin: 0 0 12px; }
   font-weight: 650;
   line-height: 1.25;
 }
-.badge.status { color: #0055cc; background: var(--accent-soft); }
+.badge.status { color: var(--accent-strong); background: var(--accent-soft); }
 .badge.label { font-weight: 500; }
 .badge.done, .badge.closed, .badge.verified, .badge.merged { color: var(--success); background: var(--success-soft); }
 .badge.stale, .badge.open { color: var(--warning); background: var(--warning-soft); }
@@ -132,8 +189,8 @@ p { margin: 0 0 12px; }
 .problem-state strong { display: block; margin-bottom: 4px; color: var(--fg); font-size: 12px; }
 .problem-state code { overflow-wrap: anywhere; white-space: normal; }
 .problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
-.problem-actions .primary { display: inline-flex; padding: 7px 12px; border-radius: 3px; color: white; background: var(--accent); font-weight: 650; }
-.problem-actions .primary:hover { text-decoration: none; background: #0055cc; }
+.problem-actions .primary { display: inline-flex; padding: 7px 12px; border-radius: 3px; color: var(--on-accent); background: var(--accent); font-weight: 650; }
+.problem-actions .primary:hover { text-decoration: none; background: var(--accent-strong); }
 .problem-id { margin-top: 20px; color: var(--muted); font-size: 11px; }
 .description, .issue-activity { max-width: 75ch; }
 .rich-text > :last-child { margin-bottom: 0; }
@@ -168,7 +225,18 @@ p { margin: 0 0 12px; }
 .agent-work { max-width: 78ch; }
 .work-category { padding: 19px 0 20px; border-top: 1px solid var(--line); }
 .work-category:first-of-type { padding-top: 0; border-top: 0; }
-.work-category h3 { margin-bottom: 7px; font-size: 15px; }
+.work-category-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+.work-category h3 { margin: 0; font-size: 15px; }
+.coworker-inline {
+  min-height: 36px;
+  padding: 5px 3px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
 .brief-claims { min-width: 0; }
 .brief-claims p { margin: 0 0 7px; }
 .brief-claims p:last-child { margin-bottom: 0; }
@@ -233,7 +301,7 @@ p { margin: 0 0 12px; }
   color: var(--fg);
   background: var(--bg);
 }
-.work-submit { min-height: 42px; border: 1px solid var(--accent); border-radius: var(--radius); color: #fff; background: var(--accent); font-weight: 650; cursor: pointer; }
+.work-submit { min-height: 42px; border: 1px solid var(--accent); border-radius: var(--radius); color: var(--on-accent); background: var(--accent); font-weight: 650; cursor: pointer; }
 .work-submit:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--line); cursor: not-allowed; }
 .work-state { min-height: 20px; margin: 0; color: var(--muted); font-size: 12px; }
 .work-state.error { color: var(--danger); }
@@ -278,7 +346,7 @@ p { margin: 0 0 12px; }
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--bg);
-  box-shadow: 0 8px 24px rgba(23, 43, 77, .14);
+  box-shadow: 0 8px 24px color-mix(in oklch, var(--fg) 14%, transparent);
 }
 .metadata-menu dl { grid-template-columns: 170px minmax(0, 1fr); padding: 0; }
 .field-values { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -296,7 +364,7 @@ p { margin: 0 0 12px; }
 .empty { color: var(--muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .94em; overflow-wrap: anywhere; }
 .tag { display: inline-block; margin: 0 5px 0 0; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font: 10px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; vertical-align: .08em; }
-.tag.obs { color: #0055cc; }
+.tag.obs { color: var(--accent-strong); }
 .tag.real { color: var(--success); }
 .tag.spec { color: var(--warning); }
 code { padding: 1px 3px; border-radius: 3px; background: var(--panel); color: var(--fg); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; overflow-wrap: anywhere; }
@@ -325,7 +393,7 @@ li { margin: 3px 0; }
   padding: 13px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, .97);
+  background: color-mix(in oklch, var(--bg) 97%, transparent);
 }
 .ticket-filters {
   display: grid;
@@ -354,7 +422,7 @@ li { margin: 3px 0; }
   border-radius: var(--radius);
   font-weight: 650;
 }
-.filter-action { border: 1px solid var(--accent); color: #fff; background: var(--accent); cursor: pointer; }
+.filter-action { border: 1px solid var(--accent); color: var(--on-accent); background: var(--accent); cursor: pointer; }
 .filter-clear { border: 1px solid transparent; color: var(--muted); }
 .filter-clear:hover { color: var(--fg); text-decoration: none; }
 .ticket-group { margin-bottom: 32px; }
@@ -389,6 +457,168 @@ li { margin: 3px 0; }
 .pagination a:hover { background: var(--panel); text-decoration: none; }
 .pagination .page-position { min-width: auto; border-color: transparent; color: var(--muted); }
 .pagination .disabled { color: var(--line-strong); }
+.coworker-launcher {
+  position: fixed;
+  z-index: 500;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 48px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--on-accent);
+  background: var(--accent);
+  box-shadow: 0 8px 22px color-mix(in oklch, var(--fg) 18%, transparent);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 160ms var(--ease-out-quart), background 160ms var(--ease-out-quart);
+}
+.coworker-launcher[hidden] { display: none; }
+.coworker-launcher:hover { background: var(--accent-strong); transform: translateY(-1px); }
+.coworker-launcher[aria-expanded="true"] { transform: scale(.92); }
+.coworker-panel {
+  position: fixed;
+  z-index: 400;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-rows: auto auto auto minmax(120px, 1fr) auto;
+  width: min(430px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 14px 38px color-mix(in oklch, var(--fg) 18%, transparent);
+  transform-origin: bottom right;
+  transition: opacity 180ms var(--ease-out-quart), transform 180ms var(--ease-out-quart);
+}
+.coworker-panel[hidden] { display: none; }
+.coworker-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.coworker-title { color: var(--fg); font-size: 15px; font-weight: 700; }
+.coworker-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+}
+.coworker-tabs { display: flex; padding: 0 10px; border-bottom: 1px solid var(--line); }
+.coworker-tab {
+  min-height: 44px;
+  padding: 9px 10px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.coworker-tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+.coworker-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.coworker-scope select {
+  min-width: 0;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 5px 28px 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+}
+.coworker-messages { min-height: 150px; padding: 12px 14px 4px; overflow-y: auto; }
+.coworker-empty { margin: 6px 0 14px; color: var(--muted); }
+.chat-message { padding: 8px 0; }
+.chat-message + .chat-message { border-top: 1px solid var(--line); }
+.chat-role { display: block; margin-bottom: 3px; color: var(--fg); font-size: 12px; font-weight: 700; }
+.chat-copy { margin: 0; color: var(--body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.coworker-proposal { margin: 10px 0 14px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.coworker-proposal h3 { margin-bottom: 4px; }
+.proposal-note { color: var(--muted); font-size: 12px; }
+.proposal-change { padding: 10px 0; border-top: 1px solid var(--line); }
+.proposal-branch { margin-bottom: 8px; color: var(--fg); font-weight: 650; overflow-wrap: anywhere; }
+.proposal-label { display: block; margin: 7px 0 2px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.proposal-value { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposal-edit {
+  width: 100%;
+  min-height: 112px;
+  margin-top: 5px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+  resize: vertical;
+}
+.proposal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.proposal-actions button {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+  cursor: pointer;
+  font-weight: 650;
+}
+.proposal-actions .primary { border-color: var(--accent); color: var(--on-accent); background: var(--accent); }
+.proposal-actions button:disabled { color: var(--muted); background: var(--panel); cursor: wait; }
+.coworker-compose { padding: 10px 14px 14px; border-top: 1px solid var(--line); }
+.coworker-compose label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.coworker-compose textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--bg);
+  resize: vertical;
+}
+.coworker-compose-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.coworker-status { min-width: 0; margin: 0; color: var(--muted); font-size: 12px; }
+.coworker-status.error { color: var(--danger); }
+.coworker-status.success { color: var(--success); }
+.coworker-send {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 7px 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--on-accent);
+  background: var(--accent);
+  cursor: pointer;
+  font-weight: 650;
+}
+.coworker-send:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--panel); cursor: wait; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
   .ticket-main { padding-right: 24px; }
@@ -428,8 +658,26 @@ li { margin: 3px 0; }
   .project-link { grid-template-columns: 1fr; gap: 3px; }
   .project-meta { text-align: left; }
   .pagination { justify-content: space-between; }
+  .truth-strip { display: grid; }
+  .truth-item { min-width: 0; }
+  .truth-item + .truth-item { border-left: 0; border-top: 1px solid var(--line); }
+  .coworker-panel {
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .coworker-launcher { right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }
+  .coworker-scope { align-items: stretch; flex-direction: column; gap: 4px; }
+  .coworker-scope select { width: 100%; max-width: none; min-height: 44px; }
+  .coworker-compose textarea { min-height: 88px; }
 }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+@media (pointer: coarse) {
+  .coworker-inline, .coworker-tab, .truth-action { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
 """
 
 
@@ -591,7 +839,379 @@ if (workForm) workForm.addEventListener('submit', async (event) => {
   }
 });
 
+const truthStrip = document.querySelector('[data-truth]');
+
+function requestError(value, fallback) {
+  return [value.message || fallback, value.state || '', value.action ? `Next: ${value.action}` : '']
+    .filter(Boolean).join(' ');
+}
+
+async function jsonRequest(path, options = {}) {
+  const response = await fetch(path, options);
+  let value = {};
+  try { value = await response.json(); } catch (error) { value = {}; }
+  if (!response.ok) throw new Error(requestError(value, 'TicketBunker could not finish this request.'));
+  return value;
+}
+
+function updateTruth(value) {
+  if (!truthStrip) return;
+  ['companion', 'git', 'synthesis'].forEach((key) => {
+    const item = truthStrip.querySelector(`[data-truth-item="${key}"]`);
+    const current = value[key] || {};
+    if (!item) return;
+    item.dataset.state = current.status || 'cached';
+    item.querySelector('.truth-label').textContent = current.label || key;
+    item.querySelector('.truth-detail').textContent = current.detail || '';
+    const action = item.querySelector('[data-truth-action]');
+    if (action) {
+      action.textContent = current.action || 'Refresh';
+      action.hidden = !current.action;
+      action.disabled = value.refresh === 'running';
+    }
+  });
+}
+
+function preserveTicketUi() {
+  const coworkerPanel = document.querySelector('[data-coworker]');
+  if (!coworkerPanel) return;
+  const key = `tb-coworker:${coworkerPanel.dataset.project || 'local'}:${coworkerPanel.dataset.ticket}`;
+  sessionStorage.setItem(key, JSON.stringify({
+    open: !coworkerPanel.hidden,
+    category: coworkerPanel.dataset.category || 'what',
+    scope: coworkerPanel.querySelector('[data-coworker-scope]')?.value || 'combined',
+    draft: coworkerPanel.querySelector('textarea[name="message"]')?.value || ''
+  }));
+}
+
+async function pollTruth() {
+  if (!truthStrip) return;
+  const query = new URLSearchParams({
+    project: truthStrip.dataset.project || '',
+    ticket: truthStrip.dataset.ticket
+  });
+  try {
+    const value = await jsonRequest(`/truth/state?${query}`);
+    updateTruth(value);
+    if (value.content_revision && value.content_revision !== truthStrip.dataset.revision) {
+      if (coworkerBusy) return;
+      preserveTicketUi();
+      location.reload();
+    }
+  } catch (error) {
+    const detail = truthStrip.querySelector('[data-truth-item="companion"] .truth-detail');
+    if (detail) detail.textContent = 'The viewer kept the ticket already on screen.';
+  }
+}
+
+truthStrip?.addEventListener('click', async (event) => {
+  const action = event.target.closest('[data-truth-action]');
+  if (!action) return;
+  truthStrip.querySelectorAll('[data-truth-action]').forEach((button) => { button.disabled = true; });
+  try {
+    const value = await jsonRequest('/truth/refresh', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': truthStrip.dataset.token},
+      body: JSON.stringify({project: truthStrip.dataset.project || '', ticket: truthStrip.dataset.ticket})
+    });
+    updateTruth(value);
+  } catch (error) {
+    const detail = action.closest('.truth-item').querySelector('.truth-detail');
+    detail.textContent = error.message;
+  } finally {
+    truthStrip.querySelectorAll('[data-truth-action]').forEach((button) => { button.disabled = false; });
+  }
+});
+
+const coworkerPanel = document.querySelector('[data-coworker]');
+const coworkerLauncher = document.querySelector('[data-coworker-launcher]');
+const coworkerClose = document.querySelector('[data-coworker-close]');
+const coworkerTabs = [...document.querySelectorAll('[data-coworker-tab]')];
+const coworkerScope = document.querySelector('[data-coworker-scope]');
+const coworkerMessages = document.querySelector('[data-coworker-messages]');
+const coworkerForm = document.querySelector('[data-coworker-form]');
+const coworkerStatus = document.querySelector('[data-coworker-status]');
+const coworkerSend = document.querySelector('[data-coworker-send]');
+let coworkerCategory = 'what';
+let coworkerBusy = false;
+
+function setCoworkerStatus(message, kind = '') {
+  if (!coworkerStatus) return;
+  coworkerStatus.textContent = message;
+  coworkerStatus.className = `coworker-status ${kind}`.trim();
+}
+
+function setCoworkerCategory(category, moveFocus = false) {
+  coworkerCategory = category;
+  if (coworkerPanel) coworkerPanel.dataset.category = category;
+  coworkerMessages?.setAttribute('aria-labelledby', `coworker-tab-${category}`);
+  coworkerTabs.forEach((tab) => {
+    const selected = tab.dataset.coworkerTab === category;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && moveFocus) tab.focus();
+  });
+}
+
+function selectedPageScope() {
+  if (!reportSelect) return 'combined';
+  return reportSelect.value === 'master' ? 'combined' : reportSelect.value;
+}
+
+function openCoworker(category = coworkerCategory, focusMessage = true) {
+  if (!coworkerPanel || !coworkerLauncher) return;
+  setCoworkerCategory(category);
+  if (coworkerScope) coworkerScope.value = selectedPageScope();
+  coworkerPanel.hidden = false;
+  coworkerLauncher.hidden = true;
+  coworkerLauncher.setAttribute('aria-expanded', 'true');
+  loadCoworker();
+  if (focusMessage) coworkerForm?.querySelector('textarea')?.focus();
+}
+
+function closeCoworker() {
+  if (!coworkerPanel || !coworkerLauncher) return;
+  coworkerPanel.hidden = true;
+  coworkerLauncher.hidden = false;
+  coworkerLauncher.setAttribute('aria-expanded', 'false');
+  preserveTicketUi();
+  coworkerLauncher.focus();
+}
+
+function textElement(tag, className, value) {
+  const node = document.createElement(tag);
+  node.className = className;
+  node.textContent = value;
+  return node;
+}
+
+function renderProposal(proposal) {
+  const article = document.createElement('article');
+  article.className = 'coworker-proposal';
+  article.dataset.proposalId = proposal.id;
+  article.append(textElement('h3', '', proposal.status === 'pending' ? 'Proposed report update' : 'Report update'));
+  article.append(textElement(
+    'p', 'proposal-note',
+    proposal.status === 'pending'
+      ? 'Accepting updates the named child reports through the report gate. Combined is regenerated.'
+      : `This proposal is ${proposal.status}.`
+  ));
+  proposal.changes.forEach((change) => {
+    const section = document.createElement('section');
+    section.className = 'proposal-change';
+    section.append(textElement('div', 'proposal-branch', change.branch));
+    section.append(textElement('span', 'proposal-label', 'Current synthesis'));
+    section.append(textElement('p', 'proposal-value', change.current_synthesis || 'No current synthesis.'));
+    section.append(textElement('span', 'proposal-label', 'Proposed synthesis'));
+    const proposed = textElement('p', 'proposal-value', change.proposed_synthesis);
+    proposed.dataset.proposalCopy = change.branch;
+    section.append(proposed);
+    const edit = document.createElement('textarea');
+    edit.className = 'proposal-edit';
+    edit.dataset.proposalEdit = change.branch;
+    edit.value = change.proposed_synthesis;
+    edit.hidden = true;
+    edit.setAttribute('aria-label', `Edit proposed ${proposal.category} synthesis for ${change.branch}`);
+    section.append(edit);
+    article.append(section);
+  });
+  if (proposal.status === 'pending') {
+    const actions = document.createElement('div');
+    actions.className = 'proposal-actions';
+    const accept = textElement('button', 'primary', 'Accept update');
+    accept.type = 'button';
+    accept.dataset.proposalAccept = proposal.id;
+    const edit = textElement('button', '', 'Edit proposal');
+    edit.type = 'button';
+    edit.dataset.proposalEditToggle = proposal.id;
+    const dismiss = textElement('button', '', 'Dismiss');
+    dismiss.type = 'button';
+    dismiss.dataset.proposalDismiss = proposal.id;
+    actions.append(accept, edit, dismiss);
+    article.append(actions);
+  }
+  return article;
+}
+
+function renderCoworker(value) {
+  if (!coworkerMessages || !coworkerScope) return;
+  const priorScope = coworkerScope.value;
+  coworkerScope.replaceChildren(...value.scopes.map((scope) => {
+    const option = document.createElement('option');
+    option.value = scope.value;
+    option.textContent = scope.label;
+    return option;
+  }));
+  coworkerScope.value = value.scopes.some((scope) => scope.value === priorScope) ? priorScope : value.scope;
+  coworkerMessages.replaceChildren();
+  if (!value.messages.length) {
+    coworkerMessages.append(textElement('p', 'coworker-empty', 'Ask about this ticket or correct its synthesis.'));
+  }
+  value.messages.forEach((message) => {
+    const article = document.createElement('article');
+    article.className = 'chat-message';
+    article.append(textElement('span', 'chat-role', message.role === 'user' ? 'You' : 'Coworker'));
+    article.append(textElement('p', 'chat-copy', message.text));
+    coworkerMessages.append(article);
+    if (message.proposal) {
+      const proposal = value.proposals.find((item) => item.id === message.proposal);
+      if (proposal) coworkerMessages.append(renderProposal(proposal));
+    }
+  });
+  coworkerSend.disabled = !value.ready;
+  if (!value.ready) setCoworkerStatus([value.readiness.summary, value.readiness.action].filter(Boolean).join(' Next: '), 'error');
+  else setCoworkerStatus('');
+  coworkerMessages.scrollTop = coworkerMessages.scrollHeight;
+}
+
+async function loadCoworker() {
+  if (!coworkerPanel || !coworkerScope) return;
+  setCoworkerStatus('Loading this ticket conversation…');
+  const query = new URLSearchParams({
+    project: coworkerPanel.dataset.project || '',
+    ticket: coworkerPanel.dataset.ticket,
+    category: coworkerCategory,
+    scope: coworkerScope.value || 'combined'
+  });
+  try {
+    renderCoworker(await jsonRequest(`/coworker/state?${query}`));
+  } catch (error) {
+    setCoworkerStatus(error.message, 'error');
+  }
+}
+
+coworkerLauncher?.addEventListener('click', () => openCoworker());
+coworkerClose?.addEventListener('click', closeCoworker);
+document.querySelectorAll('[data-coworker-category]').forEach((button) => {
+  button.addEventListener('click', () => openCoworker(button.dataset.coworkerCategory));
+});
+coworkerTabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => { setCoworkerCategory(tab.dataset.coworkerTab); loadCoworker(); });
+  tab.addEventListener('keydown', (event) => {
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % coworkerTabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + coworkerTabs.length) % coworkerTabs.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = coworkerTabs.length - 1;
+    if (next !== null) {
+      event.preventDefault();
+      setCoworkerCategory(coworkerTabs[next].dataset.coworkerTab, true);
+      loadCoworker();
+    }
+  });
+});
+coworkerScope?.addEventListener('change', loadCoworker);
+reportSelect?.addEventListener('change', () => {
+  if (coworkerScope && coworkerPanel && !coworkerPanel.hidden) {
+    coworkerScope.value = selectedPageScope();
+    loadCoworker();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) closeCoworker();
+});
+
+coworkerForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = new FormData(coworkerForm).get('message').trim();
+  if (!message) return;
+  coworkerBusy = true;
+  coworkerSend.disabled = true;
+  setCoworkerStatus(`Coworker is reading ${coworkerScope.value === 'combined' ? 'Combined' : 'this branch'}…`);
+  try {
+    const value = await jsonRequest('/coworker/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': coworkerPanel.dataset.token},
+      body: JSON.stringify({
+        project: coworkerPanel.dataset.project || '',
+        ticket: coworkerPanel.dataset.ticket,
+        category: coworkerCategory,
+        scope: coworkerScope.value,
+        message
+      })
+    });
+    coworkerForm.reset();
+    renderCoworker(value);
+  } catch (error) {
+    setCoworkerStatus(error.message, 'error');
+    coworkerSend.disabled = false;
+  } finally {
+    coworkerBusy = false;
+  }
+});
+
+coworkerMessages?.addEventListener('click', async (event) => {
+  const toggle = event.target.closest('[data-proposal-edit-toggle]');
+  if (toggle) {
+    const proposal = toggle.closest('[data-proposal-id]');
+    proposal.querySelectorAll('[data-proposal-edit]').forEach((field) => { field.hidden = !field.hidden; });
+    proposal.querySelectorAll('[data-proposal-copy]').forEach((copy) => { copy.hidden = !copy.hidden; });
+    toggle.textContent = toggle.textContent === 'Edit proposal' ? 'Keep proposal' : 'Edit proposal';
+    proposal.querySelector('[data-proposal-edit]:not([hidden])')?.focus();
+    return;
+  }
+  const accept = event.target.closest('[data-proposal-accept]');
+  const dismiss = event.target.closest('[data-proposal-dismiss]');
+  if (!accept && !dismiss) return;
+  const proposalId = (accept || dismiss).dataset.proposalAccept || (accept || dismiss).dataset.proposalDismiss;
+  const article = (accept || dismiss).closest('[data-proposal-id]');
+  article.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+  const action = accept ? 'accept' : 'dismiss';
+  coworkerBusy = true;
+  setCoworkerStatus(accept ? 'Checking the child report gate…' : 'Dismissing proposal…');
+  const edits = {};
+  article.querySelectorAll('[data-proposal-edit]').forEach((field) => { edits[field.dataset.proposalEdit] = field.value; });
+  try {
+    const result = await jsonRequest(`/coworker/proposal/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': coworkerPanel.dataset.token},
+      body: JSON.stringify({
+        project: coworkerPanel.dataset.project || '',
+        ticket: coworkerPanel.dataset.ticket,
+        proposal: proposalId,
+        edits
+      })
+    });
+    if (accept) {
+      setCoworkerStatus(
+        result.publication_warning || 'Child report updated. Combined was regenerated.',
+        result.publication_warning ? 'error' : 'success'
+      );
+      preserveTicketUi();
+      window.setTimeout(() => location.reload(), result.publication_warning ? 2200 : 700);
+    } else {
+      await loadCoworker();
+    }
+  } catch (error) {
+    setCoworkerStatus(error.message, 'error');
+    article.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+  } finally {
+    coworkerBusy = false;
+  }
+});
+
+if (coworkerPanel) {
+  try {
+    const key = `tb-coworker:${coworkerPanel.dataset.project || 'local'}:${coworkerPanel.dataset.ticket}`;
+    const saved = JSON.parse(sessionStorage.getItem(key) || '{}');
+    if (saved.category && coworkerTabs.some((tab) => tab.dataset.coworkerTab === saved.category)) {
+      setCoworkerCategory(saved.category);
+    }
+    if (saved.scope && coworkerScope?.querySelector(`option[value="${CSS.escape(saved.scope)}"]`)) {
+      coworkerScope.value = saved.scope;
+    }
+    if (typeof saved.draft === 'string' && coworkerForm?.querySelector('textarea[name="message"]')) {
+      coworkerForm.querySelector('textarea[name="message"]').value = saved.draft;
+    }
+    if (saved.open) openCoworker(coworkerCategory, false);
+  } catch (error) { /* Ignore malformed local UI state. */ }
+}
+
 setInterval(async () => {
+  if (truthStrip) {
+    await pollTruth();
+    return;
+  }
   try {
     const response = await fetch('/poll');
     if ((await response.text()).trim() !== fp) location.reload();
@@ -938,7 +1558,9 @@ def _agent_report_panel(reports: tuple[ReportSnapshot, ...], value: str, *, mast
     for label in ("Who", "What", "Where", "Why"):
         preview = _master_preview(reports, label) if master else _category_preview(reports[0], label)
         categories.append(
-            f'<section class="work-category"><h3>{label}</h3>'
+            f'<section class="work-category"><div class="work-category-head"><h3>{label}</h3>'
+            f'<button class="coworker-inline" type="button" data-coworker-category="{label.casefold()}" '
+            f'aria-label="Ask the ticket coworker about {label}">Ask coworker</button></div>'
             f'<div class="{"master-brief" if master else "brief-claims"}">{preview}</div>'
             f'{_category_trail(reports, label)}</section>'
         )
@@ -955,7 +1577,7 @@ def _agent_work(ticket: TicketSnapshot) -> str:
             '<section class="section agent-work"><div class="section-heading agent-heading">'
             '<h2>Agent work</h2></div><p class="empty">No agent reports yet.</p></section>'
         )
-    options = ['<option value="master">Master</option>']
+    options = ['<option value="master">Combined</option>']
     panels = [_agent_report_panel(ticket.reports, "master", master=True)]
     for report in ticket.reports:
         options.append(
@@ -964,7 +1586,7 @@ def _agent_work(ticket: TicketSnapshot) -> str:
         panels.append(_agent_report_panel((report,), report.slug, master=False))
     return (
         '<section class="section agent-work"><div class="section-heading agent-heading">'
-        '<h2>Agent work</h2><label class="report-picker"><span>Report</span>'
+        '<h2>Agent work</h2><label class="report-picker"><span>Report scope</span>'
         f'<select data-report-select aria-label="Agent report">{"".join(options)}</select></label></div>'
         f'{"".join(panels)}</section>'
     )
@@ -1087,7 +1709,12 @@ def _lifecycle(ticket: TicketSnapshot) -> str:
 
 
 def _branch_badge(state: str) -> str:
-    labels = {"merged": "Merged", "open": "Open", "missing": "Missing", "unobserved": "Unobserved"}
+    labels = {
+        "merged": "Merged",
+        "open": "Open",
+        "missing": "Missing",
+        "comparison-missing": "Needs Git state",
+    }
     kind = state if state in {"merged", "open", "missing"} else ""
     return _badge(labels.get(state, state.capitalize()), kind)
 
@@ -1129,10 +1756,10 @@ def _branches(ticket: TicketSnapshot, work_token: str = "") -> str:
         behind = "?" if branch.behind is None else branch.behind
         development = _date(branch.last_development)
         date_text = f" · {development}" if development else ""
-        if branch.state == "unobserved":
-            branch_meta = "Awaiting first refresh"
+        if branch.state == "comparison-missing":
+            branch_meta = "Open this branch to generate its Git comparison"
         elif branch.state == "missing":
-            branch_meta = "Branch not found"
+            branch_meta = "Not in local or fetched refs"
         else:
             branch_meta = f"ahead {ahead} · behind {behind}{date_text}"
         rows.append(
@@ -1605,6 +2232,96 @@ def page_project(
     return _page(f"{project_summary.name} tickets — TicketBunker", body, fp)
 
 
+def _truth_bar(
+    root: Path,
+    ticket: TicketSnapshot,
+    project_key: str,
+    token: str,
+) -> str:
+    value = truth.state(root, project_key, ticket.id)
+    items = []
+    for key in ("companion", "git", "synthesis"):
+        current = value.get(key) if isinstance(value.get(key), Mapping) else {}
+        status = str(current.get("status") or "cached")
+        label = str(current.get("label") or key.capitalize())
+        detail = str(current.get("detail") or "")
+        action = str(current.get("action") or "")
+        action_html = ""
+        if token:
+            hidden = "" if action else " hidden"
+            action_html = (
+                f'<button class="truth-action" type="button" data-truth-action{hidden}>'
+                f'{html.escape(action or "Refresh")}</button>'
+            )
+        items.append(
+            f'<div class="truth-item" data-truth-item="{key}" data-state="{html.escape(status, quote=True)}">'
+            '<span class="truth-dot" aria-hidden="true"></span><span class="truth-copy">'
+            f'<span class="truth-label">{html.escape(label)}</span>'
+            f'<span class="truth-detail">{html.escape(detail)}</span>{action_html}</span></div>'
+        )
+    return (
+        '<section class="truth-strip" aria-label="Shared truth" data-truth '
+        f'data-ticket="{html.escape(ticket.id, quote=True)}" '
+        f'data-project="{html.escape(project_key, quote=True)}" '
+        f'data-token="{html.escape(token, quote=True)}" '
+        f'data-revision="{html.escape(str(value.get("content_revision") or ""), quote=True)}">'
+        f'{"".join(items)}</section>'
+    )
+
+
+def _coworker_surface(
+    root: Path,
+    ticket: TicketSnapshot,
+    project_key: str,
+    token: str,
+) -> str:
+    if not token:
+        return ""
+    user = config.get_user(root)[0] or "User"
+    options = ['<option value="combined">Combined</option>']
+    options.extend(
+        f'<option value="{html.escape(report.slug, quote=True)}">{html.escape(report.branch)}</option>'
+        for report in ticket.reports
+    )
+    tabs = []
+    for index, category in enumerate(coworker.CATEGORIES):
+        selected = category == "what"
+        tabs.append(
+            f'<button class="coworker-tab" id="coworker-tab-{category}" type="button" role="tab" '
+            f'data-coworker-tab="{category}" aria-selected="{str(selected).lower()}" '
+            f'aria-controls="coworker-messages" tabindex="{0 if selected else -1}">'
+            f'{category.capitalize()}</button>'
+        )
+    return (
+        '<button class="coworker-launcher" type="button" data-coworker-launcher '
+        'aria-label="Open ticket coworker" aria-expanded="false" aria-controls="coworker-panel">'
+        '<span aria-hidden="true">Ask</span></button>'
+        '<section class="coworker-panel" id="coworker-panel" data-coworker '
+        'aria-label="Ticket coworker" '
+        f'data-ticket="{html.escape(ticket.id, quote=True)}" '
+        f'data-project="{html.escape(project_key, quote=True)}" '
+        f'data-token="{html.escape(token, quote=True)}" hidden>'
+        '<header class="coworker-titlebar">'
+        f'<span class="coworker-title">{html.escape(user)} · {html.escape(ticket.id)}</span>'
+        '<button class="coworker-close" type="button" data-coworker-close aria-label="Close ticket coworker">×</button>'
+        '</header>'
+        f'<div class="coworker-tabs" role="tablist" aria-label="Coworker topic">{"".join(tabs)}</div>'
+        '<label class="coworker-scope"><span>Scope</span>'
+        f'<select data-coworker-scope>{"".join(options)}</select></label>'
+        '<div class="coworker-messages" id="coworker-messages" role="tabpanel" '
+        'aria-labelledby="coworker-tab-what" '
+        'data-coworker-messages aria-live="polite">'
+        '<p class="coworker-empty">Ask about this ticket or correct its synthesis.</p></div>'
+        '<form class="coworker-compose" data-coworker-form>'
+        '<label for="coworker-message">Message</label>'
+        '<textarea id="coworker-message" name="message" maxlength="8000" '
+        'placeholder="Ask for context, explain a concern, or correct the report" required></textarea>'
+        '<div class="coworker-compose-row"><p class="coworker-status" data-coworker-status></p>'
+        '<button class="coworker-send" type="submit" data-coworker-send>Send</button></div>'
+        '</form></section>'
+    )
+
+
 def page_ticket(
     root: Path,
     ticket_id: str,
@@ -1639,6 +2356,7 @@ def page_ticket(
     head_facts = f'<div class="head-facts">{"".join(facts)}</div>' if facts else ""
 
     project_name, project_url = _project_context(ticket.data)
+    resolved_project = project_key or ""
     project_html = ""
     if project_name:
         if project_url.startswith(("https://", "http://")):
@@ -1706,8 +2424,9 @@ def page_ticket(
         f'{_validation(ticket)}'
         '<header class="ticket-head">'
         f'<div class="ticket-key">{project_html}<span class="mono">{html.escape(ticket.id)}</span></div>'
-        f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}</header>'
-        f'{tabs}{panels}'
+        f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}'
+        f'{_truth_bar(root, ticket, resolved_project, work_token)}</header>'
+        f'{tabs}{panels}{_coworker_surface(root, ticket, resolved_project, work_token)}'
     )
     return _page(f"{ticket.id} — TicketBunker", body, fp)
 
@@ -1762,6 +2481,14 @@ def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> Viewer
             else "The request stopped. TicketBunker did not run a recovery command."
         )
         action = action or "Run git status, resolve the reported Git state, then retry."
+    elif code.startswith("coworker_proposal"):
+        title = "Report update stopped"
+        state = "The current child reports and Combined synthesis were kept."
+        action = action or "Review the current synthesis, then ask the coworker to prepare a new proposal."
+    elif code.startswith("coworker"):
+        title = "Coworker unavailable"
+        state = "Your conversation, reports, and source files were not changed."
+        action = action or "Run tb agent status, then retry this message."
     else:
         title = "TicketBunker needs attention"
         state = (
@@ -1872,14 +2599,14 @@ class _Handler(BaseHTTPRequestHandler):
         except commands.CommandRejected as exc:
             problem = _command_problem(exc, mutating=False)
             _record_viewer_error(self.root, self.path, exc)
-            if urlsplit(self.path).path.startswith("/work/state/"):
+            if urlsplit(self.path).path.startswith(("/work/state/", "/truth/", "/coworker/")):
                 self._send_json(409, problem.as_dict())
             else:
                 self._send(409, _problem_page(problem, self.path))
         except Exception as exc:  # Browser boundary: diagnostics stay local.
             problem = _unexpected_problem(mutating=False)
             _record_viewer_error(self.root, self.path, exc, incident=problem.incident)
-            if urlsplit(self.path).path.startswith("/work/state/"):
+            if urlsplit(self.path).path.startswith(("/work/state/", "/truth/", "/coworker/")):
                 self._send_json(500, problem.as_dict())
             else:
                 self._send(500, _problem_page(problem, self.path))
@@ -1903,6 +2630,20 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/projects":
             self._send(200, page_projects(root, fp, params))
             return
+        if path == "/truth/state":
+            value = truth.state(root, str(params.get("project") or ""), str(params.get("ticket") or ""))
+            self._send_json(200, {"ok": True, **value})
+            return
+        if path == "/coworker/state":
+            value = coworker.state(
+                root,
+                str(params.get("project") or ""),
+                str(params.get("ticket") or ""),
+                category=str(params.get("category") or "what"),
+                scope=str(params.get("scope") or "combined"),
+            )
+            self._send_json(200, {"ok": True, **value})
+            return
         match = re.fullmatch(r"/work/state/([A-Za-z0-9._-]+)", path)
         if match:
             value = workflow.state(root, match.group(1))
@@ -1921,12 +2662,14 @@ class _Handler(BaseHTTPRequestHandler):
             page = page_ticket(root, match.group(2), fp, match.group(1), self.token)
             if page is not None:
                 self._send(200, page)
+                truth.queue_refresh(root, match.group(1), match.group(2))
                 return
         match = re.fullmatch(r"/ticket/([A-Za-z0-9._-]+)", path)
         if match:
-            page = page_ticket(root, match.group(1), fp)
+            page = page_ticket(root, match.group(1), fp, work_token=self.token)
             if page is not None:
                 self._send(200, page)
+                truth.queue_refresh(root, "", match.group(1))
                 return
         body = (
             '<div class="crumbs"><a href="/">Tickets</a></div>'
@@ -1949,7 +2692,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(500, problem.as_dict())
 
     def _do_POST(self) -> None:
-        if urlsplit(self.path).path != "/work":
+        path = urlsplit(self.path).path
+        commands_by_path = {
+            "/work": "workflow.start",
+            "/truth/refresh": "truth.queue",
+            "/coworker/chat": "coworker.chat",
+            "/coworker/proposal/accept": "coworker.proposal.accept",
+            "/coworker/proposal/dismiss": "coworker.proposal.dismiss",
+        }
+        command = commands_by_path.get(path)
+        if command is None:
             self._send_json(404, {"ok": False, "code": "not_found", "message": "No such action."})
             return
         supplied = self.headers.get("X-TicketBunker-Token") or ""
@@ -1966,7 +2718,7 @@ class _Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > 65536:
             self._send_json(
                 400,
-                {"ok": False, "code": "request_invalid", "message": "The Work request is empty or too large."},
+                {"ok": False, "code": "request_invalid", "message": "The request is empty or too large."},
             )
             return
         try:
@@ -1974,21 +2726,23 @@ class _Handler(BaseHTTPRequestHandler):
         except (UnicodeDecodeError, ValueError):
             self._send_json(
                 400,
-                {"ok": False, "code": "request_invalid", "message": "The Work request must be one JSON object."},
+                {"ok": False, "code": "request_invalid", "message": "The request must be one JSON object."},
             )
             return
         if not isinstance(payload, dict):
             self._send_json(
                 400,
-                {"ok": False, "code": "request_invalid", "message": "The Work request must be one JSON object."},
+                {"ok": False, "code": "request_invalid", "message": "The request must be one JSON object."},
             )
             return
+        if command == "truth.queue":
+            payload["force"] = True
         result = commands.dispatch(
-            "workflow.start",
+            command,
             payload,
             commands.CommandContext(self.root, transport="http"),
         )
-        self._send_json(200, result)
+        self._send_json(202 if command == "truth.queue" else 200, result)
 
     def _send_json(self, code: int, value: Mapping[str, Any]) -> None:
         self._send(
