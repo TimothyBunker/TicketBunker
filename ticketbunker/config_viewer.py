@@ -699,14 +699,17 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(value).encode("utf-8"), "application/json; charset=utf-8")
 
     def _send(self, status: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionError, TimeoutError):
+            pass
 
     def log_message(self, *_args: object) -> None:
         pass

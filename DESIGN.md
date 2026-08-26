@@ -414,6 +414,16 @@ embedded only in same-origin pages and remains bound to localhost. Do not add
 network exposure to the viewer. Viewer responses disable caching, framing,
 referrer propagation, and MIME sniffing.
 
+**The viewer is an error boundary, not a traceback surface.** Expected Git,
+remote, and workflow rejections render three concise facts: what stopped, what
+state was preserved, and the next command or action. Raw Git stderr and Python
+details never enter HTML or JSON responses. Unexpected failures use the same
+shape with an opaque diagnostic ID; full detail is appended only to the local
+Git administrative area at `.git/ticketbunker/viewer-errors.jsonl`. A browser
+disconnect during a response is normal transport state and produces no error.
+Problem pages do not poll or auto-retry, and TicketBunker never performs a
+recovery merge, switch, reset, stash, pull, or rebase on the user's behalf.
+
 **There is one Python read model.** `ticketbunker/api.py` exposes the public,
 read-only `TicketCatalog`, `TicketDatabase`, query/page types, and typed
 ticket/branch/report snapshots. `TicketCatalog` reads lightweight summaries

@@ -7,11 +7,15 @@ the isolated Work control dispatches the same guarded command as the CLI.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import html
 import json
 import re
 import secrets
+import sys
+import traceback
+from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
@@ -119,6 +123,17 @@ p { margin: 0 0 12px; }
 .view-tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
 .view-panel[hidden], .report-panel[hidden] { display: none; }
 .section { margin: 0 0 34px; }
+.problem-card { max-width: 680px; margin: 56px auto 0; padding: 26px 28px; border: 1px solid var(--line); border-radius: var(--radius); }
+.problem-card h1 { margin: 0 0 10px; }
+.problem-card > p { max-width: 65ch; }
+.problem-state { display: grid; gap: 15px; margin: 24px 0; }
+.problem-state div { padding-top: 14px; border-top: 1px solid var(--line); }
+.problem-state strong { display: block; margin-bottom: 4px; color: var(--fg); font-size: 12px; }
+.problem-state code { overflow-wrap: anywhere; white-space: normal; }
+.problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.problem-actions .primary { display: inline-flex; padding: 7px 12px; border-radius: 3px; color: white; background: var(--accent); font-weight: 650; }
+.problem-actions .primary:hover { text-decoration: none; background: #0055cc; }
+.problem-id { margin-top: 20px; color: var(--muted); font-size: 11px; }
 .description, .issue-activity { max-width: 75ch; }
 .rich-text > :last-child { margin-bottom: 0; }
 .rich-text h3 { margin: 22px 0 8px; font-size: 15px; }
@@ -500,6 +515,14 @@ function setWorkStatus(message, kind = '') {
   workStatus.className = `work-state ${kind}`.trim();
 }
 
+function workError(value, fallback) {
+  return [
+    value.message || fallback,
+    value.state || '',
+    value.action ? `Next: ${value.action}` : ''
+  ].filter(Boolean).join(' ');
+}
+
 async function loadWorkState() {
   if (!workForm || workForm.dataset.loaded === 'true') return;
   setWorkStatus('Checking the local repository…');
@@ -507,7 +530,7 @@ async function loadWorkState() {
   try {
     const response = await fetch(`/work/state/${encodeURIComponent(workForm.dataset.ticket)}`);
     const value = await response.json();
-    if (!response.ok) throw new Error(value.message || 'Repository preflight failed.');
+    if (!response.ok) throw new Error(workError(value, 'Repository preflight failed.'));
     workBase.replaceChildren(...value.base_branches.map((branch) => {
       const option = document.createElement('option');
       option.value = branch;
@@ -559,7 +582,7 @@ if (workForm) workForm.addEventListener('submit', async (event) => {
       })
     });
     const value = await response.json();
-    if (!response.ok) throw new Error(value.message || 'Branch creation failed.');
+    if (!response.ok) throw new Error(workError(value, 'Branch creation failed.'));
     setWorkStatus(`Created and switched to ${value.branch}.`, 'success');
     window.setTimeout(() => location.reload(), 900);
   } catch (error) {
@@ -1594,6 +1617,8 @@ def page_ticket(
             ticket = TicketCatalog(root).get_ticket(project_key, ticket_id)
         else:
             ticket = TicketDatabase(root).get_ticket(ticket_id, refresh_branches=True)
+    except commands.CommandRejected:
+        raise
     except (FileNotFoundError, KeyError, ValueError):
         return None
 
@@ -1683,11 +1708,179 @@ def page_ticket(
     return _page(f"{ticket.id} — TicketBunker", body, fp)
 
 
+@dataclass(frozen=True)
+class ViewerProblem:
+    """A browser-safe explanation of a failed viewer request."""
+
+    code: str
+    title: str
+    message: str
+    state: str
+    action: str
+    incident: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        value = {"ok": False, **asdict(self)}
+        if not self.incident:
+            value.pop("incident")
+        return value
+
+
+def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> ViewerProblem:
+    """Translate backend detail into concise, stable browser copy."""
+    lines = [line.strip() for line in exc.message.splitlines() if line.strip()]
+    message = next(
+        (
+            line
+            for line in lines
+            if not line.casefold().startswith(("next:", "git said:", "traceback"))
+        ),
+        "TicketBunker could not finish this request.",
+    )
+    action = next(
+        (line.split(":", 1)[1].strip() for line in lines if line.casefold().startswith("next:")),
+        "",
+    )
+    code = exc.code.casefold()
+    if "worktree_dirty" in code:
+        title = "Working tree needs attention"
+        state = "Nothing changed. Your uncommitted files are still in place."
+        action = action or "Commit or stash your changes, then retry."
+    elif "remote" in code or "companion" in code or "network" in code:
+        title = "Remote state unavailable"
+        state = "The cached local state was kept. Your working files were not changed."
+        action = action or "Run tb doctor, restore remote access, then retry."
+    elif "branch" in code or "git" in code:
+        title = "Branch action stopped"
+        state = (
+            "The operation stopped without a confirmed result. Check the current branch and Git status."
+            if mutating
+            else "The request stopped. TicketBunker did not run a recovery command."
+        )
+        action = action or "Run git status, resolve the reported Git state, then retry."
+    else:
+        title = "TicketBunker needs attention"
+        state = (
+            "The operation stopped without a confirmed result. Check the current branch and Git status."
+            if mutating
+            else "The request stopped. TicketBunker did not run a recovery command."
+        )
+        action = action or "Run tb doctor, then retry."
+    return ViewerProblem(exc.code, title, message, state, action)
+
+
+def _unexpected_problem(*, mutating: bool) -> ViewerProblem:
+    return ViewerProblem(
+        code="viewer_internal_error",
+        title="Viewer stopped safely",
+        message="TicketBunker could not finish this request.",
+        state=(
+            "The operation stopped before TicketBunker could confirm completion. Run git status before continuing."
+            if mutating
+            else "The request stopped. Your source worktree was not intentionally changed."
+        ),
+        action="Run tb doctor, then reload this page.",
+        incident=secrets.token_hex(4),
+    )
+
+
+def _git_admin_dir(root: Path) -> Path | None:
+    marker = root / ".git"
+    if marker.is_dir():
+        return marker
+    if not marker.is_file():
+        return None
+    try:
+        value = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not value.startswith("gitdir:"):
+        return None
+    target = Path(value.split(":", 1)[1].strip())
+    return target if target.is_absolute() else (root / target).resolve()
+
+
+def _record_viewer_error(
+    root: Path,
+    path: str,
+    exc: BaseException,
+    *,
+    incident: str = "",
+) -> None:
+    """Keep diagnostic detail in Git's local administrative area, never in the page."""
+    git_dir = _git_admin_dir(root)
+    if git_dir is None:
+        return
+    try:
+        log_dir = git_dir / "ticketbunker"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        value = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "incident": incident,
+            "path": path,
+            "error": f"{type(exc).__module__}.{type(exc).__qualname__}",
+            "message": str(exc),
+            "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        }
+        with (log_dir / "viewer-errors.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _problem_page(problem: ViewerProblem, retry_path: str) -> bytes:
+    incident = (
+        f'<p class="problem-id">Diagnostic ID <code>{html.escape(problem.incident)}</code></p>'
+        if problem.incident
+        else ""
+    )
+    body = (
+        '<section class="problem-card">'
+        f'<h1>{html.escape(problem.title)}</h1>'
+        f'<p>{html.escape(problem.message)}</p>'
+        '<div class="problem-state">'
+        f'<div><strong>Current state</strong>{html.escape(problem.state)}</div>'
+        f'<div><strong>Next</strong>{html.escape(problem.action)}</div>'
+        '</div><div class="problem-actions">'
+        f'<a class="primary" href="{html.escape(retry_path, quote=True)}">Try again</a>'
+        '<a href="/">Tickets</a></div>'
+        f'{incident}</section>'
+    )
+    document = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+        '<link rel="icon" href="data:,">'
+        f'<title>{html.escape(problem.title)} | TicketBunker</title><style>{_STYLE}</style></head>'
+        f'<body><main>{body}</main></body></html>'
+    )
+    return document.encode("utf-8")
+
+
 class _Handler(BaseHTTPRequestHandler):
     root: Path
     token: str
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
+        try:
+            self._do_GET()
+        except (ConnectionError, TimeoutError):
+            pass
+        except commands.CommandRejected as exc:
+            problem = _command_problem(exc, mutating=False)
+            _record_viewer_error(self.root, self.path, exc)
+            if urlsplit(self.path).path.startswith("/work/state/"):
+                self._send_json(409, problem.as_dict())
+            else:
+                self._send(409, _problem_page(problem, self.path))
+        except Exception as exc:  # Browser boundary: diagnostics stay local.
+            problem = _unexpected_problem(mutating=False)
+            _record_viewer_error(self.root, self.path, exc, incident=problem.incident)
+            if urlsplit(self.path).path.startswith("/work/state/"):
+                self._send_json(500, problem.as_dict())
+            else:
+                self._send(500, _problem_page(problem, self.path))
+
+    def _do_GET(self) -> None:
         root = self.root
         fp = fingerprint(root)
         request = urlsplit(self.path)
@@ -1708,11 +1901,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         match = re.fullmatch(r"/work/state/([A-Za-z0-9._-]+)", path)
         if match:
-            try:
-                value = workflow.state(root, match.group(1))
-            except commands.CommandRejected as exc:
-                self._send_json(409, exc.as_dict())
-                return
+            value = workflow.state(root, match.group(1))
             self._send_json(200, {"ok": True, **value})
             return
         match = re.fullmatch(r"/project/([A-Z][A-Z0-9]*)", path)
@@ -1742,6 +1931,20 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(404, _page("Not found", body, fp))
 
     def do_POST(self) -> None:  # noqa: N802 (http.server API)
+        try:
+            self._do_POST()
+        except (ConnectionError, TimeoutError):
+            pass
+        except commands.CommandRejected as exc:
+            problem = _command_problem(exc, mutating=True)
+            _record_viewer_error(self.root, self.path, exc)
+            self._send_json(409, problem.as_dict())
+        except Exception as exc:  # Browser boundary: diagnostics stay local.
+            problem = _unexpected_problem(mutating=True)
+            _record_viewer_error(self.root, self.path, exc, incident=problem.incident)
+            self._send_json(500, problem.as_dict())
+
+    def _do_POST(self) -> None:
         if urlsplit(self.path).path != "/work":
             self._send_json(404, {"ok": False, "code": "not_found", "message": "No such action."})
             return
@@ -1776,15 +1979,11 @@ class _Handler(BaseHTTPRequestHandler):
                 {"ok": False, "code": "request_invalid", "message": "The Work request must be one JSON object."},
             )
             return
-        try:
-            result = commands.dispatch(
-                "workflow.start",
-                payload,
-                commands.CommandContext(self.root, transport="http"),
-            )
-        except commands.CommandRejected as exc:
-            self._send_json(409, exc.as_dict())
-            return
+        result = commands.dispatch(
+            "workflow.start",
+            payload,
+            commands.CommandContext(self.root, transport="http"),
+        )
         self._send_json(200, result)
 
     def _send_json(self, code: int, value: Mapping[str, Any]) -> None:
@@ -1795,20 +1994,33 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
     def _send(self, code: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionError, TimeoutError):
+            pass
 
     def log_message(self, *_args: object) -> None:
         pass
 
 
+class _ViewerServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, _request: object, _client_address: object) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionError, TimeoutError)):
+            return
+        print("TicketBunker viewer request stopped safely. Run tb doctor for help.", file=sys.stderr)
+
+
 def serve(root: Path, port: int) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (_Handler,), {"root": root, "token": secrets.token_urlsafe(32)})
-    return ThreadingHTTPServer(("127.0.0.1", port), handler)
+    return _ViewerServer(("127.0.0.1", port), handler)

@@ -5,9 +5,11 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
-from ticketbunker import layout
+from ticketbunker import commands, layout, viewer
 from ticketbunker.viewer import (
     page_index,
     page_project,
@@ -382,6 +384,93 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(ticket_headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(ticket_headers["X-Frame-Options"], "DENY")
         self.assertEqual(ticket_headers["Referrer-Policy"], "no-referrer")
+
+    def test_git_failure_page_explains_state_and_hides_raw_diagnostics(self) -> None:
+        failure = commands.CommandRejected(
+            "git_workflow_failed",
+            "Could not refresh the ticket branches.\n"
+            "Next: Run git status, fix the remote, then reload.\n"
+            "Git said: fatal: temporary failure in name resolution\n"
+            "BrokenPipeError: internal transport detail",
+        )
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(viewer, "page_ticket", side_effect=failure):
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(
+                        f"http://127.0.0.1:{server.server_address[1]}/ticket/TB-9"
+                    )
+                response = caught.exception
+                page = response.read().decode("utf-8")
+                response.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(caught.exception.code, 409)
+        self.assertIn("Branch action stopped", page)
+        self.assertIn("Could not refresh the ticket branches.", page)
+        self.assertIn("Current state", page)
+        self.assertIn("Run git status, fix the remote, then reload.", page)
+        self.assertNotIn("Git said", page)
+        self.assertNotIn("temporary failure in name resolution", page)
+        self.assertNotIn("BrokenPipeError", page)
+        self.assertNotIn("Traceback", page)
+        self.assertNotIn("setInterval", page)
+
+    def test_unexpected_failure_is_private_and_leaves_a_diagnostic_id(self) -> None:
+        (self.root / ".git").mkdir()
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(
+                viewer,
+                "page_ticket",
+                side_effect=RuntimeError("private implementation detail"),
+            ):
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(
+                        f"http://127.0.0.1:{server.server_address[1]}/ticket/TB-9"
+                    )
+                response = caught.exception
+                page = response.read().decode("utf-8")
+                response.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(caught.exception.code, 500)
+        self.assertIn("Viewer stopped safely", page)
+        self.assertIn("Diagnostic ID", page)
+        self.assertIn("Run tb doctor, then reload this page.", page)
+        self.assertNotIn("RuntimeError", page)
+        self.assertNotIn("private implementation detail", page)
+        self.assertNotIn("Traceback", page)
+        record = json.loads(
+            (self.root / ".git" / "ticketbunker" / "viewer-errors.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()[-1]
+        )
+        self.assertIn(record["incident"], page)
+        self.assertEqual(record["message"], "private implementation detail")
+        self.assertIn("RuntimeError", record["traceback"])
+
+    def test_client_disconnect_during_response_is_silent(self) -> None:
+        handler = object.__new__(viewer._Handler)
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler.wfile = mock.Mock()
+        handler.wfile.write.side_effect = BrokenPipeError("browser closed")
+
+        handler._send(200, b"response")
+
+        handler.wfile.write.assert_called_once_with(b"response")
 
     def test_report_markup_is_escaped_before_tags_are_reintroduced(self) -> None:
         rendered = render_report("- [real] Safe `<img src=x onerror=alert(1)>`")

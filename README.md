@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.3-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.3-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.4-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.4-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -259,6 +259,12 @@ preserve tracker-shaped and project-specific information in `ticket.json`.
 Activity kinds such as comments, history, work logs, logs, and notes are
 mirrored from the configured source; the read-only viewer offers no parallel
 comment or note authoring path.
+
+If Git or a remote prevents a viewer action, the page says what stopped, what
+state was preserved, and what to do next. It does not expose Python tracebacks
+or raw Git stderr. Unexpected faults show a short diagnostic ID and keep their
+details locally in `.git/ticketbunker/viewer-errors.jsonl`; closing or reloading
+the browser during a response is treated as a normal disconnect.
 
 ### GitHub Issues and Projects
 
