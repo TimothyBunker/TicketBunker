@@ -244,6 +244,37 @@ def probe_remote_heads(
     return heads, ""
 
 
+def refresh_source_refs(source_root: Path, ledger: Ledger) -> tuple[bool, str]:
+    """Refresh ``origin/*`` without touching the source worktree.
+
+    Ticket-open uses this narrow operation to discover collaborators' branches.
+    A fetch is safe with staged, unstaged, and untracked files: unlike pull or
+    rebase it only updates remote-tracking refs. Missing/offline origins retain
+    the cached refs and return their diagnostic instead of hiding local work.
+    """
+    source_root = Path(source_root).resolve()
+    remotes = {
+        value.strip()
+        for value in git(
+            source_root,
+            ["remote"],
+            ledger,
+            "ticket_open_refs",
+            check=False,
+        ).splitlines()
+        if value.strip()
+    }
+    if "origin" not in remotes:
+        return True, ""
+    output, status = _remote_git_status(
+        source_root,
+        ["fetch", "--prune", "origin"],
+        ledger,
+        "ticket_open_refs",
+    )
+    return status == 0, "" if status == 0 else output.strip()
+
+
 def _remote_error(
     remote: str,
     detail: str,

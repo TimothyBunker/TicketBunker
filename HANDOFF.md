@@ -121,6 +121,11 @@ exercise unless a live boundary is explicitly called out.
 - An assignment/session is published only after Git succeeds. Existing
   branches use strict `workflow.attach`; a name without the bounded ticket key
   is rejected with a rename instruction.
+- Opening a ticket safely fetches/prunes `origin` refs, then rebuilds the
+  Branches view from the union of local refs, remote-tracking refs, and explicit
+  assignments. It works with uncommitted source files because it never pulls,
+  rebases, switches, merges, resets, or stashes; offline opens keep local and
+  cached refs. New refs are marked unobserved until the full pipeline runs.
 - The localhost Work POST is explicit and CSRF-token protected. Viewer pages
   remain bound to `127.0.0.1`, escape ticket/agent content, disable caching,
   framing, referrer propagation, and MIME sniffing, and never expose ticket,
@@ -148,7 +153,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.2 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.3 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -188,7 +193,7 @@ caveats are in `docs/mock-product-loop.md`; the scenario is also a unit test.
 Automatic-agent tests separately cover event coalescing, existing-hook
 preservation/restoration, the gated worker path, frozen-worker isolation, and
 a real non-blocking post-commit hook with the deterministic stub. The full
-suite is 106 tests.
+suite is 107 tests.
 
 Browser QA was performed in headless Google Chrome at desktop and mobile sizes.
 The Work panel, base selector, readiness state, responsive stacking, and

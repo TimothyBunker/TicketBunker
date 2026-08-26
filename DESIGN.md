@@ -834,6 +834,15 @@ the pattern is enforced by construction at the same place the branch is born.
 Failure messages name the state that stopped Git and what the user must do next;
 no reset, forced checkout, auto-stash, or non-fast-forward merge occurs.
 
+Opening a ticket performs a narrower safe refresh before rendering Branches:
+`git fetch --prune origin`, followed by one union of matching local and
+remote-tracking refs plus explicit ticket assignments. Fetch updates refs only,
+so it is allowed while the source worktree is dirty and never becomes an
+implicit pull, rebase, switch, merge, stash, or reset. If the network is
+unavailable, the ticket still opens from local branches and cached remote refs;
+the failed fetch remains ledgered. Newly discovered branches appear as
+unobserved until the deterministic pipeline computes their full metadata.
+
 **The ticket is the deliberate step, so creating one must not hurt.** A
 ticket mirrors the useful core of a tracker issue — id, title, description,
 type (bug/task/story), status (todo/in-progress/in-review/done), priority,

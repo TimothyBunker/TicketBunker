@@ -151,6 +151,35 @@ class TicketWorkflowTests(unittest.TestCase):
         self.assertEqual(result["base_branches"][0], "ecs")
         self.assertEqual(result["current_branch"], "ecs")
 
+    def test_ticket_open_fetches_remote_and_local_branches_without_rebase(self) -> None:
+        run_git(self.source, "branch", "Ada/ECS-4-local", "ecs")
+        collaborator = Path(self.tmp.name) / "collaborator"
+        subprocess.run(
+            ["git", "clone", "--branch", "ecs", str(self.source_remote), str(collaborator)],
+            check=True,
+            capture_output=True,
+        )
+        run_git(collaborator, "switch", "-c", "Lin/ECS-4-remote")
+        run_git(collaborator, "push", "-u", "origin", "Lin/ECS-4-remote")
+        dirty = self.source / "unfinished.txt"
+        dirty.write_text("keep this work\n", encoding="utf-8")
+        before = run_git(self.source, "branch", "--show-current")
+
+        opened = api.TicketCatalog(self.source).get_ticket("ECS", "ECS-4")
+
+        branches = {branch.name: branch.state for branch in opened.branches}
+        self.assertEqual(branches["Ada/ECS-4-local"], "unobserved")
+        self.assertEqual(branches["origin/Lin/ECS-4-remote"], "unobserved")
+        page = viewer.page_ticket(
+            self.source, "ECS-4", "fingerprint", "ECS"
+        ).decode("utf-8")
+        self.assertIn("Ada/ECS-4-local", page)
+        self.assertIn("origin/Lin/ECS-4-remote", page)
+        self.assertEqual(run_git(self.source, "branch", "--show-current"), before)
+        self.assertTrue(dirty.is_file())
+        self.assertFalse((self.source / ".git" / "rebase-merge").exists())
+        self.assertFalse((self.source / ".git" / "rebase-apply").exists())
+
     def test_viewer_work_control_uses_csrf_protected_shared_command(self) -> None:
         server = viewer.serve(self.source, 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

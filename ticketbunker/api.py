@@ -1,4 +1,4 @@
-"""Stable, read-only Python access to the repository ticket database.
+"""Stable Python access to the repository ticket database.
 
 The CLI and localhost viewer are two presentations of the same committed
 ``.tb/`` data.  This module is the shared query boundary between storage and
@@ -7,7 +7,9 @@ reports into one typed snapshot without inventing a second source of truth.
 
 Writes go through :mod:`ticketbunker.commands`; those shared handlers route
 typed information through :mod:`ticketbunker.handlers`. Keeping this query
-module read-only makes that boundary explicit for API users and the viewer.
+module read-only by default makes that boundary explicit for API users. A
+ticket-open query may opt into refreshing remote-tracking refs; it never
+switches, merges, rebases, or edits the source worktree.
 """
 
 from __future__ import annotations
@@ -19,8 +21,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from . import config, layout, project, ticketindex, types
+from .adapters.gitrun import git_status
 from .builders import master as master_mod
+from .ledger import Ledger
 from .processors.anchorcheck import predates, verified_stamp
+from .processors.stages import relate_branches
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -50,6 +55,65 @@ def _branch_value(per_branch: Mapping[str, Any], branch: str) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     return {}
+
+
+def _live_branch_resolution(project_root: Path, data: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Fetch and resolve current local/remote ticket branches for one open."""
+    candidates = []
+    configured_repo = str(data.get("repo") or "").strip()
+    if configured_repo:
+        candidates.append(Path(configured_repo).expanduser())
+    candidates.append(Path(project_root))
+    repo = None
+    ledger = Ledger(Path(project_root) / layout.TB_DIR / "ticket-open.jsonl")
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        inside, status = git_status(
+            resolved,
+            ["rev-parse", "--is-inside-work-tree"],
+            ledger,
+            "ticket_open_refs",
+        )
+        if status == 0 and inside.strip() == "true":
+            repo = resolved
+            break
+    if repo is None:
+        return None
+
+    # A failed network refresh intentionally falls back to cached origin refs
+    # plus every current local branch. The failure remains visible in the
+    # execution ledger without making an offline ticket disappear.
+    project.refresh_source_refs(repo, ledger)
+    output, status = git_status(
+        repo,
+        ["branch", "--all", "--format=%(refname:short)"],
+        ledger,
+        "ticket_open_refs",
+    )
+    if status != 0:
+        return None
+    names = [
+        value
+        for value in (line.strip() for line in output.splitlines())
+        if value and not value.endswith("/HEAD")
+    ]
+    if not names:
+        return None
+    assigned_value = data.get("assigned_branches")
+    assigned = [
+        value
+        for value in assigned_value if isinstance(value, str) and value
+    ] if isinstance(assigned_value, list) else []
+    branches, rules, missing = relate_branches(
+        names,
+        str(data.get("key") or data.get("id") or ""),
+        assigned,
+    )
+    return {
+        "branches": branches,
+        "match_rules": rules,
+        "assigned_missing": missing,
+    }
 
 
 def _section(text: str, name: str) -> str:
@@ -358,7 +422,7 @@ class TicketDatabase:
             )
         return tuple(summaries)
 
-    def get_ticket(self, ticket_id: str) -> TicketSnapshot:
+    def get_ticket(self, ticket_id: str, *, refresh_branches: bool = False) -> TicketSnapshot:
         if not config.validate_ticket_id(ticket_id):
             raise KeyError(ticket_id)
         bunker = (
@@ -372,6 +436,10 @@ class TicketDatabase:
             raise KeyError(ticket_id)
 
         resolution = _read_json(paths["branch_resolution"])
+        if refresh_branches:
+            live_resolution = _live_branch_resolution(self.project_root, data)
+            if live_resolution is not None:
+                resolution = {**resolution, **live_resolution}
         merge_per = _read_json(paths["merge_history"]).get("per_branch", {})
         author_per = _read_json(paths["authorship"]).get("per_branch", {})
         merge_per = merge_per if isinstance(merge_per, dict) else {}
@@ -732,7 +800,7 @@ class TicketCatalog:
         self._tickets_dir(project_key)
         if self.locator is not None:
             project.materialize_ticket(self.source_root, project_key, ticket_id)
-        return self.database(project_key).get_ticket(ticket_id)
+        return self.database(project_key).get_ticket(ticket_id, refresh_branches=True)
 
 
 __all__ = [

@@ -1593,7 +1593,7 @@ def page_ticket(
         if project_key:
             ticket = TicketCatalog(root).get_ticket(project_key, ticket_id)
         else:
-            ticket = TicketDatabase(root).get_ticket(ticket_id)
+            ticket = TicketDatabase(root).get_ticket(ticket_id, refresh_branches=True)
     except (FileNotFoundError, KeyError, ValueError):
         return None
 

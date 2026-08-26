@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.2-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.2-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-0.2.3-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-0.2.3-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -159,6 +159,12 @@ sync`) and embedded legacy bunkers remain supported. On every later clone,
 `tb init` reads the locator and connects automatically. A fresh connection checks
 out only committed ticket indexes; opening or changing a ticket fetches that
 one bunker without copying every ticket and report.
+
+Opening a ticket also runs a safe `git fetch --prune origin` in the source
+repository and rebuilds its Branches tab from matching local branches,
+remote-tracking branches, and explicit assignments. Fetch does not touch the
+worktree, so uncommitted files are preserved and no pull, rebase, switch,
+merge, reset, or stash occurs. Offline opens use local and cached refs.
 
 `tb init` performs its own remote probe. It retries transient DNS resolution,
 uses bounded non-interactive Git operations, and distinguishes DNS, timeout,
