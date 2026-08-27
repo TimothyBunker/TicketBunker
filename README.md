@@ -205,7 +205,9 @@ token surfaces.
 The Local settings page stays outside the companion repository. Its editor
 command is saved only in `~/.tbconfig`; leaving it blank automatically selects
 `vim` when available, then `nano`. `TB_EDITOR`, `VISUAL`/`EDITOR`, and Git's
-`core.editor` remain explicit higher-priority choices.
+`core.editor` remain explicit higher-priority choices. On Windows, the lookup
+also recognizes Vim bundled with Git even when only Git Bash can see it on
+`PATH`.
 
 To move an old embedded database safely:
 

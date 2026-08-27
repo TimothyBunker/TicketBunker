@@ -49,6 +49,26 @@ class EditorTests(unittest.TestCase):
 
         self.assertEqual(value, ("nano", "automatic"))
 
+    def test_windows_git_bundled_vim_is_available_to_the_viewer(self) -> None:
+        git = self.root / "Git" / "cmd" / "git.exe"
+        vim = self.root / "Git" / "usr" / "bin" / "vim.exe"
+        git.parent.mkdir(parents=True)
+        vim.parent.mkdir(parents=True)
+        git.write_text("git", encoding="utf-8")
+        vim.write_text("vim", encoding="utf-8")
+
+        candidates = editor._windows_git_editor_paths("vim", str(git))
+
+        self.assertIn(vim, candidates)
+
+    def test_editor_launch_materializes_the_discovered_executable(self) -> None:
+        with mock.patch.object(editor, "_find_editor_executable", return_value="/found/vim"):
+            argv, terminal = editor._editor_argv("vim", self.root / "src" / "main.py", 2)
+
+        self.assertEqual(argv[0], "/found/vim")
+        self.assertEqual(argv[1], "+2")
+        self.assertTrue(terminal)
+
     def test_local_editor_command_persists_and_auto_clears_it(self) -> None:
         with mock.patch.object(editor.shutil, "which", return_value="/usr/bin/nano"):
             saved = commands.dispatch(
@@ -90,19 +110,20 @@ class EditorTests(unittest.TestCase):
             os.environ,
             {"TB_EDITOR": "code --goto {file}:{line}"},
         ):
-            with mock.patch.object(editor.subprocess, "Popen") as opened:
-                value = commands.dispatch(
-                    "editor.open",
-                    {"path": "src/main.py", "line": 2},
-                    commands.CommandContext(self.root, transport="test"),
-                )
+            with mock.patch.object(editor, "_find_editor_executable", return_value="/found/code"):
+                with mock.patch.object(editor.subprocess, "Popen") as opened:
+                    value = commands.dispatch(
+                        "editor.open",
+                        {"path": "src/main.py", "line": 2},
+                        commands.CommandContext(self.root, transport="test"),
+                    )
 
         self.assertTrue(value["opened"])
         self.assertEqual(value["path"], "src/main.py")
         self.assertEqual(value["line"], 2)
         self.assertEqual(
             opened.call_args.args[0],
-            ["code", "--goto", f"{self.root / 'src' / 'main.py'}:2"],
+            ["/found/code", "--goto", f"{self.root / 'src' / 'main.py'}:2"],
         )
         self.assertFalse(opened.call_args.kwargs.get("shell", False))
 
@@ -121,17 +142,20 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "source_path_outside_project")
 
     def test_code_editor_gets_its_native_goto_arguments(self) -> None:
-        argv, terminal = editor._editor_argv("code", self.root / "src" / "main.py", 2)
+        with mock.patch.object(editor, "_find_editor_executable", return_value="/found/code"):
+            argv, terminal = editor._editor_argv("code", self.root / "src" / "main.py", 2)
 
         self.assertEqual(argv[-2:], ["--goto", f"{self.root / 'src' / 'main.py'}:2"])
+        self.assertEqual(argv[0], "/found/code")
         self.assertFalse(terminal)
 
     def test_templated_vim_still_requests_a_terminal(self) -> None:
-        argv, terminal = editor._editor_argv(
-            "vim +{line} {file}", self.root / "src" / "main.py", 2
-        )
+        with mock.patch.object(editor, "_find_editor_executable", return_value="/found/vim"):
+            argv, terminal = editor._editor_argv(
+                "vim +{line} {file}", self.root / "src" / "main.py", 2
+            )
 
-        self.assertEqual(argv, ["vim", "+2", str(self.root / "src" / "main.py")])
+        self.assertEqual(argv, ["/found/vim", "+2", str(self.root / "src" / "main.py")])
         self.assertTrue(terminal)
 
 

@@ -18,6 +18,53 @@ _GOTO_EDITORS = {"code", "code-insiders", "codium", "cursor", "windsurf"}
 _AUTOMATIC_EDITORS = ("vim", "nano")
 
 
+def _windows_git_editor_paths(command: str, git_executable: str | None = None) -> list[Path]:
+    """Return editor locations bundled with Git for Windows.
+
+    Git Bash adds ``Git/usr/bin`` to its own PATH, but a native process
+    launched from the browser commonly sees only ``Git/cmd``. Keep this
+    lookup explicit so terminal availability and viewer availability agree.
+    """
+    name = Path(command).name.casefold().removesuffix(".exe")
+    if name != "vim":
+        return []
+    roots: list[Path] = []
+    git = git_executable or shutil.which("git")
+    if git:
+        git_path = Path(git).expanduser()
+        if git_path.parent.name.casefold() in {"cmd", "bin"}:
+            roots.append(git_path.parent.parent)
+    for variable, suffix in (
+        ("ProgramFiles", "Git"),
+        ("ProgramFiles(x86)", "Git"),
+        ("LOCALAPPDATA", "Programs/Git"),
+    ):
+        base = os.environ.get(variable)
+        if base:
+            roots.append(Path(base) / suffix)
+    paths: list[Path] = []
+    for root in roots:
+        for relative in ("usr/bin/vim.exe", "mingw64/bin/vim.exe"):
+            candidate = root / relative
+            if candidate not in paths:
+                paths.append(candidate)
+    return paths
+
+
+def _find_editor_executable(command: str) -> str | None:
+    executable = Path(command).expanduser()
+    if executable.is_absolute():
+        return str(executable) if executable.is_file() else None
+    found = shutil.which(command)
+    if found:
+        return found
+    if os.name == "nt":
+        for candidate in _windows_git_editor_paths(command):
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
 def resolve_editor(root: Path) -> tuple[str, str]:
     """Return the effective editor command and the machine-local source."""
     if os.environ.get("TB_EDITOR"):
@@ -37,7 +84,7 @@ def resolve_editor(root: Path) -> tuple[str, str]:
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip(), "Git core.editor"
     for candidate in _AUTOMATIC_EDITORS:
-        if shutil.which(candidate):
+        if _find_editor_executable(candidate):
             return candidate, "automatic"
     return "", "unavailable"
 
@@ -66,9 +113,7 @@ def _validate_editor(command: str) -> None:
         ) from exc
     if not argv:
         return
-    executable = Path(argv[0]).expanduser()
-    available = executable.is_file() if executable.is_absolute() else shutil.which(argv[0]) is not None
-    if not available:
+    if not _find_editor_executable(argv[0]):
         raise commands.CommandRejected(
             "local_editor_missing",
             f"{argv[0]} is not available on this machine. Choose an installed editor or leave the field blank for automatic selection.",
@@ -111,6 +156,14 @@ def _editor_argv(editor: str, source: Path, line: int) -> tuple[list[str], bool]
             "source_editor_missing",
             "No local editor was found. Open 'tb config' and choose Local settings, then select an editor.",
         )
+    resolved = _find_editor_executable(argv[0])
+    if not resolved:
+        raise commands.CommandRejected(
+            "source_editor_missing",
+            f"{argv[0]} is no longer available on this machine. Open 'tb config', choose Local settings, "
+            "and select another editor.",
+        )
+    argv[0] = resolved
     source_text = str(source)
     name = Path(argv[0]).name.casefold().removesuffix(".exe")
     templated = any("{file}" in part or "{line}" in part for part in argv)

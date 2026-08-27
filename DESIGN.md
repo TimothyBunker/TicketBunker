@@ -490,7 +490,10 @@ the current branch, then launches the effective machine-local editor at the
 line without a shell. Resolution is `TB_EDITOR`, the saved Local settings
 command, `VISUAL`/`EDITOR`, Git's `core.editor`, then automatic `vim` followed
 by `nano`. Opening is a user action and grants the coworker no source-writing
-capability. Neither
+capability. On Windows, automatic selection also checks the Vim executable
+bundled with Git because Git Bash can expose it without adding it to the native
+viewer process's `PATH`. The launch command uses the resolved executable path;
+it does not invoke a shell. Neither
 `tb view` nor `tb open` enters the CLI's companion-publication tail; both are
 machine-local actions even in a connected project.
 Fresh clones and sparse companion checkouts recreate the ignored machine-local

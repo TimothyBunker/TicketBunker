@@ -81,8 +81,9 @@ exercise unless a live boundary is explicitly called out.
   three real steps: create an empty companion repo, connect it, then commit the
   source locator. Its Local settings page is explicitly machine-only and saves
   the editor command to `~/.tbconfig` through `local.editor.update`; blank/auto
-  tries `vim`, then `nano`. `tb config --editor` uses that same command and does
-  not publish companion data.
+  tries `vim`, then `nano`, including Git for Windows' bundled Vim when it is
+  absent from the native viewer `PATH`. `tb config --editor` uses that same
+  command and does not publish companion data.
 - `tb doctor [--json] [--offline]` checks Git identity, locator/ignore state,
   companion checkouts and remote heads, resolved configuration, ticket index,
   credential presence, hooks, and worktree cleanliness. Every failure names a
@@ -197,7 +198,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.14 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.15 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -239,7 +240,7 @@ also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates, private proposal-rejection diagnostics, and shared
-CLI/HTTP local editor selection. The current full suite is 163 tests.
+CLI/HTTP local editor selection. The current full suite is 165 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
