@@ -442,6 +442,10 @@ immediately follows its synthesis with a native disclosure for the unchanged
 evidence, likewise separated and grouped by child. Selecting a branch narrows all
 Who/What/Where/Why synthesis and evidence to that component. Direct links in the
 persistent Branches rail activate Agent and select the corresponding report.
+Once any report exists, Report scope is the union of resolved ticket branches
+and child reports: a newly created local branch remains selectable before its
+first child report and shows a direct Synthesize empty state. Reports whose refs
+are no longer resolved remain available for audit.
 State remains a separate collapsed report trail, because tracker lifecycle and
 observed branch state are already visible in the rail. Legacy children derive
 compact previews from their evidence without inventing synthesis. Verification

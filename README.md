@@ -255,7 +255,10 @@ generated comparison say **Needs Git state**, which names the missing program
 output.
 
 Agent defaults to **Combined**, the mechanically assembled master report, with
-each child branch kept visibly separate. Every Who, What, Where, and Why
+each child branch kept visibly separate. Once at least one report exists, Report
+scope also lists resolved branches that do not have a report yet; selecting one
+shows the direct Synthesize empty state instead of hiding the branch. Every Who,
+What, Where, and Why
 synthesis can open the same ticket coworker. The viewer presents four topic
 conversations, but all scopes and branches use one underlying Pi session for
 that local user and ticket. The coworker can read and search the repository,

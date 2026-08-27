@@ -152,8 +152,11 @@ exercise unless a live boundary is explicitly called out.
   only the center Agent surface. Combined is the mechanically generated master
   and separates each branch visibly;
   Who/What/Where/Why synthesis appears before each collapsible full evidence
-  trail. Branch selection narrows the view. Before the first report, there is a
-  direct empty state rather than a meaningless Combined selector.
+  trail. Branch selection narrows the view. After any report exists, Report
+  scope includes every resolved branch plus retained report, so a new local
+  branch remains selectable with a direct Synthesize empty state before its
+  first report. Before the first report, there is a direct empty state rather
+  than a meaningless Combined selector.
 - A Companion / Git refs / Synthesis strip exposes cached, refreshing, current,
   outdated, stopped, and publication-pending states with direct actions.
   Synthesis is explicitly started with Synthesize, Update synthesis, or Retry
@@ -190,7 +193,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.12 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.13 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -232,7 +235,7 @@ also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates and private proposal-rejection diagnostics. The
-current full suite is 155 tests.
+current full suite is 156 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,

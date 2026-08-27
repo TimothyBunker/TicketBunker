@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from . import autoagent, commands, config, coworker, editor, layout, truth, workflow
 from .api import (
+    BranchSnapshot,
     ReportSnapshot,
     TicketCatalog,
     TicketDatabase,
@@ -1097,6 +1098,13 @@ function selectedPageScope() {
   return reportSelect.value === 'master' ? 'combined' : reportSelect.value;
 }
 
+function coworkerPageScope() {
+  const selected = selectedPageScope();
+  return [...(coworkerScope?.options || [])].some((option) => option.value === selected)
+    ? selected
+    : 'combined';
+}
+
 function referenceLabel(reference) {
   const place = reference.branch || (reference.scope === 'combined' ? 'Combined' : 'this branch');
   return `${reference.category[0].toUpperCase()}${reference.category.slice(1)} · ${place}`;
@@ -1166,7 +1174,7 @@ function showSelectionAsk() {
 function openCoworker(category = coworkerCategory, focusMessage = true) {
   if (!coworkerPanel || !coworkerLauncher) return;
   setCoworkerCategory(category);
-  if (coworkerScope) coworkerScope.value = selectedPageScope();
+  if (coworkerScope) coworkerScope.value = coworkerPageScope();
   coworkerPanel.hidden = false;
   coworkerLauncher.hidden = true;
   coworkerLauncher.setAttribute('aria-expanded', 'true');
@@ -1348,7 +1356,7 @@ coworkerScope?.addEventListener('change', () => { setCoworkerReference(null); lo
 reportSelect?.addEventListener('change', () => {
   if (coworkerScope && coworkerPanel && !coworkerPanel.hidden) {
     setCoworkerReference(null);
-    coworkerScope.value = selectedPageScope();
+    coworkerScope.value = coworkerPageScope();
     loadCoworker();
   }
 });
@@ -1714,9 +1722,13 @@ def _badge(label: str, kind: str = "") -> str:
     return f'<span class="{html.escape(classes, quote=True)}">{html.escape(label)}</span>'
 
 
-def _report_anchor(report: ReportSnapshot) -> str:
-    clean = re.sub(r"[^A-Za-z0-9_-]", "-", report.slug)
+def _report_slug_anchor(slug: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_-]", "-", slug)
     return f"report-{clean}"
+
+
+def _report_anchor(report: ReportSnapshot) -> str:
+    return _report_slug_anchor(report.slug)
 
 
 def _summary_markdown(text: str, limit: int = 1) -> str:
@@ -1887,6 +1899,17 @@ def _agent_report_panel(reports: tuple[ReportSnapshot, ...], value: str, *, mast
     )
 
 
+def _agent_empty_branch_panel(branch: BranchSnapshot) -> str:
+    return (
+        f'<div class="report-panel" id="{_report_slug_anchor(branch.slug)}" '
+        f'data-report-panel="{html.escape(branch.slug, quote=True)}" '
+        f'data-report-branch="{html.escape(branch.name, quote=True)}" hidden>'
+        f'<p class="report-context"><span class="mono">{html.escape(branch.name)}</span></p>'
+        '<p class="empty">No agent report for this branch yet. Use Synthesize above to create it.</p>'
+        '</div>'
+    )
+
+
 def _agent_work(ticket: TicketSnapshot) -> str:
     if not ticket.reports:
         return (
@@ -1895,7 +1918,22 @@ def _agent_work(ticket: TicketSnapshot) -> str:
         )
     options = ['<option value="master">Combined</option>']
     panels = [_agent_report_panel(ticket.reports, "master", master=True)]
+    reports = {report.slug: report for report in ticket.reports}
+    included: set[str] = set()
+    for branch in ticket.branches:
+        report = reports.get(branch.slug)
+        options.append(
+            f'<option value="{html.escape(branch.slug, quote=True)}">{html.escape(branch.name)}</option>'
+        )
+        panels.append(
+            _agent_report_panel((report,), report.slug, master=False)
+            if report
+            else _agent_empty_branch_panel(branch)
+        )
+        included.add(branch.slug)
     for report in ticket.reports:
+        if report.slug in included:
+            continue
         options.append(
             f'<option value="{html.escape(report.slug, quote=True)}">{html.escape(report.branch)}</option>'
         )
@@ -2066,8 +2104,10 @@ def _branches(ticket: TicketSnapshot, work_token: str = "") -> str:
     rows = []
     for branch in ticket.branches:
         report = reports.get(branch.slug)
-        tag = "a" if report else "div"
-        href = f' href="#{_report_anchor(report)}"' if report else ""
+        selectable = bool(ticket.reports)
+        tag = "a" if selectable else "div"
+        anchor = _report_anchor(report) if report else _report_slug_anchor(branch.slug)
+        href = f' href="#{anchor}"' if selectable else ""
         ahead = "?" if branch.ahead is None else branch.ahead
         behind = "?" if branch.behind is None else branch.behind
         development = _date(branch.last_development)

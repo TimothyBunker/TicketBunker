@@ -817,6 +817,25 @@ class ViewerTests(unittest.TestCase):
         self.assertIn(".master-branch-summary + .master-branch-summary { border-top: 1px solid var(--line-strong); }", page)
         self.assertIn('href="#report-lin__TB-9-second-view"', page)
 
+    def test_report_scope_keeps_a_local_branch_before_its_first_report(self) -> None:
+        paths = layout.paths(self.bunker)
+        branch = "tim/TB-9-local-work"
+        resolution = json.loads(paths["branch_resolution"].read_text(encoding="utf-8"))
+        resolution["branches"].append(branch)
+        paths["branch_resolution"].write_text(json.dumps(resolution), encoding="utf-8")
+
+        rendered = page_ticket(self.root, "TB-9", "fingerprint")
+        self.assertIsNotNone(rendered)
+        page = rendered.decode("utf-8")
+
+        self.assertIn('<option value="tim__TB-9-local-work">tim/TB-9-local-work</option>', page)
+        self.assertIn(
+            'id="report-tim__TB-9-local-work" data-report-panel="tim__TB-9-local-work"',
+            page,
+        )
+        self.assertIn("No agent report for this branch yet. Use Synthesize above to create it.", page)
+        self.assertIn('href="#report-tim__TB-9-local-work"', page)
+
 
 if __name__ == "__main__":
     unittest.main()
