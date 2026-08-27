@@ -40,10 +40,25 @@ STATE_DIR = "ticketbunker/automatic-agent"
 FINGERPRINT_FILE = "fingerprints.json"
 CHANGE_FILE = "changes.json"
 RUNNING_FILE = "running.json"
+USER_REQUEST_EVENT = "user-requested-synthesis"
 
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def was_user_requested(value: dict[str, Any] | None) -> bool:
+    """Whether one queued/running/finished state came from the explicit UI/CLI action.
+
+    Older TicketBunker versions ran synthesis from Git events and may leave a
+    failed ``last.json`` behind after upgrade.  Those records must remain local
+    audit history without being presented as a request the user made.
+    """
+    if not isinstance(value, dict):
+        return False
+    if value.get("requested") is True:
+        return True
+    return USER_REQUEST_EVENT in (value.get("events") or [])
 
 
 def _git(repo: Path, *args: str) -> tuple[str, int]:
@@ -438,6 +453,7 @@ def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
         events.add(event)
         payload = {
             "schema_version": 1,
+            "requested": True,
             "repo": str(repo),
             "bunker": str(bunker.resolve()),
             "branch": branch,
@@ -670,6 +686,7 @@ def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = F
                 except Exception as exc:
                     result = {
                         "status": "fail",
+                        "requested": was_user_requested(payload),
                         "branch": payload.get("branch"),
                         "head": payload.get("head"),
                         "events": payload.get("events") or [],
@@ -701,6 +718,7 @@ def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = F
                 (state / RUNNING_FILE).unlink(missing_ok=True)
             result = {
                 "status": "pass" if ok else "fail",
+                "requested": was_user_requested(payload),
                 "branch": payload.get("branch"),
                 "head": payload.get("head"),
                 "events": payload.get("events") or [],

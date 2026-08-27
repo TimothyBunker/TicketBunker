@@ -125,6 +125,7 @@ class SharedTruthTests(unittest.TestCase):
             return_value={
                 "last": {
                     "status": "fail",
+                    "events": ["user-requested-synthesis"],
                     "branch": self.branch,
                     "detail": "pi synthesis failed",
                 }
@@ -137,6 +138,26 @@ class SharedTruthTests(unittest.TestCase):
         self.assertEqual(value["action"], "Retry synthesis")
         self.assertEqual(value["command"], "synthesize")
         self.assertEqual(value["log_url"], "/truth/agent-log")
+
+    def test_legacy_automatic_failure_is_an_unsynthesized_state_not_user_failure(self) -> None:
+        with mock.patch.object(
+            autoagent,
+            "read_state",
+            return_value={
+                "last": {
+                    "status": "fail",
+                    "events": ["head-advanced"],
+                    "branch": self.branch,
+                    "detail": "deterministic refresh failed",
+                }
+            },
+        ):
+            ticket = TicketDatabase(self.root).get_ticket("TB-9", refresh_branches=True)
+            value = truth.synthesis_state(self.root, ticket)
+
+        self.assertEqual(value["label"], "Not synthesized")
+        self.assertEqual(value["action"], "Synthesize")
+        self.assertNotIn("failed", value["detail"].casefold())
 
     def test_outdated_synthesis_names_age_and_commit_count(self) -> None:
         published = git(self.root, "rev-parse", "HEAD")

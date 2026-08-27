@@ -210,14 +210,25 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
     running = automatic.get("running") or {}
     last = automatic.get("last") or {}
     active = running if isinstance(running, dict) and running.get("branch") == branch else queued
-    if isinstance(active, dict) and branch and active.get("branch") == branch:
+    if (
+        isinstance(active, dict)
+        and branch
+        and active.get("branch") == branch
+        and autoagent.was_user_requested(active)
+    ):
         return {
             "status": "updating",
             "label": "Synthesizing",
             "detail": f"TicketBunker is updating {branch} because you requested it.",
             "action": "",
         }
-    if isinstance(last, dict) and selected and last.get("branch") == branch and last.get("status") == "fail":
+    if (
+        isinstance(last, dict)
+        and selected
+        and last.get("branch") == branch
+        and last.get("status") == "fail"
+        and autoagent.was_user_requested(last)
+    ):
         return {
             "status": "stopped",
             "label": "Synthesis stopped",

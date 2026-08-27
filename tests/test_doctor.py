@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ticketbunker import commands, config, doctor, project
 
@@ -95,6 +96,57 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(remote["status"], "fail")
         self.assertIn("repository URL and access grant", remote["action"])
         self.assertIn("tb init", remote["action"])
+
+    def test_legacy_automatic_failure_is_not_called_a_requested_synthesis(self) -> None:
+        self.initialize()
+        run_git(self.source, "add", project.LOCATOR_FILE, ".gitignore")
+        run_git(self.source, "commit", "-m", "Connect TicketBunker")
+        automatic = {
+            "ready": True,
+            "installed": list(doctor.autoagent.HOOK_NAMES),
+            "missing": [],
+            "state": {
+                "last": {
+                    "status": "fail",
+                    "events": ["head-advanced"],
+                    "detail": "deterministic refresh failed",
+                }
+            },
+        }
+
+        with mock.patch.object(doctor.autoagent, "hook_status", return_value=automatic):
+            result = doctor.report(self.source)
+
+        synthesis = next(value for value in result["checks"] if value["key"] == "hooks")
+        self.assertEqual(synthesis["status"], "pass")
+        self.assertIn("No user-requested synthesis has run", synthesis["summary"])
+        self.assertNotIn("failed", synthesis["summary"].casefold())
+
+    def test_explicit_synthesis_failure_remains_actionable(self) -> None:
+        self.initialize()
+        run_git(self.source, "add", project.LOCATOR_FILE, ".gitignore")
+        run_git(self.source, "commit", "-m", "Connect TicketBunker")
+        automatic = {
+            "ready": True,
+            "installed": list(doctor.autoagent.HOOK_NAMES),
+            "missing": [],
+            "state": {
+                "last": {
+                    "status": "fail",
+                    "events": ["user-requested-synthesis"],
+                    "detail": "configured base is unavailable",
+                },
+                "log": "/tmp/agent.log",
+            },
+        }
+
+        with mock.patch.object(doctor.autoagent, "hook_status", return_value=automatic):
+            result = doctor.report(self.source)
+
+        synthesis = next(value for value in result["checks"] if value["key"] == "hooks")
+        self.assertEqual(synthesis["status"], "warn")
+        self.assertIn("last requested synthesis failed", synthesis["summary"])
+        self.assertIn("/tmp/agent.log", synthesis["action"])
 
 
 if __name__ == "__main__":

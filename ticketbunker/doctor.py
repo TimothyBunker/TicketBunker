@@ -199,7 +199,7 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
     if automation["ready"]:
         summary = "Checkout, commit, merge, and rebase events mark synthesis changes without calling the agent."
         last = (automation.get("state") or {}).get("last") or {}
-        if last.get("status") == "fail":
+        if last.get("status") == "fail" and autoagent.was_user_requested(last):
             log = (automation.get("state") or {}).get("log") or str(autoagent.log_path(root))
             checks.append(
                 _check(
@@ -211,6 +211,8 @@ def report(source_root: Path, *, check_remote: bool = True) -> dict[str, Any]:
                 )
             )
         else:
+            if last.get("status") == "fail":
+                summary += " No user-requested synthesis has run on this installation."
             checks.append(_check("hooks", "Synthesis tracking", "pass", summary))
     else:
         missing = ", ".join(automation["missing"])

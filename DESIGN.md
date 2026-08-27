@@ -321,6 +321,11 @@ tool:
   session headlessly; the bootstrap extensions and command-fed agent do the
   rest. Branch creation and ordinary Git activity only mark synthesis as
   missing or changed.
+- Synthesis failure is a user-request state, not merely a historical worker
+  record. Only a run marked by the explicit Synthesize/Update/Retry command may
+  render **Synthesis stopped** or a doctor warning. Failures persisted by older
+  Git-triggered versions remain local audit history but render as the ordinary
+  **Not synthesized** state until the user chooses Synthesize.
 - Generation is local until one component passes intake. Agent-side `tb infer`
   calls remain typed and ledgered but do not each publish the companion
   checkout; the worker owns one final companion publication after the ordinary
