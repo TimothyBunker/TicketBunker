@@ -321,6 +321,18 @@ tool:
   session headlessly; the bootstrap extensions and command-fed agent do the
   rest. Branch creation and ordinary Git activity only mark synthesis as
   missing or changed.
+- Generation is local until one component passes intake. Agent-side `tb infer`
+  calls remain typed and ledgered but do not each publish the companion
+  checkout; the worker owns one final companion publication after the ordinary
+  report gate succeeds. A transient remote/DNS problem therefore cannot turn
+  every inference into a separate failed push.
+- Pi and Codex get one bounded report-format repair pass when their first draft
+  fails mechanical lint or anchor checks. The repair receives the exact
+  findings and edits the same child draft; it cannot edit source or Combined.
+  The result still passes through the unchanged typed lint and anchor gates,
+  and a second failure stops with the draft/transcript locations and leaves the
+  prior shared report untouched. Command harnesses remain deterministic and
+  single-pass.
 - The report is the sole user-facing artifact — it must be complete enough that
   reading it answers who/what/where/why without a follow-up conversation.
 - The generation transcript/session is retained as **provenance**: if a report claim
@@ -437,6 +449,9 @@ only viewer route that starts the model. While running, the state stays visibly
 busy. On failure, Retry synthesis and View log sit together; the localhost-only
 log page escapes and bounds the output and names the exact local path. Every
 stopped state preserves the prior report and names the next action.
+Fresh clones and sparse companion checkouts recreate the ignored machine-local
+session directory before writing a form, so missing local artifacts are an
+empty state rather than a filesystem traceback.
 Pages poll that local state and reload only when ticket content or refs change.
 All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.

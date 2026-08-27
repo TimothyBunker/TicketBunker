@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,8 +11,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import autoagent, config, handlers, layout
+from ticketbunker import autoagent, cli, config, handlers, layout
 from ticketbunker.ledger import Ledger
+from tools.stub_agent import fill
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -173,6 +175,73 @@ class AutomaticAgentTests(unittest.TestCase):
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
         self.assertTrue(any(value.get("type") == "synthesis_started" for value in events))
         self.assertTrue(any(value.get("type") == "synthesis_finished" for value in events))
+
+    def test_pi_report_gets_one_bounded_format_repair_before_intake(self) -> None:
+        refreshed = cli.main(
+            [
+                "bootstrap",
+                str(self.bunker),
+                "--repo",
+                str(self.repo),
+                "--baseline",
+                "main",
+            ]
+        )
+        self.assertEqual(refreshed, 0)
+        branch = "Ada/ECS-4-automatic"
+        shutil.rmtree(layout.paths(self.bunker)["sessions"])
+        form = layout.session_form(self.bunker, branch)
+        calls = 0
+
+        def generated_then_repaired(*_args: object, **kwargs: object) -> tuple[str, int]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                with mock.patch("tools.stub_agent._real_file", return_value="README.md"):
+                    valid = fill(form.read_text(encoding="utf-8"))
+                invalid = valid.replace(
+                    "- [speculation] grounded: the ticket assignee and observed git authors",
+                    "The ticket assignee and observed git authors",
+                    1,
+                )
+                form.write_text(invalid, encoding="utf-8")
+                return "generated an invalid Reader brief", 0
+            self.assertEqual(kwargs["contract"].name, "agent_report_repair")
+            self.assertIn("Reader brief 'Who' needs at least one tagged claim", kwargs["prompt"])
+            # Preserve the pipeline-built evidence and repair only the malformed line.
+            current = form.read_text(encoding="utf-8")
+            form.write_text(
+                current.replace(
+                    "The ticket assignee and observed git authors",
+                    "- [speculation] grounded: the ticket assignee and observed git authors",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            return "repaired the report", 0
+
+        with mock.patch(
+            "ticketbunker.adapters.harness.run_session",
+            side_effect=generated_then_repaired,
+        ) as run_session:
+            status = cli.main(
+                [
+                    "run",
+                    str(self.bunker),
+                    "--repo",
+                    str(self.repo),
+                    "--branch",
+                    branch,
+                    "--harness",
+                    "pi",
+                    "--pi-bin",
+                    "/managed/pi",
+                ]
+            )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(run_session.call_count, 2)
+        self.assertTrue(layout.child_report(self.bunker, branch).exists())
 
     def test_unchanged_durable_inputs_skip_the_provider(self) -> None:
         source = self.repo / "position.py"

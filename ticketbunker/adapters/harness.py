@@ -35,11 +35,43 @@ Your pre-filled report form is at: {form}
 The source repo is at: {repo}
 
 Follow the tool order from your context. Fill in every `<!-- agent: ... -->`
-area of the form with tagged claims — your claims replace the marker line
-itself; no such marker may remain — leaving the [observation] lines exactly
-as they are. Treat Reader brief as a prioritized explanation over that trail,
-not a second inventory, and save the file in place. Do not publish; publishing happens
-outside your session. When the form is complete, you are done.
+area of the form with Markdown bullet claims. Every bullet you add must start
+exactly with `- [real]` or `- [speculation]`; a [real] bullet names a
+checkable path, and a [speculation] bullet includes grounded, adjacent, or
+ungrounded. Your claims replace the marker line itself; no such marker may
+remain. Leave the [observation] lines exactly as they are. Each Reader brief
+subsection must contain at least one such bullet (Where contains exactly one).
+Treat Reader brief as a prioritized explanation over the full trail, not a
+second inventory, and save the file in place. Do not publish; publishing
+happens outside your session. When the form is complete, you are done.
+"""
+
+REPAIR_CONTRACT = StageContract(
+    name="agent_report_repair",
+    purpose="Repair a generated report that failed the mechanical publish gate.",
+    inputs="The filled report form and exact lint/anchor findings from the first pass.",
+    process="Invoke the same configured harness once with the rejected form and bounded repair instructions.",
+    desired_outcome="A corrected form that still enters through the ordinary lint and anchor publish gate.",
+)
+
+REPAIR_PROMPT = """\
+You are repairing the TicketBunker report form for ticket {ticket_id}, branch
+{branch}. Nothing from this draft has been published.
+
+The report form is at: {form}
+The source repo is at: {repo}
+
+The mechanical gate reported:
+{findings}
+
+Edit that same form in place and fix every listed finding. Keep every existing
+[observation] line unchanged. Every claim must be a Markdown bullet beginning
+exactly with `- [real]` or `- [speculation]`. A [real] claim must name a
+checkable repo or bunker path. A [speculation] claim must say grounded,
+adjacent, or ungrounded. Reader brief Who, What, Where, and Why must each have
+at least one tagged bullet; Where must have exactly one, while the others have
+at most two. Remove every `<!-- agent: ... -->` marker. Do not publish or
+change source code. Save the repaired form in place and stop.
 """
 
 MERGE_CONTRACT = StageContract(

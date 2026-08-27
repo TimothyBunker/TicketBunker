@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -132,6 +133,27 @@ def _generation(args: argparse.Namespace) -> dict[str, str]:
     if args.model:
         generation["model"] = args.model
     return generation
+
+
+def _report_draft_errors(
+    text: str,
+    repo: Path,
+    bunker: Path,
+    refs: list[str],
+) -> list[str]:
+    """Exact mechanical findings a report repair session must resolve."""
+    from .processors import anchorcheck
+
+    errors = [
+        str(finding)
+        for finding in reportlint.lint(text)
+        if finding.severity == "error"
+    ]
+    errors.extend(anchorcheck.verify(text, repo, refs, bunker))
+    remaining = text.count("<!-- agent:")
+    if remaining:
+        errors.insert(0, f"{remaining} report area(s) still contain an agent placeholder")
+    return errors
 
 
 def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
@@ -686,10 +708,13 @@ def cmd_publish(args: argparse.Namespace) -> int:
         return 1
     ledger = _ledger(bunker)
     text = Path(args.file).read_text(encoding="utf-8")
-    # Show all findings (including warnings) regardless of outcome.
+    # Blocking findings are reported once by IntakeRejected below.
     _, findings = reportlint.gate(text)
     for f in findings:
-        print(f)
+        # IntakeRejected below reports blocking findings once.  Keep useful
+        # non-blocking diagnostics without making users decode duplicates.
+        if f.severity == "warn":
+            print(f)
     repo = Path(args.repo).resolve() if args.repo else (layout.find_root() or Path.cwd())
     try:
         dest = handlers.intake_report_component(bunker, args.branch, text, ledger,
@@ -789,6 +814,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     # 1. Session-scoped context and pre-filled form.
     _recompose(bunker, ledger, branch=args.branch)
     form = layout.session_form(bunker, args.branch)
+    # Session artifacts are machine-local in companion/sparse and fresh-clone
+    # layouts, so Git cannot be relied on to preserve their empty directory.
+    form.parent.mkdir(parents=True, exist_ok=True)
     form.write_text(scaffold.build(_ticket(bunker), obs, args.branch), encoding="utf-8")
 
     # 2. The agent session (ledgered stage; agent tool calls mirrored by the
@@ -832,25 +860,90 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             return 1
 
-    # 3. Refuse to publish untouched work: a session that filled nothing is
-    #    a failed session, not a report.
+    # 3. Give an interactive agent one bounded chance to repair its own draft
+    #    from the exact mechanical findings.  This never weakens or bypasses
+    #    intake: the repaired text still enters through the ordinary lint and
+    #    anchor gates below.  Deterministic command harnesses stay single-pass.
     text = form.read_text(encoding="utf-8")
+    refs = _verify_refs(bunker, args.branch)
+    draft_errors = _report_draft_errors(text, repo, bunker, refs)
+    repaired = False
+    if draft_errors and args.harness in {"pi", "codex"}:
+        repair_prompt = harness_mod.REPAIR_PROMPT.format(
+            ticket_id=_ticket(bunker).get("id") or bunker.name,
+            branch=args.branch,
+            form=form,
+            repo=repo,
+            findings="\n".join(f"- {finding}" for finding in draft_errors),
+        )
+        ledger.event(
+            "session_repair_started",
+            branch=args.branch,
+            findings=draft_errors,
+        )
+        repair_output, repair_code = harness_mod.run_session(
+            bunker,
+            args.branch,
+            repo,
+            ledger,
+            harness=args.harness,
+            command_template=args.cmd,
+            pi_bin=args.pi_bin,
+            codex_bin=args.codex_bin,
+            provider=args.provider,
+            model=args.model,
+            form=form,
+            prompt=repair_prompt,
+            contract=harness_mod.REPAIR_CONTRACT,
+        )
+        with transcript.open("a", encoding="utf-8") as handle:
+            handle.write("\n\n--- TicketBunker format repair ---\n\n")
+            handle.write(repair_output)
+        if repair_code != 0:
+            ledger.event(
+                "session_repair_failed",
+                branch=args.branch,
+                harness_exit=repair_code,
+                findings=draft_errors,
+            )
+            print(repair_output)
+            print(
+                "Synthesis stopped while repairing the report format; no shared report changed.\n"
+                f"  draft:      {form}\n"
+                f"  transcript: {transcript}",
+                file=sys.stderr,
+            )
+            return 1
+        repaired = True
+        text = form.read_text(encoding="utf-8")
+        draft_errors = _report_draft_errors(text, repo, bunker, refs)
+        ledger.event(
+            "session_repair_finished",
+            branch=args.branch,
+            status="pass" if not draft_errors else "fail",
+            findings=draft_errors,
+        )
+
+    # Refuse to publish untouched work: a session that filled nothing is a
+    # failed session, not a report.
     unfilled = text.count("<!-- agent:")
     if unfilled:
         ledger.event("session_unfilled", branch=args.branch, remaining_areas=unfilled)
         print(
-            f"FAIL — the agent left {unfilled} area(s) of the form unfilled; nothing published.\n"
-            f"  form:       {form}\n"
+            f"Synthesis stopped: {unfilled} report area(s) were left unfinished; "
+            "no shared report changed.\n"
+            f"  draft:      {form}\n"
             f"  transcript: {transcript}\n"
-            "  Common cause with codex: sandbox denied the write (the codex profile now "
-            "passes --sandbox workspace-write). Inspect the transcript, then re-run, or "
-            "fill the form by hand and 'tb publish'.",
+            "Use View log in the ticket state hub for the local run details, then retry synthesis.",
             file=sys.stderr,
         )
         return 1
     _, findings = reportlint.gate(text)
     for f in findings:
-        print(f)
+        # IntakeRejected below reports blocking findings once.  Keep useful
+        # non-blocking diagnostics without making users decode duplicates.
+        if f.severity == "warn":
+            print(f)
     try:
         dest = handlers.intake_report_component(bunker, args.branch, text, ledger,
                                                 repo=repo, refs=_verify_refs(bunker, args.branch),
@@ -858,7 +951,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     except IntakeRejected as exc:
         for err in exc.errors:
             print(f"[error] {err}", file=sys.stderr)
-        print(f"FAIL — agent's form did not pass the gate; left at {form} for repair", file=sys.stderr)
+        pass_name = " after one automatic repair pass" if repaired else ""
+        print(
+            f"Synthesis stopped{pass_name}: the report still failed its safety checks; "
+            "no shared report changed.\n"
+            f"  draft:      {form}\n"
+            f"  transcript: {transcript}\n"
+            "Use View log in the ticket state hub for the local run details, then retry synthesis.",
+            file=sys.stderr,
+        )
         return 1
     out = master.regenerate(bunker, ledger)
     print(f"session complete: published {dest}; master regenerated at {out}")
@@ -1750,7 +1851,11 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tb", description="TicketBunker — git context layer for tickets")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    # Keep the selected subcommand separate from harnesses' public ``--cmd``
+    # option.  Sharing one argparse destination made a Pi-shaped ``tb run``
+    # (which correctly omits ``--cmd``) replace "run" with None and crash in
+    # the post-command companion publication step.
+    sub = parser.add_subparsers(dest="command_name", required=True)
 
     s = sub.add_parser(
         "init",
@@ -2045,13 +2150,15 @@ def main(argv: list[str] | None = None) -> int:
     result = args.fn(args)
     source_root = project_mod.find_source_root()
     if (
-        args.cmd not in {"doctor", "agent", "synthesize"}
-        and not args.cmd.startswith("_")
+        result == 0
+        and not os.environ.get("TB_AGENT_ACTIVE")
+        and args.command_name not in {"doctor", "agent", "synthesize"}
+        and not args.command_name.startswith("_")
         and source_root is not None
         and project_mod.load_locator(source_root) is not None
     ):
         try:
-            project_mod.publish_data(source_root, f"TicketBunker: tb {args.cmd}")
+            project_mod.publish_data(source_root, f"TicketBunker: tb {args.command_name}")
         except commands.CommandRejected as exc:
             print(f"error: {exc.message}", file=sys.stderr)
             return 1

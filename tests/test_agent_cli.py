@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -129,6 +130,25 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(dispatched.call_args.args[0], "truth.synthesize")
         self.assertEqual(dispatched.call_args.args[1], {"project": "TB", "ticket": "TB-9"})
         self.assertEqual(dispatched.call_args.args[2].transport, "cli")
+
+    def test_pi_run_without_command_template_keeps_its_subcommand_name(self) -> None:
+        """``tb run --cmd`` must not overwrite argparse's top-level command."""
+        with mock.patch.object(cli, "cmd_run", return_value=0):
+            with mock.patch.object(cli.project_mod, "find_source_root", return_value=None):
+                code, _stdout, stderr = self._run(["run", "--harness", "pi"])
+
+        self.assertEqual(code, 0, stderr)
+
+    def test_agent_pipeline_defers_companion_publication_to_its_worker(self) -> None:
+        with mock.patch.dict(os.environ, {"TB_AGENT_ACTIVE": "1"}):
+            with mock.patch.object(cli, "cmd_run", return_value=0):
+                with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+                    with mock.patch.object(cli.project_mod, "load_locator", return_value={"project": "TB"}):
+                        with mock.patch.object(cli.project_mod, "publish_data") as publish:
+                            code, _stdout, stderr = self._run(["run", "--harness", "pi"])
+
+        self.assertEqual(code, 0, stderr)
+        publish.assert_not_called()
 
 
 if __name__ == "__main__":
