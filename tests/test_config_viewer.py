@@ -7,8 +7,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from ticketbunker import commands, config, config_viewer, projectconfig
+from ticketbunker import commands, config, config_viewer, editor, projectconfig
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -107,6 +108,31 @@ class ConfigViewerTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(run_git(self.root, "config", "--get", "user.name"), "T Bunker")
         self.assertEqual(config.load()["user"], "bunker")
+
+    def test_local_settings_selects_an_editor_through_the_shared_command(self) -> None:
+        status, _content_type, body = self.request("GET", "/local")
+        text = body.decode("utf-8")
+
+        self.assertEqual(status, 200)
+        self.assertIn('href="/local" aria-current="page">Local settings</a>', text)
+        self.assertIn("Only this machine.", text)
+        self.assertIn('data-command="local.editor.update"', text)
+        self.assertIn("Automatic tries vim, then nano.", text)
+
+        token = self.server.RequestHandlerClass.token
+        with mock.patch.object(editor.shutil, "which", return_value="/usr/bin/nano"):
+            status, _content_type, body = self.request(
+                "POST",
+                "/api/commands",
+                {"command": "local.editor.update", "payload": {"editor": "nano"}},
+                token,
+            )
+
+        result = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["effective_editor"], "nano")
+        self.assertEqual(config.load()["editor"], "nano")
 
     def test_integrations_page_is_a_prefilled_mapping_matrix(self) -> None:
         commands.dispatch(

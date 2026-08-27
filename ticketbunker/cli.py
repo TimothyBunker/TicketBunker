@@ -1137,6 +1137,19 @@ def cmd_config(args: argparse.Namespace) -> int:
         changed = True
     if changed:
         config.save(cfg)
+    if args.editor is not None:
+        try:
+            local = commands.dispatch(
+                "local.editor.update",
+                {"editor": args.editor},
+                commands.CommandContext(Path.cwd(), transport="cli"),
+            )
+        except commands.CommandRejected as exc:
+            print(f"error: {exc.message}", file=sys.stderr)
+            return 1
+        changed = True
+        print(f"editor: {local.get('effective_editor') or 'not found'} ({local.get('editor_source')})")
+    if changed:
         for key in ("user", "bunker_root"):
             if cfg.get(key):
                 print(f"{key}: {cfg[key]}")
@@ -2294,6 +2307,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--user", default=None, help="set your team identifier (defaults from git user.name)")
     s.add_argument("--bunker-root", default=None, metavar="DIR",
                    help="set where the bunker database lives, so tb run resolves bunkers from any repo")
+    s.add_argument("--editor", default=None, metavar="COMMAND",
+                   help="set the machine-local editor command; use 'auto' to try vim, then nano")
     s.add_argument("--port", type=int, default=8378, help="localhost port (default: 8378)")
     s.add_argument("--no-open", action="store_true", help="do not open the editor in a browser")
     s.set_defaults(fn=cmd_config)
@@ -2338,7 +2353,7 @@ def main(argv: list[str] | None = None) -> int:
     if (
         result == 0
         and not os.environ.get("TB_AGENT_ACTIVE")
-        and args.command_name not in {"doctor", "agent", "synthesize", "view", "open"}
+        and args.command_name not in {"doctor", "agent", "synthesize", "view", "open", "config"}
         and not args.command_name.startswith("_")
         and source_root is not None
         and project_mod.load_locator(source_root) is not None

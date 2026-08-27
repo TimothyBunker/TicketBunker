@@ -122,7 +122,8 @@ tb agent status                     # active runtime, provider, model, and login
 tb agent model                      # open Pi's model picker; selection is saved after validation
 tb agent model --provider openai-codex --model gpt-5.6-sol  # scriptable equivalent
 tb agent login                      # open Pi login, then validate and adopt its selection
-tb config                           # remote-backed identity, storage, fields, integrations editor
+tb config                           # shared project config plus machine-local settings
+tb config --editor vim              # local editor selection; use auto for vim, then nano
 tb doctor                           # readiness checks with exact next commands (--json / --offline available)
 tb github OWNER/REPO#1267           # idempotently create/update one GitHub Issue
 tb github --project 8 --project-owner OWNER  # or synchronize every Issue in a Project
@@ -201,6 +202,11 @@ mapping atomically. GitHub Issues, GitLab Issues, and Jira Cloud start with
 editable templates; custom integrations use the exact same mapping and local
 token surfaces.
 
+The Local settings page stays outside the companion repository. Its editor
+command is saved only in `~/.tbconfig`; leaving it blank automatically selects
+`vim` when available, then `nano`. `TB_EDITOR`, `VISUAL`/`EDITOR`, and Git's
+`core.editor` remain explicit higher-priority choices.
+
 To move an old embedded database safely:
 
 ```sh
@@ -275,12 +281,14 @@ The category actions and persistent launcher are compact chat bubbles.
 Highlighting part of a synthesis reveals a contextual bubble; pressing it
 attaches the selected excerpt, topic, report scope, and branch to the next local
 coworker message, and the quote remains visible in conversation history.
-Verified locations written as `@[relative/path]:line` are clickable. The same
+Verified locations written as `@[relative/path]:line` are clickable. Verified
+inline-code `relative/path:line` anchors in Combined, branch synthesis, and
+full trails use that same control, matching coworker chat. The same
 guarded operation is available as `tb open '@[relative/path]:line'`; it rejects
-paths outside the checkout and opens the current branch's file in `TB_EDITOR`,
-`$VISUAL`/`$EDITOR`, Git's `core.editor`, or a recognized local IDE. A custom
-line-jump template can be set with, for example,
-`TB_EDITOR='code --goto {file}:{line}'`.
+paths outside the checkout and opens the current branch's file in the effective
+machine-local editor. Configure it on `tb config` → Local settings or with
+`tb config --editor 'code --goto {file}:{line}'`; `TB_EDITOR` remains the
+environment override.
 
 `tb view` opens the browser by default and releases the terminal after the
 localhost helper is ready. The helper follows live browser tabs and stops a few

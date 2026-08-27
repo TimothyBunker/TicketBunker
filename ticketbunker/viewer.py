@@ -1562,16 +1562,22 @@ def _inline(escaped: str) -> str:
     def source_reference(match: re.Match[str]) -> str:
         path = html.unescape(match.group(1)).strip()
         line = match.group(2)
+        label = f"@[{path}]:{line}" if match.group(0).startswith("@[") else f"{path}:{line}"
         placeholder = f"\x1e{len(source_references)}\x1f"
         source_references.append(
             '<button class="source-link" type="button" '
             f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
             f'aria-label="Open {html.escape(path, quote=True)} at line {line}">'
-            f'@[{html.escape(path)}]:{line}</button>'
+            f'{html.escape(label)}</button>'
         )
         return placeholder
 
     escaped = re.sub(r"@\[([^\]\n]+)\]:(\d+)", source_reference, escaped)
+    escaped = re.sub(
+        r"`([A-Za-z0-9_.-]*/[A-Za-z0-9_./-]+|[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,8}):(\d+)`",
+        source_reference,
+        escaped,
+    )
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
     escaped = re.sub(r"(?<!\*)\*([^*]+)\*", r"<em>\1</em>", escaped)
@@ -2882,7 +2888,7 @@ def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> Viewer
     elif code.startswith("source_editor"):
         title = "Editor not ready"
         state = "No editor was opened and your source files were not changed."
-        action = action or "Set TB_EDITOR='code --goto {file}:{line}', then retry the link."
+        action = action or "Open tb config, choose Local settings, select an editor, then retry the link."
     elif code.startswith("source_"):
         title = "Source link unavailable"
         state = "No editor was opened and your source files were not changed."

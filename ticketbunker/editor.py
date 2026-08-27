@@ -10,28 +10,69 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import commands
+from . import commands, config
 
 
 _TERMINAL_EDITORS = {"vi", "vim", "nvim", "nano", "micro"}
 _GOTO_EDITORS = {"code", "code-insiders", "codium", "cursor", "windsurf"}
+_AUTOMATIC_EDITORS = ("vim", "nano")
 
 
-def _configured_editor(root: Path) -> str:
-    configured = os.environ.get("TB_EDITOR") or os.environ.get("VISUAL") or os.environ.get("EDITOR")
+def resolve_editor(root: Path) -> tuple[str, str]:
+    """Return the effective editor command and the machine-local source."""
+    if os.environ.get("TB_EDITOR"):
+        return os.environ["TB_EDITOR"], "TB_EDITOR"
+    configured = str(config.load().get("editor") or "").strip()
     if configured:
-        return configured
+        return configured, "local setting"
+    if os.environ.get("VISUAL"):
+        return os.environ["VISUAL"], "VISUAL"
+    if os.environ.get("EDITOR"):
+        return os.environ["EDITOR"], "EDITOR"
     proc = subprocess.run(
         ["git", "-C", str(root), "config", "--get", "core.editor"],
         capture_output=True,
         text=True,
     )
     if proc.returncode == 0 and proc.stdout.strip():
-        return proc.stdout.strip()
-    for candidate in ("code", "cursor", "codium", "subl", "idea"):
+        return proc.stdout.strip(), "Git core.editor"
+    for candidate in _AUTOMATIC_EDITORS:
         if shutil.which(candidate):
-            return candidate
-    return ""
+            return candidate, "automatic"
+    return "", "unavailable"
+
+
+def _configured_editor(root: Path) -> str:
+    return resolve_editor(root)[0]
+
+
+def local_state(root: Path) -> dict[str, str]:
+    effective, source = resolve_editor(Path(root).resolve())
+    return {
+        "configured_editor": str(config.load().get("editor") or ""),
+        "effective_editor": effective,
+        "editor_source": source,
+    }
+
+
+def _validate_editor(command: str) -> None:
+    try:
+        argv = shlex.split(command, posix=os.name != "nt")
+    except ValueError as exc:
+        raise commands.CommandRejected(
+            "local_editor_invalid",
+            "That editor command could not be parsed. Use a command such as 'vim' or "
+            "'code --goto {file}:{line}'.",
+        ) from exc
+    if not argv:
+        return
+    executable = Path(argv[0]).expanduser()
+    available = executable.is_file() if executable.is_absolute() else shutil.which(argv[0]) is not None
+    if not available:
+        raise commands.CommandRejected(
+            "local_editor_missing",
+            f"{argv[0]} is not available on this machine. Choose an installed editor or leave the field blank for automatic selection.",
+        )
 
 
 def _source(root: Path, raw: str) -> tuple[Path, str]:
@@ -61,14 +102,14 @@ def _editor_argv(editor: str, source: Path, line: int) -> tuple[list[str], bool]
     except ValueError as exc:
         raise commands.CommandRejected(
             "source_editor_invalid",
-            "TB_EDITOR or your configured editor could not be parsed. Use a command such as "
+            "Your local editor command could not be parsed. Open 'tb config' and choose Local settings, "
+            "or use a command such as "
             "'code --goto {file}:{line}'.",
         ) from exc
     if not argv:
         raise commands.CommandRejected(
             "source_editor_missing",
-            "No local editor was found. Set TB_EDITOR, for example "
-            "TB_EDITOR='code --goto {file}:{line}'.",
+            "No local editor was found. Open 'tb config' and choose Local settings, then select an editor.",
         )
     source_text = str(source)
     name = Path(argv[0]).name.casefold().removesuffix(".exe")
@@ -100,7 +141,8 @@ def _terminal_argv(argv: list[str]) -> list[str]:
     if sys.platform == "darwin":
         raise commands.CommandRejected(
             "source_editor_terminal_required",
-            "The configured editor needs a terminal. Set TB_EDITOR to a graphical editor command such as "
+            "The configured editor needs a terminal. Open 'tb config' and choose Local settings, then "
+            "select a graphical editor command such as "
             "'code --goto {file}:{line}'.",
         )
     for terminal, separator in (
@@ -114,7 +156,8 @@ def _terminal_argv(argv: list[str]) -> list[str]:
     raise commands.CommandRejected(
         "source_editor_terminal_required",
         "The configured editor needs a terminal, but no supported terminal launcher was found. "
-        "Set TB_EDITOR to a graphical editor command such as 'code --goto {file}:{line}'.",
+        "Open 'tb config' and choose Local settings, then select a graphical editor command such as "
+        "'code --goto {file}:{line}'.",
     )
 
 
@@ -127,8 +170,7 @@ def open_source(root: Path, path: str, line: int) -> dict[str, Any]:
     if not editor:
         raise commands.CommandRejected(
             "source_editor_missing",
-            "No local editor was found. Set TB_EDITOR, for example "
-            "TB_EDITOR='code --goto {file}:{line}'.",
+            "No local editor was found. Open 'tb config' and choose Local settings, then select an editor.",
         )
     argv, terminal = _editor_argv(editor, source, line)
     if terminal:
@@ -153,7 +195,8 @@ def open_source(root: Path, path: str, line: int) -> dict[str, Any]:
     except OSError as exc:
         raise commands.CommandRejected(
             "source_editor_failed",
-            f"The configured editor could not start ({exc}). Set TB_EDITOR and retry.",
+            f"The configured editor could not start ({exc}). Open 'tb config', choose Local settings, "
+            "and select another editor.",
         ) from exc
     return {
         "opened": True,
@@ -173,4 +216,27 @@ def command_open(context: commands.CommandContext, payload: dict[str, Any]) -> d
     return open_source(Path(context.project_root), str(payload.get("path") or ""), line)
 
 
-__all__ = ["command_open", "open_source"]
+@commands.register("local.editor.update")
+def command_update(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    if "editor" not in payload:
+        raise commands.CommandRejected("local_editor_required", "Choose an editor or automatic selection.")
+    value = str(payload.get("editor") or "").strip()
+    if value.casefold() in {"auto", "automatic"}:
+        value = ""
+    if len(value) > 500:
+        raise commands.CommandRejected(
+            "local_editor_too_long",
+            "Keep the editor command under 500 characters.",
+        )
+    if value:
+        _validate_editor(value)
+    cfg = config.load()
+    if value:
+        cfg["editor"] = value
+    else:
+        cfg.pop("editor", None)
+    config.save(cfg)
+    return local_state(Path(context.project_root))
+
+
+__all__ = ["command_open", "command_update", "local_state", "open_source", "resolve_editor"]

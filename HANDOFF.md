@@ -79,7 +79,10 @@ exercise unless a live boundary is explicitly called out.
   configured local environment file, which is ignored.
 - `tb config` opens the remote-backed editor. Its Repository page explains the
   three real steps: create an empty companion repo, connect it, then commit the
-  source locator.
+  source locator. Its Local settings page is explicitly machine-only and saves
+  the editor command to `~/.tbconfig` through `local.editor.update`; blank/auto
+  tries `vim`, then `nano`. `tb config --editor` uses that same command and does
+  not publish companion data.
 - `tb doctor [--json] [--offline]` checks Git identity, locator/ignore state,
   companion checkouts and remote heads, resolved configuration, ticket index,
   credential presence, hooks, and worktree cleanliness. Every failure names a
@@ -176,11 +179,12 @@ exercise unless a live boundary is explicitly called out.
   exact lint/anchor findings remain in private local `diagnostics.jsonl` and do
   not leak into coworker replies or command errors. It cannot edit source, run
   Git mutations, or write Combined directly.
-- `@[relative/path]:line` is a clickable verified-source form in report and
-  coworker copy. The viewer and `tb open` share the guarded `editor.open`
-  command, which confines paths to the current checkout and launches the local
-  editor without a shell. `TB_EDITOR='code --goto {file}:{line}'` is the explicit
-  override.
+- `@[relative/path]:line` and verified inline-code `relative/path:line` report
+  anchors use the same clickable source control in Combined, child synthesis,
+  full trails, and coworker copy. The viewer and `tb open` share the guarded
+  `editor.open` command, which confines paths to the current checkout and
+  launches the local editor without a shell. Local settings owns the saved
+  command; `TB_EDITOR` remains the explicit environment override.
 - `tb view` now opens the browser and returns immediately. Its detached
   localhost worker tracks page presence, survives in-app navigation, and shuts
   down shortly after the last tab closes; `--foreground` and `--no-open` remain
@@ -193,7 +197,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.13 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.14 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -234,8 +238,8 @@ real post-commit hook that records a change without publishing. Focused tests
 also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
-child-only report updates and private proposal-rejection diagnostics. The
-current full suite is 156 tests.
+child-only report updates, private proposal-rejection diagnostics, and shared
+CLI/HTTP local editor selection. The current full suite is 163 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,

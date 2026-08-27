@@ -481,12 +481,16 @@ stale sessions expire. `--foreground` retains an attached diagnostic mode and
 `--no-open` suppresses browser launch.
 
 Verified source locations may use `@[relative/path]:line` in report or coworker
-copy. The viewer renders that notation as an explicit local-open control. Its
+copy. Existing report synthesis may also carry a verified inline-code
+`relative/path:line` anchor. The viewer renders both forms as the same explicit
+local-open control in Combined, child synthesis, full trails, and chat. Its
 CSRF-protected POST and `tb open` both dispatch `editor.open`: the handler
 resolves symlinks, rejects anything outside the current checkout or absent on
-the current branch, then launches the machine-local `TB_EDITOR`, ordinary
-editor setting, or a recognized IDE at the line without a shell. Opening is a
-user action and grants the coworker no source-writing capability. Neither
+the current branch, then launches the effective machine-local editor at the
+line without a shell. Resolution is `TB_EDITOR`, the saved Local settings
+command, `VISUAL`/`EDITOR`, Git's `core.editor`, then automatic `vim` followed
+by `nano`. Opening is a user action and grants the coworker no source-writing
+capability. Neither
 `tb view` nor `tb open` enters the CLI's companion-publication tail; both are
 machine-local actions even in a connected project.
 Fresh clones and sparse companion checkouts recreate the ignored machine-local
@@ -992,10 +996,13 @@ own.
 
 Canonical configuration lives on the companion config branch and changes only
 through typed, revision-checked commands. `tb config` first refreshes that
-branch, then opens a localhost editor with four direct surfaces: Identity,
-Repository, Ticket fields, and Integrations. The CLI, editor HTTP transport,
-and programmatic callers dispatch the same command envelopes; transports do
-not reimplement mutations.
+branch, then opens a localhost editor with five direct surfaces: Identity,
+Local settings, Repository, Ticket fields, and Integrations. Local settings
+never enter companion history; the editor command lives only in `~/.tbconfig`
+and blank means automatic `vim`, then `nano`. Both the browser and `tb config
+--editor` dispatch `local.editor.update`. The CLI, editor HTTP transport, and
+programmatic callers dispatch the same command envelopes; transports do not
+reimplement mutations.
 
 Repository connection is a three-step contract, not a wizard that owns external
 state: create an empty companion repository, connect it, then commit the source

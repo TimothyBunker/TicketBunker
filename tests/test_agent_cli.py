@@ -215,6 +215,20 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(open_code, 0, open_stderr)
         publish.assert_not_called()
 
+    def test_local_editor_config_uses_shared_command_without_publishing(self) -> None:
+        with mock.patch.object(cli.editor_mod.shutil, "which", return_value="/usr/bin/nano"):
+            with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+                with mock.patch.object(
+                    cli.project_mod, "load_locator", return_value={"project": "TB"}
+                ):
+                    with mock.patch.object(cli.project_mod, "publish_data") as publish:
+                        code, stdout, stderr = self._run(["config", "--editor", "nano"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("editor: nano (local setting)", stdout)
+        self.assertEqual(config.load()["editor"], "nano")
+        publish.assert_not_called()
+
     def test_pi_run_without_command_template_keeps_its_subcommand_name(self) -> None:
         """``tb run --cmd`` must not overwrite argparse's top-level command."""
         with mock.patch.object(cli, "cmd_run", return_value=0):

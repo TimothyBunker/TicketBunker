@@ -14,10 +14,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import commands, doctor, project, projectconfig, types
+from . import commands, doctor, editor, project, projectconfig, types
 
 
-_PAGES = ("identity", "repository", "fields", "integrations")
+_PAGES = ("identity", "local", "repository", "fields", "integrations")
+_PAGE_LABELS = {
+    "identity": "Identity",
+    "local": "Local settings",
+    "repository": "Repository",
+    "fields": "Ticket fields",
+    "integrations": "Integrations",
+}
 _ALLOWED_COMMANDS = {
     "project.connect",
     "identity.update",
@@ -30,6 +37,7 @@ _ALLOWED_COMMANDS = {
     "configuration.mapping.put",
     "configuration.mapping.replace",
     "credentials.update",
+    "local.editor.update",
 }
 
 
@@ -193,6 +201,7 @@ def _initial_state(root: Path) -> dict[str, Any]:
         return {
             "initialized": True,
             **projectconfig.state(root),
+            "local": editor.local_state(root),
             "diagnostics": doctor.report(root, check_remote=False),
         }
     fields = []
@@ -204,6 +213,7 @@ def _initial_state(root: Path) -> dict[str, Any]:
         "locator": {},
         "revision": "",
         "identity": projectconfig.identity_state(root),
+        "local": editor.local_state(root),
         "credentials_file": str(projectconfig.credential_file()),
         "credentials": projectconfig.credential_state(),
         "fields": fields,
@@ -233,6 +243,37 @@ def _identity_page(state: dict[str, Any]) -> str:
         </div>
         <div class="actions"><button type="submit">Save identity</button><output class="status" aria-live="polite"></output></div>
       </form>
+    </section>"""
+
+
+def _local_page(state: dict[str, Any]) -> str:
+    settings = state["local"]
+    configured = str(settings.get("configured_editor") or "")
+    effective = str(settings.get("effective_editor") or "")
+    source = str(settings.get("editor_source") or "unavailable")
+    source_label = source if source in {"TB_EDITOR", "VISUAL", "EDITOR"} else source.capitalize()
+    current = effective or "None found"
+    placeholder = f"Automatic: {effective}" if effective else "Automatic: vim, then nano"
+    return f"""
+    <header class="page-head"><h1>Local settings</h1><p class="lede">Only this machine.</p></header>
+    <section class="section">
+      <div class="section-head"><h2>Editor</h2><span class="badge">{_e(source_label)}</span></div>
+      <dl class="readonly">
+        <dt>Current editor</dt><dd class="mono">{_e(current)}</dd>
+      </dl>
+      <form data-command="local.editor.update">
+        <div class="form-grid">
+          <label class="span-2">Editor command
+            <input name="editor" list="editor-commands" value="{_e(configured)}" placeholder="{_e(placeholder)}" autocomplete="off" spellcheck="false">
+          </label>
+          <datalist id="editor-commands">
+            <option value="vim"></option><option value="nano"></option>
+            <option value="code --goto {{file}}:{{line}}"></option>
+          </datalist>
+        </div>
+        <div class="actions"><button type="submit">Save locally</button><output class="status" aria-live="polite"></output></div>
+      </form>
+      <p class="empty">Automatic tries vim, then nano.</p>
     </section>"""
 
 
@@ -513,19 +554,20 @@ def _render(root: Path, page: str, token: str) -> bytes:
     state = _initial_state(root)
     pages = {
         "identity": _identity_page,
+        "local": _local_page,
         "repository": lambda value: _repository_page(value, root),
         "fields": _fields_page,
         "integrations": _integrations_page,
     }
     nav = "".join(
-        f'<a href="/{name}"' + (' aria-current="page"' if name == page else '') + f'>{name.title()}</a>'
+        f'<a href="/{name}"' + (' aria-current="page"' if name == page else '') + f'>{_PAGE_LABELS[name]}</a>'
         for name in _PAGES
     )
     project_name = state.get("project", {}).get("key") or "Not initialized"
     script_state = json.dumps({"token": token}, separators=(",", ":")).replace("<", "\\u003c")
     body = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="data:,">
-<title>{_e(page.title())} · TicketBunker</title><style>{_STYLE}</style></head>
+<title>{_e(_PAGE_LABELS[page])} · TicketBunker</title><style>{_STYLE}</style></head>
 <body><div class="shell"><aside class="side"><div class="brand">TicketBunker<span class="project-mark">{_e(project_name)}</span></div>
 <nav class="nav" aria-label="Configuration">{nav}</nav></aside>
 <main class="content">{pages[page](state)}</main></div>

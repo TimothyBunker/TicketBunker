@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import commands, editor
+from ticketbunker import commands, config, editor
 
 
 class EditorTests(unittest.TestCase):
@@ -15,9 +15,75 @@ class EditorTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         (self.root / "src").mkdir()
         (self.root / "src" / "main.py").write_text("first\nsecond\n", encoding="utf-8")
+        self.old_global_config = config.GLOBAL_CONFIG
+        config.GLOBAL_CONFIG = self.root / "tbconfig.json"
 
     def tearDown(self) -> None:
+        config.GLOBAL_CONFIG = self.old_global_config
         self.temp.cleanup()
+
+    def test_automatic_editor_prefers_vim_then_nano(self) -> None:
+        git_result = mock.Mock(returncode=1, stdout="")
+        with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):
+            with mock.patch.object(editor.subprocess, "run", return_value=git_result):
+                with mock.patch.object(
+                    editor.shutil,
+                    "which",
+                    side_effect=lambda name: f"/usr/bin/{name}" if name in {"vim", "nano"} else None,
+                ) as find:
+                    value = editor.resolve_editor(self.root)
+
+        self.assertEqual(value, ("vim", "automatic"))
+        find.assert_called_once_with("vim")
+
+    def test_automatic_editor_uses_nano_when_vim_is_unavailable(self) -> None:
+        git_result = mock.Mock(returncode=1, stdout="")
+        with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):
+            with mock.patch.object(editor.subprocess, "run", return_value=git_result):
+                with mock.patch.object(
+                    editor.shutil,
+                    "which",
+                    side_effect=lambda name: "/usr/bin/nano" if name == "nano" else None,
+                ):
+                    value = editor.resolve_editor(self.root)
+
+        self.assertEqual(value, ("nano", "automatic"))
+
+    def test_local_editor_command_persists_and_auto_clears_it(self) -> None:
+        with mock.patch.object(editor.shutil, "which", return_value="/usr/bin/nano"):
+            saved = commands.dispatch(
+                "local.editor.update",
+                {"editor": "nano"},
+                commands.CommandContext(self.root, transport="test"),
+            )
+        self.assertEqual(config.load()["editor"], "nano")
+        self.assertEqual(saved["editor_source"], "local setting")
+
+        git_result = mock.Mock(returncode=1, stdout="")
+        with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):
+            with mock.patch.object(editor.subprocess, "run", return_value=git_result):
+                with mock.patch.object(editor.shutil, "which", return_value="/usr/bin/vim"):
+                    automatic = commands.dispatch(
+                        "local.editor.update",
+                        {"editor": "auto"},
+                        commands.CommandContext(self.root, transport="test"),
+                    )
+        self.assertNotIn("editor", config.load())
+        self.assertEqual(automatic["effective_editor"], "vim")
+        self.assertEqual(automatic["editor_source"], "automatic")
+
+    def test_missing_editor_command_does_not_replace_the_saved_choice(self) -> None:
+        config.save({"editor": "vim"})
+        with mock.patch.object(editor.shutil, "which", return_value=None):
+            with self.assertRaises(commands.CommandRejected) as caught:
+                commands.dispatch(
+                    "local.editor.update",
+                    {"editor": "missing-editor"},
+                    commands.CommandContext(self.root, transport="test"),
+                )
+
+        self.assertEqual(caught.exception.code, "local_editor_missing")
+        self.assertEqual(config.load()["editor"], "vim")
 
     def test_shared_command_opens_an_inside_path_at_the_requested_line(self) -> None:
         with mock.patch.dict(

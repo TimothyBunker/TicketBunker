@@ -739,12 +739,35 @@ class ViewerTests(unittest.TestCase):
         self.assertNotIn("<img", rendered)
 
     def test_report_source_reference_becomes_an_explicit_local_open_control(self) -> None:
-        rendered = render_report("- [real] Open @[ticketbunker/viewer.py]:1 first.")
+        rendered = render_report(
+            "- [real] Open @[ticketbunker/viewer.py]:1, then `ticketbunker/editor.py:2`."
+        )
 
         self.assertIn('class="source-link" type="button"', rendered)
         self.assertIn('data-source-path="ticketbunker/viewer.py"', rendered)
         self.assertIn('data-source-line="1"', rendered)
         self.assertIn("@[ticketbunker/viewer.py]:1</button>", rendered)
+        self.assertIn('data-source-path="ticketbunker/editor.py"', rendered)
+        self.assertIn('data-source-line="2"', rendered)
+        self.assertIn("ticketbunker/editor.py:2</button>", rendered)
+
+    def test_branch_and_combined_synthesis_use_the_chat_source_control(self) -> None:
+        rendered = page_ticket(self.root, "TB-9", "fingerprint")
+        self.assertIsNotNone(rendered)
+        page = rendered.decode("utf-8")
+
+        combined = page.split('id="report-master"', 1)[1].split(
+            'data-report-panel="grace__TB-9-a-very-long-branch-name-that-must-wrap"',
+            1,
+        )[0]
+        branch = page.split(
+            'data-report-panel="grace__TB-9-a-very-long-branch-name-that-must-wrap"',
+            1,
+        )[1]
+        for panel in (combined, branch):
+            self.assertIn('class="source-link" type="button"', panel)
+            self.assertIn('data-source-path="ticketbunker/viewer.py"', panel)
+            self.assertIn('data-source-line="1"', panel)
 
     def test_source_open_error_names_the_editor_fix_without_git_recovery_copy(self) -> None:
         problem = viewer._command_problem(
@@ -753,7 +776,8 @@ class ViewerTests(unittest.TestCase):
         )
 
         self.assertEqual(problem.title, "Editor not ready")
-        self.assertIn("TB_EDITOR", problem.action)
+        self.assertIn("tb config", problem.action)
+        self.assertIn("Local settings", problem.action)
         self.assertNotIn("git status", problem.action.casefold())
 
     def test_ticket_markup_is_rich_but_does_not_invent_provenance(self) -> None:
