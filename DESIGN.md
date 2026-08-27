@@ -369,11 +369,14 @@ tool:
   Git mutations, or directly edit Combined.
 - Raw coworker messages and Pi session files stay private below
   `.git/ticketbunker/coworker/<project>/<ticket>/<user>/`. Pi is launched with
-  only `read`, `grep`, `find`, and `ls`. A proposal is inert until the user
-  accepts it. Acceptance rechecks the current child digest, report lint, and
-  every real anchor, updates only the named child Reader brief subsection, and
-  regenerates Combined mechanically. The ordinary companion publication path
-  remains the only way the accepted report becomes shared truth.
+  only `read`, `grep`, `find`, and `ls`. Report-check failures are expressed in
+  conversation as a concise rejected/not-saved outcome; exact lint and anchor
+  findings stay in the private local coworker diagnostics and never become
+  coworker copy. A proposal is inert until the user accepts it. Acceptance
+  rechecks the current child digest, report lint, and every real anchor, updates
+  only the named child Reader brief subsection, and regenerates Combined
+  mechanically. The ordinary companion publication path remains the only way
+  the accepted report becomes shared truth.
 
 **The ticket surface mirrors a tracker page, read-only and honest about
 provenance.** `tb list` shows every ticket grouped by declared status and

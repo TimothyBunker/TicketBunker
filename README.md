@@ -263,6 +263,8 @@ explain the current report, and prepare a child Reader-brief proposal. It has
 no shell, edit, write, or Git tool. Raw chat stays below
 `.git/ticketbunker/coworker/`; accepting a proposal rechecks the current child,
 lint, and real anchors before changing that child and regenerating Combined.
+Rejected proposals show only a concise outcome in the conversation; exact
+validator findings remain in the private local coworker diagnostics.
 If companion publication stops, the accepted local report remains visible as
 **Companion publish pending** with its next action.
 

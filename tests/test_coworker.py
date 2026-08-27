@@ -214,6 +214,45 @@ class CoworkerTests(unittest.TestCase):
         self.assertEqual(result["messages"][0]["reference"], reference)
         self.assertEqual(run_pi.call_args.args[-1], reference)
 
+    def test_rejected_generated_proposal_keeps_validator_details_out_of_chat(self) -> None:
+        response = {
+            "reply": "I prepared a report correction.",
+            "proposal": {
+                "category": "what",
+                "changes": [
+                    {
+                        "branch": self.branch,
+                        "proposed_synthesis": "- [real] The report correction is complete.",
+                    }
+                ],
+            },
+        }
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.object(coworker, "_run_pi", return_value=(response, {"harness": "pi"})):
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                result = commands.dispatch(
+                    "coworker.chat",
+                    {
+                        "ticket": "TB-9",
+                        "category": "what",
+                        "scope": "combined",
+                        "message": "Correct the report.",
+                    },
+                    context,
+                )
+
+        visible = result["messages"][-1]["text"]
+        self.assertIn("did not pass TicketBunker's report checks", visible)
+        self.assertIn("No report changed", visible)
+        self.assertNotIn("real-anchor", visible)
+        self.assertNotIn("[error]", visible)
+        self.assertEqual(result["proposals"], [])
+        session = coworker._root(self.root, "", "TB-9")
+        diagnostics_path = session / "diagnostics.jsonl"
+        diagnostics = diagnostics_path.read_text(encoding="utf-8")
+        self.assertIn("real-anchor", diagnostics)
+        self.assertEqual(diagnostics_path.stat().st_mode & 0o777, 0o600)
+
     def test_selected_synthesis_reference_cannot_cross_topic_or_scope(self) -> None:
         with self.assertRaises(commands.CommandRejected) as caught:
             commands.dispatch(
@@ -282,6 +321,55 @@ class CoworkerTests(unittest.TestCase):
         self.assertEqual(accepted["proposal"]["status"], "accepted")
         self.assertTrue(accepted["combined_regenerated"])
         self.assertNotIn("source.py", git(self.root, "status", "--porcelain"))
+
+    def test_rejected_proposal_edit_keeps_validator_details_out_of_command_error(self) -> None:
+        response = {
+            "reply": "I prepared a narrower What synthesis.",
+            "proposal": {
+                "category": "what",
+                "changes": [
+                    {
+                        "branch": self.branch,
+                        "proposed_synthesis": (
+                            "- [speculation] grounded: The report stays evidence bounded "
+                            "(observations/diff.json)."
+                        ),
+                    }
+                ],
+            },
+        }
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.object(coworker, "_run_pi", return_value=(response, {"harness": "pi"})):
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                chat = commands.dispatch(
+                    "coworker.chat",
+                    {
+                        "ticket": "TB-9",
+                        "category": "what",
+                        "scope": "combined",
+                        "message": "Prepare a report update.",
+                    },
+                    context,
+                )
+
+        with self.assertRaises(commands.CommandRejected) as caught:
+            commands.dispatch(
+                "coworker.proposal.accept",
+                {
+                    "ticket": "TB-9",
+                    "proposal": chat["proposals"][0]["id"],
+                    "edits": {self.branch: "- [real] This edit has no checkable anchor."},
+                },
+                context,
+            )
+
+        self.assertIn("did not pass TicketBunker's report checks", caught.exception.message)
+        self.assertNotIn("real-anchor", caught.exception.message)
+        self.assertNotIn("[error]", caught.exception.message)
+        diagnostics = (
+            coworker._root(self.root, "", "TB-9") / "diagnostics.jsonl"
+        ).read_text(encoding="utf-8")
+        self.assertIn("real-anchor", diagnostics)
 
     def test_pi_runtime_is_read_only_and_reuses_one_session_directory(self) -> None:
         original_run = subprocess.run

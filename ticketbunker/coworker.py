@@ -34,6 +34,14 @@ MAX_MESSAGE_CHARS = 8000
 MAX_REPLY_CHARS = 16000
 MAX_REFERENCE_CHARS = 2400
 CHAT_TIMEOUT_SECONDS = 300
+PROPOSAL_CHECK_WARNING = (
+    "That proposed report update was not saved because it did not pass "
+    "TicketBunker's report checks. No report changed. Ask the coworker to try the update again."
+)
+PROPOSAL_ACCEPT_REJECTION = (
+    "The proposed report update did not pass TicketBunker's report checks. "
+    "Review its evidence or ask the coworker to prepare it again."
+)
 _LOCKS: dict[str, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -135,6 +143,33 @@ def _append(path: Path, value: Mapping[str, Any]) -> None:
         path.chmod(0o600)
     except OSError:
         pass
+
+
+def _record_proposal_rejection(
+    root: Path,
+    project_key: str,
+    ticket_id: str,
+    *,
+    phase: str,
+    category: str,
+    scope: str,
+    details: list[str],
+    branch: str = "",
+) -> None:
+    """Keep exact validator output local without turning it into coworker copy."""
+    _append(
+        _root(root, project_key, ticket_id) / "diagnostics.jsonl",
+        {
+            "kind": "coworker_proposal_rejected",
+            "phase": phase,
+            "ticket": ticket_id,
+            "category": category,
+            "scope": scope,
+            "branch": branch,
+            "details": details,
+            "created_at": _now(),
+        },
+    )
 
 
 def _messages(root: Path, project_key: str, ticket_id: str) -> list[dict[str, Any]]:
@@ -361,33 +396,39 @@ def _prepare_proposal(
     scope: str,
     raw: Any,
     generation: Mapping[str, str],
-) -> tuple[dict[str, Any] | None, str]:
+) -> tuple[dict[str, Any] | None, str, list[str]]:
     if not isinstance(raw, Mapping):
-        return None, ""
+        return None, "", []
     if str(raw.get("category") or "").casefold() != category:
-        return None, "The proposed report update did not match the selected category, so it was not saved."
+        return None, PROPOSAL_CHECK_WARNING, [
+            "The proposal category did not match the selected category."
+        ]
     requested = raw.get("changes")
     if not isinstance(requested, list) or not requested:
-        return None, "The proposed report update named no child branches, so it was not saved."
+        return None, PROPOSAL_CHECK_WARNING, ["The proposal named no child branch changes."]
     by_branch = {report.branch: report for report in ticket.reports}
     changes: list[dict[str, str]] = []
     for item in requested:
         if not isinstance(item, Mapping):
-            return None, "The proposed report update had an invalid branch change, so it was not saved."
+            return None, PROPOSAL_CHECK_WARNING, [
+                "The proposal contained an invalid branch change."
+            ]
         branch = str(item.get("branch") or "").strip()
         synthesis = str(item.get("proposed_synthesis") or "").strip()
         report = by_branch.get(branch)
         if report is None or not synthesis:
-            return None, f"The proposed report update could not resolve child branch {branch or '(missing)'}."
+            return None, PROPOSAL_CHECK_WARNING, [
+                f"The proposal could not resolve child branch {branch or '(missing)'}.",
+            ]
         try:
             patched = _replace_brief(report.text, category, synthesis)
         except commands.CommandRejected as exc:
-            return None, exc.message
+            return None, PROPOSAL_CHECK_WARNING, [exc.message]
         ok, findings = reportlint.gate(patched)
         errors = [str(finding) for finding in findings if finding.severity == "error"]
         errors.extend(anchorcheck.verify(patched, root, _refs(ticket.bunker, branch), ticket.bunker))
         if not ok or errors:
-            return None, f"The proposed report update did not pass the report gate: {errors[0]}"
+            return None, PROPOSAL_CHECK_WARNING, errors or ["The report lint gate rejected the proposal."]
         changes.append(
             {
                 "branch": branch,
@@ -411,7 +452,7 @@ def _prepare_proposal(
         "generation": dict(generation),
         "changes": changes,
     }
-    return value, ""
+    return value, "", []
 
 
 def _session_lock(path: Path) -> threading.Lock:
@@ -640,9 +681,19 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
             root, project_key, ticket, category, scope, message, reference
         )
         reply = str(response.get("reply") or "").strip()[:MAX_REPLY_CHARS]
-        proposal, warning = _prepare_proposal(
+        proposal, warning, diagnostics = _prepare_proposal(
             root, ticket, category, scope, response.get("proposal"), generation
         )
+        if diagnostics:
+            _record_proposal_rejection(
+                root,
+                project_key,
+                ticket_id,
+                phase="prepare",
+                category=category,
+                scope=scope,
+                details=diagnostics,
+            )
         proposal_id = ""
         if proposal is not None:
             proposal["project"] = project_key
@@ -695,6 +746,7 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
     ticket = _ticket(root, project_key, ticket_id)
     reports = {report.branch: report for report in ticket.reports}
     category = str(proposal.get("category") or "")
+    scope = str(proposal.get("scope") or "combined")
     prepared: list[tuple[str, str]] = []
     for change in proposal.get("changes", []):
         if not isinstance(change, Mapping):
@@ -712,9 +764,19 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
         errors = [str(finding) for finding in findings if finding.severity == "error"]
         errors.extend(anchorcheck.verify(patched, root, _refs(ticket.bunker, branch), ticket.bunker))
         if not ok or errors:
+            _record_proposal_rejection(
+                root,
+                project_key,
+                ticket_id,
+                phase="accept",
+                category=category,
+                scope=scope,
+                branch=branch,
+                details=errors or ["The report lint gate rejected the edited proposal."],
+            )
             raise commands.CommandRejected(
                 "coworker_proposal_rejected",
-                f"The edited proposal for {branch} did not pass the report gate.\nNext: {errors[0]}",
+                PROPOSAL_ACCEPT_REJECTION,
             )
         prepared.append((branch, patched))
     if not prepared:
@@ -733,9 +795,21 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
                 generation={str(k): str(v) for k, v in generation.items()},
             )
     except IntakeRejected as exc:
+        details = [str(error) for error in exc.errors] or [
+            "The report intake gate rejected the proposal."
+        ]
+        _record_proposal_rejection(
+            root,
+            project_key,
+            ticket_id,
+            phase="publish",
+            category=category,
+            scope=scope,
+            details=details,
+        )
         raise commands.CommandRejected(
             "coworker_proposal_rejected",
-            f"The report gate rejected this proposal.\nNext: {exc.errors[0]}",
+            PROPOSAL_ACCEPT_REJECTION,
         ) from exc
     master.regenerate(ticket.bunker, ledger)
     ledger.event(

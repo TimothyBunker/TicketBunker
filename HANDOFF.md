@@ -169,8 +169,10 @@ exercise unless a live boundary is explicitly called out.
   receives only read/search tools. Raw chat stays below `.git`; a
   coworker reply can prepare an inert child Reader-brief proposal, and explicit
   acceptance rechecks digest/lint/anchors, updates the named children, then
-  regenerates Combined. It cannot edit source, run Git mutations, or write
-  Combined directly.
+  regenerates Combined. Rejected proposals show a concise not-saved outcome;
+  exact lint/anchor findings remain in private local `diagnostics.jsonl` and do
+  not leak into coworker replies or command errors. It cannot edit source, run
+  Git mutations, or write Combined directly.
 - `@[relative/path]:line` is a clickable verified-source form in report and
   coworker copy. The viewer and `tb open` share the guarded `editor.open`
   command, which confines paths to the current checkout and launches the local
@@ -188,7 +190,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.11 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.12 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -229,7 +231,8 @@ real post-commit hook that records a change without publishing. Focused tests
 also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
-child-only report updates. The current full suite is 153 tests.
+child-only report updates and private proposal-rejection diagnostics. The
+current full suite is 155 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
