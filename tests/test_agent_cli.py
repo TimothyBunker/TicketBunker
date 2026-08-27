@@ -155,6 +155,28 @@ class AgentCliTests(unittest.TestCase):
         )
         self.assertEqual(dispatched.call_args.args[2].transport, "cli")
 
+    def test_open_source_cli_starts_the_owned_editor_when_selected(self) -> None:
+        response = {
+            "opened": True,
+            "mode": "builtin",
+            "path": "ticketbunker/viewer.py",
+            "line": 42,
+            "editor": "TicketBunker",
+        }
+        with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+            with mock.patch.object(cli.commands, "dispatch", return_value=response):
+                with mock.patch.object(cli, "cmd_view", return_value=0) as start_viewer:
+                    with mock.patch("webbrowser.open") as opened:
+                        code, stdout, stderr = self._run(
+                            ["open", "@[ticketbunker/viewer.py]:42"]
+                        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("TicketBunker editor", stdout)
+        start_viewer.assert_called_once()
+        self.assertIn("/source?", opened.call_args.args[0])
+        self.assertIn("ticketbunker%2Fviewer.py", opened.call_args.args[0])
+
     def test_view_opens_the_browser_by_default_and_keeps_foreground_optional(self) -> None:
         seen: list[argparse.Namespace] = []
 

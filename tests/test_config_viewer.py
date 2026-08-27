@@ -117,21 +117,38 @@ class ConfigViewerTests(unittest.TestCase):
         self.assertIn('href="/local" aria-current="page">Local settings</a>', text)
         self.assertIn("Only this machine.", text)
         self.assertIn('data-command="local.editor.update"', text)
-        self.assertIn("Automatic tries vim, then nano.", text)
+        self.assertIn("Built-in editor", text)
+        self.assertIn("Tab key inserts", text)
+        self.assertIn("Formatting on save", text)
 
         token = self.server.RequestHandlerClass.token
         with mock.patch.object(editor.shutil, "which", return_value="/usr/bin/nano"):
             status, _content_type, body = self.request(
                 "POST",
                 "/api/commands",
-                {"command": "local.editor.update", "payload": {"editor": "nano"}},
+                {
+                    "command": "local.editor.update",
+                    "payload": {
+                        "editor_mode": "external",
+                        "editor": "nano",
+                        "indent_style": "tabs",
+                        "tab_size": "2",
+                        "line_wrap": True,
+                        "trim_trailing_whitespace": True,
+                        "ensure_final_newline": True,
+                    },
+                },
                 token,
             )
 
         result = json.loads(body)
         self.assertEqual(status, 200)
         self.assertTrue(result["ok"])
+        self.assertEqual(result["editor_mode"], "external")
         self.assertEqual(result["effective_editor"], "nano")
+        self.assertEqual(result["indent_style"], "tabs")
+        self.assertEqual(result["tab_size"], 2)
+        self.assertTrue(result["trim_trailing_whitespace"])
         self.assertEqual(config.load()["editor"], "nano")
 
     def test_integrations_page_is_a_prefilled_mapping_matrix(self) -> None:

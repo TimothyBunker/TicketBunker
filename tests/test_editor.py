@@ -49,6 +49,18 @@ class EditorTests(unittest.TestCase):
 
         self.assertEqual(value, ("nano", "automatic"))
 
+    def test_built_in_editor_is_the_install_free_default(self) -> None:
+        with mock.patch.object(editor, "_editor_argv") as external:
+            value = commands.dispatch(
+                "editor.open",
+                {"path": "src/main.py", "line": 2},
+                commands.CommandContext(self.root, transport="test"),
+            )
+
+        self.assertEqual(value["mode"], "builtin")
+        self.assertEqual(value["editor"], "TicketBunker")
+        external.assert_not_called()
+
     def test_windows_git_bundled_vim_is_available_to_the_viewer(self) -> None:
         git = self.root / "Git" / "cmd" / "git.exe"
         vim = self.root / "Git" / "usr" / "bin" / "vim.exe"
@@ -104,6 +116,70 @@ class EditorTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "local_editor_missing")
         self.assertEqual(config.load()["editor"], "vim")
+
+    def test_builtin_format_settings_do_not_require_the_hidden_external_command(self) -> None:
+        config.save({"editor_mode": "builtin", "editor": "missing-editor"})
+        with mock.patch.object(editor.shutil, "which", return_value=None):
+            saved = commands.dispatch(
+                "local.editor.update",
+                {
+                    "editor_mode": "builtin",
+                    "editor": "missing-editor",
+                    "indent_style": "spaces",
+                    "tab_size": 3,
+                },
+                commands.CommandContext(self.root, transport="test"),
+            )
+
+        self.assertEqual(saved["editor_mode"], "builtin")
+        self.assertEqual(saved["tab_size"], 3)
+        self.assertEqual(config.load()["editor"], "missing-editor")
+
+    def test_builtin_read_and_save_preserve_newlines_and_apply_opted_in_cleanup(self) -> None:
+        source = self.root / "src" / "main.py"
+        source.write_bytes(b"first  \r\nsecond")
+        config.save(
+            {
+                "editor_mode": "builtin",
+                "indent_style": "spaces",
+                "tab_size": 2,
+                "trim_trailing_whitespace": True,
+                "ensure_final_newline": True,
+            }
+        )
+
+        opened = commands.dispatch(
+            "editor.read",
+            {"path": "src/main.py", "line": 2},
+            commands.CommandContext(self.root, transport="test"),
+        )
+        saved = commands.dispatch(
+            "editor.save",
+            {
+                "path": "src/main.py",
+                "content": "first  \nchanged  ",
+                "expected_digest": opened["digest"],
+            },
+            commands.CommandContext(self.root, transport="test"),
+        )
+
+        self.assertEqual(opened["content"], "first  \nsecond")
+        self.assertEqual(opened["newline"], "crlf")
+        self.assertEqual(opened["settings"]["tab_size"], 2)
+        self.assertTrue(saved["saved"])
+        self.assertEqual(saved["content"], "first\nchanged\n")
+        self.assertEqual(source.read_bytes(), b"first\r\nchanged\r\n")
+
+    def test_builtin_save_refuses_to_overwrite_a_file_changed_on_disk(self) -> None:
+        opened = editor.read_source(self.root, "src/main.py", 1)
+        source = self.root / "src" / "main.py"
+        source.write_text("newer\n", encoding="utf-8")
+
+        with self.assertRaises(commands.CommandRejected) as caught:
+            editor.save_source(self.root, "src/main.py", "draft\n", opened["digest"])
+
+        self.assertEqual(caught.exception.code, "source_changed")
+        self.assertEqual(source.read_text(encoding="utf-8"), "newer\n")
 
     def test_shared_command_opens_an_inside_path_at_the_requested_line(self) -> None:
         with mock.patch.dict(

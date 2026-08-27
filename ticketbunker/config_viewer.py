@@ -135,7 +135,7 @@ button:disabled { opacity: .55; cursor: wait; }
 .tabs button { min-height: 44px; padding: 8px 1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); background: transparent; }
 .tabs button:hover { color: var(--fg); background: transparent; }
 .tabs button[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
-.provider[hidden], .field-scope[hidden] { display: none; }
+.provider[hidden], .field-scope[hidden], [data-external-editor][hidden] { display: none; }
 .mapping-matrix { border-top: 1px solid var(--line); }
 .mapping-head, .mapping-entry {
   display: grid;
@@ -248,33 +248,65 @@ def _identity_page(state: dict[str, Any]) -> str:
 
 def _local_page(state: dict[str, Any]) -> str:
     settings = state["local"]
+    mode = str(settings.get("editor_mode") or "builtin")
     configured = str(settings.get("configured_editor") or "")
     effective = str(settings.get("effective_editor") or "")
     source = str(settings.get("editor_source") or "unavailable")
     source_label = source if source in {"TB_EDITOR", "VISUAL", "EDITOR"} else source.capitalize()
     current = effective or "None found"
     placeholder = f"Automatic: {effective}" if effective else "Automatic: vim, then nano"
+    indent_style = str(settings.get("indent_style") or "spaces")
+    tab_size = int(settings.get("tab_size") or 4)
+    tab_options = "".join(
+        f'<option value="{value}"{" selected" if value == tab_size else ""}>{value}</option>'
+        for value in range(1, 9)
+    )
     return f"""
     <header class="page-head"><h1>Local settings</h1><p class="lede">Only this machine.</p></header>
-    <section class="section">
-      <div class="section-head"><h2>Editor</h2><span class="badge">{_e(source_label)}</span></div>
-      <dl class="readonly">
-        <dt>Current editor</dt><dd class="mono">{_e(current)}</dd>
-      </dl>
-      <form data-command="local.editor.update">
+    <form data-command="local.editor.update" data-local-editor>
+      <section class="section">
+        <div class="section-head"><h2>Source editor</h2><span class="badge">{"Included" if mode == "builtin" else "External"}</span></div>
         <div class="form-grid">
-          <label class="span-2">Editor command
-            <input name="editor" list="editor-commands" value="{_e(configured)}" placeholder="{_e(placeholder)}" autocomplete="off" spellcheck="false">
+          <label>Open source links
+            <select name="editor_mode" data-editor-mode>
+              <option value="builtin"{" selected" if mode == "builtin" else ""}>Built-in editor</option>
+              <option value="external"{" selected" if mode == "external" else ""}>External editor</option>
+            </select>
           </label>
+          <div data-external-editor{"" if mode == "external" else " hidden"}>
+            <label>External command
+              <input name="editor" list="editor-commands" value="{_e(configured)}" placeholder="{_e(placeholder)}" autocomplete="off" spellcheck="false">
+            </label>
+          </div>
           <datalist id="editor-commands">
             <option value="vim"></option><option value="nano"></option>
             <option value="code --goto {{file}}:{{line}}"></option>
           </datalist>
         </div>
+        <p class="empty" data-external-editor{"" if mode == "external" else " hidden"}>Current external editor: <span class="mono">{_e(current)}</span> ({_e(source_label)}).</p>
+      </section>
+      <section class="section">
+        <div class="section-head"><h2>Indentation</h2></div>
+        <div class="form-grid">
+          <label>Tab key inserts
+            <select name="indent_style">
+              <option value="spaces"{" selected" if indent_style == "spaces" else ""}>Spaces</option>
+              <option value="tabs"{" selected" if indent_style == "tabs" else ""}>Tabs</option>
+            </select>
+          </label>
+          <label>Tab width<select name="tab_size">{tab_options}</select></label>
+          <label class="check"><input type="checkbox" name="line_wrap"{" checked" if settings.get("line_wrap") else ""}>Wrap long lines</label>
+        </div>
+      </section>
+      <section class="section">
+        <div class="section-head"><h2>Formatting on save</h2></div>
+        <div class="form-grid">
+          <label class="check"><input type="checkbox" name="trim_trailing_whitespace"{" checked" if settings.get("trim_trailing_whitespace") else ""}>Trim trailing whitespace</label>
+          <label class="check"><input type="checkbox" name="ensure_final_newline"{" checked" if settings.get("ensure_final_newline") else ""}>Ensure final newline</label>
+        </div>
         <div class="actions"><button type="submit">Save locally</button><output class="status" aria-live="polite"></output></div>
-      </form>
-      <p class="empty">Automatic tries vim, then nano.</p>
-    </section>"""
+      </section>
+    </form>"""
 
 
 def _repository_page(state: dict[str, Any], root: Path) -> str:
@@ -684,6 +716,13 @@ document.querySelectorAll('[data-field-type]').forEach(select => {
   const values = select.form.querySelector('[data-enum-values]');
   const sync = () => { values.disabled = select.value !== 'enum'; };
   select.addEventListener('change', sync); sync();
+});
+document.querySelectorAll('[data-local-editor]').forEach(form => {
+  const mode = form.querySelector('[data-editor-mode]');
+  const sync = () => form.querySelectorAll('[data-external-editor]').forEach(
+    element => { element.hidden = mode.value !== 'external'; }
+  );
+  mode.addEventListener('change', sync); sync();
 });
 """
 

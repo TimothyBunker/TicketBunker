@@ -1148,7 +1148,10 @@ def cmd_config(args: argparse.Namespace) -> int:
             print(f"error: {exc.message}", file=sys.stderr)
             return 1
         changed = True
-        print(f"editor: {local.get('effective_editor') or 'not found'} ({local.get('editor_source')})")
+        if local.get("editor_mode") == "builtin":
+            print("editor: TicketBunker built-in")
+        else:
+            print(f"editor: {local.get('effective_editor') or 'not found'} ({local.get('editor_source')})")
     if changed:
         for key in ("user", "bunker_root"):
             if cfg.get(key):
@@ -1710,6 +1713,23 @@ def cmd_open_source(args: argparse.Namespace) -> int:
     except commands.CommandRejected as exc:
         print(f"error: {exc.message}", file=sys.stderr)
         return 1
+    if result.get("mode") == "builtin":
+        viewer_args = argparse.Namespace(
+            port=args.port,
+            foreground=False,
+            open=False,
+        )
+        code = cmd_view(viewer_args)
+        if code:
+            return code
+        import webbrowser
+        from urllib.parse import urlencode
+
+        query = urlencode({"path": result["path"], "line": result["line"]})
+        target = f"http://127.0.0.1:{args.port}/source?{query}"
+        webbrowser.open(target)
+        print(f"opened {result['path']}:{result['line']} in the TicketBunker editor")
+        return 0
     print(f"opened {result['path']}:{result['line']} in {result['editor']}")
     return 0
 
@@ -2162,9 +2182,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("ticket", help="ticket ID")
     s.set_defaults(fn=cmd_synthesize)
 
-    s = sub.add_parser("open", help="open a project source reference in the configured local editor")
+    s = sub.add_parser("open", help="open a project source reference in TicketBunker's built-in editor")
     s.add_argument("source", help="project path or '@[path]:line' reference")
     s.add_argument("--line", type=int, default=None, help="source line (default: 1)")
+    s.add_argument("--port", type=int, default=8378, help="localhost viewer port (default: 8378)")
     s.set_defaults(fn=cmd_open_source)
 
     s = sub.add_parser("hooks", help="inspect or repair the Git change-tracking hooks installed by tb init")
@@ -2308,7 +2329,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--bunker-root", default=None, metavar="DIR",
                    help="set where the bunker database lives, so tb run resolves bunkers from any repo")
     s.add_argument("--editor", default=None, metavar="COMMAND",
-                   help="set the machine-local editor command; use 'auto' to try vim, then nano")
+                   help="use 'builtin' (default), an external command, or 'auto' for external vim/nano")
     s.add_argument("--port", type=int, default=8378, help="localhost port (default: 8378)")
     s.add_argument("--no-open", action="store_true", help="do not open the editor in a browser")
     s.set_defaults(fn=cmd_config)

@@ -712,6 +712,124 @@ li { margin: 3px 0; }
 }
 .source-status[hidden] { display: none; }
 .source-status.error { color: var(--danger); border-color: var(--danger); }
+.source-body { min-width: 320px; overflow: hidden; }
+.source-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+.source-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.source-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--body);
+  font-weight: 650;
+}
+.source-back:hover { background: var(--panel); text-decoration: none; }
+.source-file { min-width: 0; }
+.source-path {
+  display: block;
+  overflow: hidden;
+  color: var(--fg);
+  font: 650 13px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-branch { display: block; color: var(--muted); font-size: 11px; }
+.source-actions { display: flex; align-items: center; gap: 10px; }
+.source-save-state { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.source-save-state.dirty { color: var(--warning); }
+.source-save-state.error {
+  position: fixed;
+  z-index: 50;
+  right: 14px;
+  bottom: 42px;
+  max-width: min(520px, calc(100vw - 28px));
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: var(--bg);
+  white-space: normal;
+}
+.source-save {
+  min-height: 40px;
+  padding: 7px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--on-accent);
+  background: var(--accent);
+  cursor: pointer;
+  font-weight: 650;
+}
+.source-save:hover { background: var(--accent-strong); }
+.source-save:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--panel); cursor: default; }
+.source-workspace {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  min-height: 0;
+  background: oklch(98.6% .005 252);
+}
+.source-gutter {
+  min-width: 54px;
+  height: 100%;
+  margin: 0;
+  padding: 14px 11px 80px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--panel);
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-align: right;
+  user-select: none;
+}
+.source-input {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 18px 80px;
+  resize: none;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  color: oklch(25% .035 255);
+  background: transparent;
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  caret-color: var(--accent-strong);
+}
+.source-input:focus-visible { outline: 0; }
+.source-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  padding: 5px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 11px;
+}
+.source-position { color: var(--body); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
   .ticket-main { padding-right: 24px; }
@@ -764,6 +882,12 @@ li { margin: 3px 0; }
   .coworker-scope { align-items: stretch; flex-direction: column; gap: 4px; }
   .coworker-scope select { width: 100%; max-width: none; min-height: 44px; }
   .coworker-compose textarea { min-height: 88px; }
+  .source-toolbar { grid-template-columns: auto minmax(0, 1fr); gap: 9px; }
+  .source-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .source-toolbar { padding: 8px 10px; }
+  .source-gutter { min-width: 43px; padding-right: 7px; }
+  .source-input { padding-left: 11px; }
+  .source-footer span:first-child { display: none; }
 }
 @media (pointer: coarse) {
   .coworker-inline, .coworker-tab, .truth-action { min-height: 44px; }
@@ -1394,6 +1518,16 @@ document.addEventListener('click', async (event) => {
       headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': token},
       body: JSON.stringify({path: link.dataset.sourcePath, line: link.dataset.sourceLine})
     });
+    if (value.mode === 'builtin') {
+      const query = new URLSearchParams({
+        path: value.path,
+        line: String(value.line),
+        return: `${location.pathname}${location.search}${location.hash}`
+      });
+      preserveTicketUi();
+      location.assign(`/source?${query}`);
+      return;
+    }
     setSourceStatus(`Opened ${value.path}:${value.line} in ${value.editor}.`);
     window.setTimeout(() => setSourceStatus(''), 2600);
   } catch (error) {
@@ -1699,6 +1833,183 @@ def _page(title: str, body: str, fp: str) -> bytes:
         '<link rel="icon" href="data:,">'
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><main>{body}</main><script>{_POLL_JS}</script></body></html>"
+    )
+    return document.encode("utf-8")
+
+
+_SOURCE_JS = r"""
+const source = document.querySelector('[data-source-input]');
+const gutter = document.querySelector('[data-source-gutter]');
+const save = document.querySelector('[data-source-save]');
+const status = document.querySelector('[data-source-save-state]');
+const position = document.querySelector('[data-source-position]');
+let digest = source.dataset.digest;
+let savedContent = source.value;
+let saving = false;
+
+function lineCount() { return Math.max(1, source.value.split('\n').length); }
+function updateGutter() {
+  gutter.textContent = Array.from({length: lineCount()}, (_, index) => index + 1).join('\n');
+}
+function updatePosition() {
+  const before = source.value.slice(0, source.selectionStart);
+  const lines = before.split('\n');
+  position.textContent = `Ln ${lines.length}, Col ${lines.at(-1).length + 1}`;
+}
+function updateDirty() {
+  const dirty = source.value !== savedContent;
+  status.textContent = dirty ? 'Unsaved' : 'Saved';
+  status.className = `source-save-state${dirty ? ' dirty' : ''}`;
+  save.disabled = !dirty || saving;
+  updateGutter(); updatePosition();
+}
+function requestMessage(value, fallback) {
+  return [value.message || fallback, value.state || '', value.action ? `Next: ${value.action}` : '']
+    .filter(Boolean).join(' ');
+}
+function selectedLines() {
+  const start = source.selectionStart;
+  const end = source.selectionEnd;
+  const blockStart = source.value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  let blockEnd = source.value.indexOf('\n', end);
+  if (blockEnd < 0) blockEnd = source.value.length;
+  return {start, end, blockStart, blockEnd};
+}
+function handleTab(event) {
+  if (event.key !== 'Tab') return;
+  event.preventDefault();
+  const tabSize = Number(source.dataset.tabSize || 4);
+  const unit = source.dataset.indentStyle === 'tabs' ? '\t' : ' '.repeat(tabSize);
+  const range = selectedLines();
+  if (range.start !== range.end || source.value.slice(range.blockStart, range.blockEnd).includes('\n')) {
+    const block = source.value.slice(range.blockStart, range.blockEnd);
+    const lines = block.split('\n');
+    let changed;
+    if (event.shiftKey) {
+      changed = lines.map(line => line.startsWith('\t') ? line.slice(1) : line.replace(new RegExp(`^ {1,${tabSize}}`), '')).join('\n');
+    } else {
+      changed = lines.map(line => unit + line).join('\n');
+    }
+    source.setRangeText(changed, range.blockStart, range.blockEnd, 'select');
+    source.selectionStart = range.blockStart;
+    source.selectionEnd = range.blockStart + changed.length;
+  } else if (event.shiftKey) {
+    const prefix = source.value.slice(range.blockStart, range.start);
+    const removable = prefix.endsWith('\t') ? 1 : Math.min(tabSize, (prefix.match(/ +$/) || [''])[0].length);
+    if (removable) source.setRangeText('', range.start - removable, range.start, 'end');
+  } else {
+    const column = range.start - range.blockStart;
+    const inserted = source.dataset.indentStyle === 'tabs' ? '\t' : ' '.repeat(tabSize - (column % tabSize));
+    source.setRangeText(inserted, range.start, range.end, 'end');
+  }
+  updateDirty();
+}
+async function saveSource() {
+  if (saving || source.value === savedContent) return;
+  saving = true; save.disabled = true;
+  status.textContent = 'Saving…'; status.className = 'source-save-state';
+  try {
+    const response = await fetch('/source/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': viewerToken},
+      body: JSON.stringify({path: source.dataset.path, content: source.value, expected_digest: digest})
+    });
+    let value = {};
+    try { value = await response.json(); } catch (error) { value = {}; }
+    if (!response.ok) throw new Error(requestMessage(value, 'The file could not be saved.'));
+    source.value = value.content;
+    digest = value.digest;
+    savedContent = value.content;
+    status.textContent = value.saved ? 'Saved' : 'No changes';
+    status.className = 'source-save-state';
+    updateGutter(); updatePosition();
+  } catch (error) {
+    status.textContent = error.message;
+    status.className = 'source-save-state error';
+  } finally {
+    saving = false;
+    save.disabled = source.value === savedContent;
+  }
+}
+
+source.addEventListener('input', updateDirty);
+source.addEventListener('click', updatePosition);
+source.addEventListener('keyup', updatePosition);
+source.addEventListener('keydown', (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault(); saveSource(); return;
+  }
+  handleTab(event);
+});
+source.addEventListener('scroll', () => { gutter.scrollTop = source.scrollTop; });
+save.addEventListener('click', saveSource);
+window.addEventListener('beforeunload', event => {
+  if (source.value === savedContent) return;
+  event.preventDefault(); event.returnValue = '';
+});
+
+updateGutter(); updateDirty();
+const targetLine = Math.max(1, Number(source.dataset.line || 1));
+let offset = 0;
+for (let line = 1; line < targetLine; line += 1) {
+  const next = source.value.indexOf('\n', offset);
+  if (next < 0) break;
+  offset = next + 1;
+}
+source.focus(); source.setSelectionRange(offset, offset);
+requestAnimationFrame(() => {
+  const lineHeight = parseFloat(getComputedStyle(source).lineHeight) || 20;
+  source.scrollTop = Math.max(0, (targetLine - 3) * lineHeight);
+  gutter.scrollTop = source.scrollTop;
+  updatePosition();
+});
+"""
+
+
+def page_source(root: Path, path: str, line: int, return_to: str = "/") -> bytes:
+    value = commands.dispatch(
+        "editor.read",
+        {"path": path, "line": line},
+        commands.CommandContext(root, transport="http"),
+    )
+    settings = value["settings"]
+    back = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/"
+    if back.startswith("/source"):
+        back = "/"
+    wrap = "soft" if settings["line_wrap"] else "off"
+    indent = "Tabs" if settings["indent_style"] == "tabs" else f'{settings["tab_size"]} spaces'
+    cleanup = []
+    if settings["trim_trailing_whitespace"]:
+        cleanup.append("trim whitespace")
+    if settings["ensure_final_newline"]:
+        cleanup.append("final newline")
+    cleanup_label = ", ".join(cleanup) if cleanup else "no save cleanup"
+    document = (
+        '<!doctype html><html lang="en" data-viewer-token=""><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+        '<link rel="icon" href="data:,">'
+        f'<title>{html.escape(value["path"])} | TicketBunker</title><style>{_STYLE}</style></head>'
+        '<body class="source-body"><main class="source-shell">'
+        '<header class="source-toolbar">'
+        f'<a class="source-back" href="{html.escape(back, quote=True)}">Close</a>'
+        '<div class="source-file">'
+        f'<span class="source-path">{html.escape(value["path"])}</span>'
+        f'<span class="source-branch">{html.escape(value["branch"] or "Detached checkout")}</span></div>'
+        '<div class="source-actions">'
+        '<span class="source-save-state" data-source-save-state role="status" aria-live="polite">Saved</span>'
+        '<button class="source-save" type="button" data-source-save disabled>Save</button></div></header>'
+        '<div class="source-workspace">'
+        '<pre class="source-gutter" data-source-gutter aria-hidden="true"></pre>'
+        f'<textarea class="source-input" data-source-input data-path="{html.escape(value["path"], quote=True)}" '
+        f'data-line="{value["line"]}" data-digest="{value["digest"]}" '
+        f'data-indent-style="{html.escape(settings["indent_style"], quote=True)}" '
+        f'data-tab-size="{settings["tab_size"]}" style="tab-size:{settings["tab_size"]}" '
+        f'wrap="{wrap}" spellcheck="false" '
+        f'aria-label="Edit {html.escape(value["path"], quote=True)}">{html.escape(value["content"])}</textarea></div>'
+        '<footer class="source-footer">'
+        f'<span>{html.escape(indent)} · {html.escape(cleanup_label)}</span>'
+        '<span class="source-position" data-source-position>Ln 1, Col 1</span></footer>'
+        f'</main><script>{_PRESENCE_JS}{_SOURCE_JS}</script></body></html>'
     )
     return document.encode("utf-8")
 
@@ -2885,6 +3196,14 @@ def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> Viewer
         title = "Coworker unavailable"
         state = "Your conversation, reports, and source files were not changed."
         action = action or "Run tb agent status, then retry this message."
+    elif code == "source_changed":
+        title = "File changed on disk"
+        state = "The browser kept your draft. TicketBunker did not overwrite the newer file."
+        action = action or "Copy any draft changes you need, reload the file, then apply them again."
+    elif code.startswith("source_save") or code.startswith("source_content") or code.startswith("source_digest"):
+        title = "Save stopped"
+        state = "The browser kept your draft. TicketBunker did not change the source file."
+        action = action or "Check the file state and local permissions, then retry Save."
     elif code.startswith("source_editor"):
         title = "Editor not ready"
         state = "No editor was opened and your source files were not changed."
@@ -3045,6 +3364,21 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/projects":
             self._send(200, page_projects(root, fp, params))
             return
+        if path == "/source":
+            try:
+                line = int(params.get("line") or 1)
+            except ValueError as exc:
+                raise commands.CommandRejected("source_line_invalid", "Choose a numeric source line.") from exc
+            self._send(
+                200,
+                page_source(
+                    root,
+                    str(params.get("path") or ""),
+                    line,
+                    str(params.get("return") or "/"),
+                ),
+            )
+            return
         if path == "/truth/state":
             value = truth.state(root, str(params.get("project") or ""), str(params.get("ticket") or ""))
             self._send_json(200, {"ok": True, **value})
@@ -3119,6 +3453,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/coworker/proposal/accept": "coworker.proposal.accept",
             "/coworker/proposal/dismiss": "coworker.proposal.dismiss",
             "/source/open": "editor.open",
+            "/source/save": "editor.save",
         }
         command = commands_by_path.get(path)
         presence_action = path in {"/_viewer/presence", "/_viewer/close"}
@@ -3129,7 +3464,8 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or "0")
         except ValueError:
             length = 0
-        if length <= 0 or length > 65536:
+        maximum = 4_100_000 if path == "/source/save" else 65536
+        if length <= 0 or length > maximum:
             self._send_json(
                 400,
                 {"ok": False, "code": "request_invalid", "message": "The request is empty or too large."},

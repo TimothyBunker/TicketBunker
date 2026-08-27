@@ -79,11 +79,11 @@ exercise unless a live boundary is explicitly called out.
   configured local environment file, which is ignored.
 - `tb config` opens the remote-backed editor. Its Repository page explains the
   three real steps: create an empty companion repo, connect it, then commit the
-  source locator. Its Local settings page is explicitly machine-only and saves
-  the editor command to `~/.tbconfig` through `local.editor.update`; blank/auto
-  tries `vim`, then `nano`, including Git for Windows' bundled Vim when it is
-  absent from the native viewer `PATH`. `tb config --editor` uses that same
-  command and does not publish companion data.
+  source locator. Its Local settings page is explicitly machine-only. The
+  included browser source editor is the default; indentation, tab width,
+  wrapping, deterministic save cleanup, and the optional external command are
+  stored in `~/.tbconfig` through `local.editor.update`. `tb config --editor`
+  uses that same command and does not publish companion data.
 - `tb doctor [--json] [--offline]` checks Git identity, locator/ignore state,
   companion checkouts and remote heads, resolved configuration, ticket index,
   credential presence, hooks, and worktree cleanliness. Every failure names a
@@ -182,10 +182,10 @@ exercise unless a live boundary is explicitly called out.
   Git mutations, or write Combined directly.
 - `@[relative/path]:line` and verified inline-code `relative/path:line` report
   anchors use the same clickable source control in Combined, child synthesis,
-  full trails, and coworker copy. The viewer and `tb open` share the guarded
-  `editor.open` command, which confines paths to the current checkout and
-  launches the local editor without a shell. Local settings owns the saved
-  command; `TB_EDITOR` remains the explicit environment override.
+  full trails, and coworker copy. The default is the included localhost source
+  editor. `editor.read` confines paths and bounded UTF-8 content to the current
+  checkout; `editor.save` requires the opened digest and atomically writes one
+  file without staging or Git. External editors remain an explicit option.
 - `tb view` now opens the browser and returns immediately. Its detached
   localhost worker tracks page presence, survives in-app navigation, and shuts
   down shortly after the last tab closes; `--foreground` and `--no-open` remain
@@ -198,7 +198,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.15 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.16 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -240,7 +240,8 @@ also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates, private proposal-rejection diagnostics, and shared
-CLI/HTTP local editor selection. The current full suite is 165 tests.
+CLI/HTTP local editor selection and guarded built-in source saves. The current
+full suite is 171 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,

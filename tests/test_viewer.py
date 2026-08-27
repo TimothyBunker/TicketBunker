@@ -8,9 +8,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from ticketbunker import commands, layout, viewer
+from ticketbunker import commands, config, layout, viewer
 from ticketbunker.viewer import (
     page_index,
     page_project,
@@ -474,6 +475,55 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(dispatched.call_args.args[0], "editor.open")
         self.assertEqual(dispatched.call_args.args[1]["path"], "ticketbunker/viewer.py")
         self.assertEqual(dispatched.call_args.args[2].transport, "http")
+
+    def test_builtin_source_editor_reads_and_saves_through_guarded_commands(self) -> None:
+        source = self.root / "src" / "sample.py"
+        source.parent.mkdir()
+        source.write_text("one\ntwo\n", encoding="utf-8")
+        local_config = self.root / "local-config.json"
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        token = server.RequestHandlerClass.token
+        try:
+            with mock.patch.object(config, "GLOBAL_CONFIG", local_config):
+                query = urlencode({"path": "src/sample.py", "line": 2, "return": "/ticket/TB-9"})
+                page = urlopen(f"{base}/source?{query}").read().decode("utf-8")
+                opened = commands.dispatch(
+                    "editor.read",
+                    {"path": "src/sample.py", "line": 2},
+                    commands.CommandContext(self.root, transport="test"),
+                )
+                request = Request(
+                    f"{base}/source/save",
+                    data=json.dumps(
+                        {
+                            "path": "src/sample.py",
+                            "content": "one\nchanged\n",
+                            "expected_digest": opened["digest"],
+                        }
+                    ).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-TicketBunker-Token": token,
+                    },
+                    method="POST",
+                )
+                result = json.loads(urlopen(request).read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertIn('class="source-input"', page)
+        self.assertIn('data-line="2"', page)
+        self.assertIn('style="tab-size:4"', page)
+        self.assertIn('href="/ticket/TB-9">Close</a>', page)
+        self.assertIn("data-source-save", page)
+        self.assertIn("expected_digest", page)
+        self.assertTrue(result["saved"])
+        self.assertEqual(source.read_text(encoding="utf-8"), "one\nchanged\n")
 
     def test_background_viewer_stops_after_its_last_session_closes(self) -> None:
         server = viewer.serve(self.root, 0, launch_id="test-launch")

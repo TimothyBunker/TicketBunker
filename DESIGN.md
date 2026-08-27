@@ -483,17 +483,24 @@ stale sessions expire. `--foreground` retains an attached diagnostic mode and
 Verified source locations may use `@[relative/path]:line` in report or coworker
 copy. Existing report synthesis may also carry a verified inline-code
 `relative/path:line` anchor. The viewer renders both forms as the same explicit
-local-open control in Combined, child synthesis, full trails, and chat. Its
-CSRF-protected POST and `tb open` both dispatch `editor.open`: the handler
-resolves symlinks, rejects anything outside the current checkout or absent on
-the current branch, then launches the effective machine-local editor at the
-line without a shell. Resolution is `TB_EDITOR`, the saved Local settings
-command, `VISUAL`/`EDITOR`, Git's `core.editor`, then automatic `vim` followed
-by `nano`. Opening is a user action and grants the coworker no source-writing
-capability. On Windows, automatic selection also checks the Vim executable
-bundled with Git because Git Bash can expose it without adding it to the native
-viewer process's `PATH`. The launch command uses the resolved executable path;
-it does not invoke a shell. Neither
+local-open control in Combined, child synthesis, full trails, and chat. The
+default target is TicketBunker's included browser editor, served by the same
+localhost viewer and requiring no system editor or terminal launcher. Its
+`editor.read` command resolves symlinks, rejects anything outside the current
+checkout or absent on the current branch, and admits only bounded UTF-8 text.
+`editor.save` requires the digest returned by that read, refuses to overwrite a
+file changed since it opened, and atomically replaces only that file. It does
+not stage, format with an external process, or run Git. The page preserves the
+file's LF/CRLF convention, supports configurable spaces/tabs, tab width and
+line wrapping, and can opt into deterministic trailing-whitespace and final-
+newline cleanup. Unsaved drafts stay in the browser when a save is rejected.
+
+An external editor remains an explicit Local settings option. In that mode the
+same `editor.open` guard launches `TB_EDITOR`, the saved command,
+`VISUAL`/`EDITOR`, Git's `core.editor`, or automatic `vim` then `nano`, without
+a shell. On Windows it also recognizes Git's bundled Vim. Opening or saving is
+always a user action and grants the coworker no source-writing capability.
+Neither
 `tb view` nor `tb open` enters the CLI's companion-publication tail; both are
 machine-local actions even in a connected project.
 Fresh clones and sparse companion checkouts recreate the ignored machine-local
@@ -1001,11 +1008,12 @@ Canonical configuration lives on the companion config branch and changes only
 through typed, revision-checked commands. `tb config` first refreshes that
 branch, then opens a localhost editor with five direct surfaces: Identity,
 Local settings, Repository, Ticket fields, and Integrations. Local settings
-never enter companion history; the editor command lives only in `~/.tbconfig`
-and blank means automatic `vim`, then `nano`. Both the browser and `tb config
---editor` dispatch `local.editor.update`. The CLI, editor HTTP transport, and
-programmatic callers dispatch the same command envelopes; transports do not
-reimplement mutations.
+never enter companion history. The included source editor is the default;
+editor mode, indentation style, tab width, line wrapping, save cleanup, and an
+optional external command live only in `~/.tbconfig`. Both the browser and `tb
+config --editor` dispatch `local.editor.update`. The CLI, editor HTTP
+transport, and programmatic callers dispatch the same command envelopes;
+transports do not reimplement mutations.
 
 Repository connection is a three-step contract, not a wizard that owns external
 state: create an empty companion repository, connect it, then commit the source
