@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -175,6 +177,95 @@ class AutomaticAgentTests(unittest.TestCase):
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
         self.assertTrue(any(value.get("type") == "synthesis_started" for value in events))
         self.assertTrue(any(value.get("type") == "synthesis_finished" for value in events))
+
+    def test_refresh_uses_companion_projects_configured_base_on_a_new_ticket(self) -> None:
+        companion = self.repo / ".tb" / "data" / "projects" / "ECS" / "tickets" / "ECS-4"
+        companion.parent.mkdir(parents=True)
+        shutil.move(str(self.bunker), companion)
+        self.bunker = companion
+        (layout.paths(self.bunker)["observations"] / "baseline.json").write_text(
+            json.dumps({"baseline": "main", "per_branch": {}}),
+            encoding="utf-8",
+        )
+        (self.repo / layout.LOCATOR_FILE).write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "project": "ECS",
+                    "bunker_repository": "unused",
+                    "config_branch": "ticketbunker/config",
+                    "data_branch": "ticketbunker/data",
+                    "base_branch": "ecs",
+                }
+            ),
+            encoding="utf-8",
+        )
+        root_commit = git(self.repo, "rev-list", "--max-parents=0", "HEAD")
+        git(self.repo, "update-ref", "refs/remotes/origin/ecs", root_commit)
+
+        with mock.patch.dict(os.environ, {"TB_AGENT_ACTIVE": "1"}):
+            status = cli.main(
+                ["refresh", "--repo", str(self.repo), "--quiet", "--strict"]
+            )
+
+        baseline = json.loads(
+            (layout.paths(self.bunker)["observations"] / "baseline.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(baseline["configured_baseline"], "ecs")
+        self.assertEqual(baseline["baseline"], "origin/ecs")
+
+    def test_worker_preserves_refresh_reason_and_action_in_failure_state(self) -> None:
+        refresh_output = (
+            "deterministic refresh stopped: the configured base branch 'ecs' is unavailable.\n"
+            "Next: Run 'git fetch --prune origin', then retry synthesis.\n"
+            "diagnostic: raw command detail"
+        )
+        completed = subprocess.CompletedProcess([], 1, stdout=refresh_output)
+        with mock.patch.object(
+            autoagent,
+            "_git",
+            side_effect=[("Ada/ECS-4-automatic", 0), ("abc123", 0)],
+        ):
+            with mock.patch.object(autoagent, "_profile", return_value={"harness": "pi"}):
+                with mock.patch.object(autoagent, "_launcher", return_value=["tb"]):
+                    with mock.patch.object(autoagent.subprocess, "run", return_value=completed):
+                        stdout = io.StringIO()
+                        with contextlib.redirect_stdout(stdout):
+                            ok, detail = autoagent._run_pipeline(
+                                self.repo,
+                                {
+                                    "branch": "Ada/ECS-4-automatic",
+                                    "bunker": str(self.bunker),
+                                    "head": "abc123",
+                                },
+                            )
+
+        self.assertFalse(ok)
+        self.assertIn("configured base branch 'ecs' is unavailable", detail)
+        self.assertIn("git fetch --prune origin", detail)
+        self.assertIn("No agent session was started", detail)
+        self.assertNotIn("raw command detail", detail)
+        self.assertIn("diagnostic: raw command detail", stdout.getvalue())
+
+    def test_strict_refresh_names_the_missing_base_and_exact_next_action(self) -> None:
+        (layout.paths(self.bunker)["observations"] / "baseline.json").write_text(
+            json.dumps({"baseline": "delivery", "per_branch": {}}),
+            encoding="utf-8",
+        )
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"TB_AGENT_ACTIVE": "1"}):
+            with contextlib.redirect_stderr(stderr):
+                status = cli.main(
+                    ["refresh", "--repo", str(self.repo), "--quiet", "--strict"]
+                )
+
+        output = stderr.getvalue()
+        self.assertEqual(status, 1)
+        self.assertIn("configured base branch 'delivery' is unavailable", output)
+        self.assertIn("git -C", output)
+        self.assertIn("fetch --prune origin", output)
+        self.assertIn("diagnostic:", output)
 
     def test_pi_report_gets_one_bounded_format_repair_before_intake(self) -> None:
         refreshed = cli.main(

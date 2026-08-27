@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -63,6 +64,31 @@ class RepositoryOwnedDatabaseTests(unittest.TestCase):
         self.assertEqual([commit["subject"] for commit in commits], ["implement ticket"])
         self.assertEqual(result["merge_history"][branch]["ahead_of_merge_base"], 1)
         self.assertFalse(result["merge_history"][branch]["merged_back"])
+
+    def test_configured_base_falls_back_to_fetched_remote_ref(self) -> None:
+        root_commit = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-list", "--max-parents=0", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-ref", "refs/remotes/origin/ecs", root_commit],
+            check=True,
+        )
+
+        result = run_bootstrap(
+            repo=self.repo,
+            ticket_key="TB-1",
+            baseline="ecs",
+            obs_dir=self.observations,
+            ledger=self.ledger,
+        )
+
+        saved = json.loads((self.observations / "baseline.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["baseline"], "origin/ecs")
+        self.assertEqual(saved["baseline"], "origin/ecs")
+        self.assertEqual(saved["configured_baseline"], "ecs")
 
 
 if __name__ == "__main__":

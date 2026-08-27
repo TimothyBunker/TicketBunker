@@ -582,9 +582,25 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     base = _launcher()
     refresh = [*base, "refresh", "--repo", str(repo), "--quiet", "--strict"]
     env = _cli_env()
-    refreshed = subprocess.run(refresh, cwd=str(repo), env=env)
+    refreshed = subprocess.run(
+        refresh,
+        cwd=str(repo),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     if refreshed.returncode != 0:
-        return False, "deterministic refresh failed; no synthesis was published"
+        output = (refreshed.stdout or "").strip()
+        if output:
+            print(output, flush=True)
+        useful = [
+            line.strip()
+            for line in output.splitlines()
+            if line.strip() and not line.strip().casefold().startswith("diagnostic:")
+        ]
+        detail = " ".join(useful[:2]) or "Deterministic refresh failed. Run tb refresh to see the failed Git check."
+        return False, f"{detail} No agent session was started."
     fingerprint = input_fingerprint(repo, bunker, branch, head=head)
     prior = synthesis_input_state(repo, bunker, branch)
     if prior.get("status") == "current" and prior.get("published") == fingerprint:

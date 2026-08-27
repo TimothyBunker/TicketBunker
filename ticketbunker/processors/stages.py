@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from ..contracts import StageContract, run_stage
-from ..adapters.gitrun import git, git_status
+from ..adapters.gitrun import GitError, git, git_status
 from ..layout import TB_DIR, branch_slug
 from ..ledger import Ledger
 
@@ -104,6 +104,7 @@ def run_bootstrap(
 ) -> dict:
     """Run all six stages in order. Returns the combined observation set."""
     observations: dict = {"ticket_key": ticket_key, "baseline": baseline, "repo": str(repo)}
+    baseline_ref = baseline
 
     def stage_branch_resolution() -> list[str]:
         out = git(repo, ["branch", "--all", "--format=%(refname:short)"], ledger, "branch_resolution")
@@ -122,13 +123,32 @@ def run_bootstrap(
     observations["branches"] = branches
 
     def stage_baseline() -> dict:
-        git(repo, ["rev-parse", "--verify", baseline], ledger, "baseline")
+        nonlocal baseline_ref
+        candidates = [baseline]
+        if "/" not in baseline:
+            candidates.append(f"origin/{baseline}")
+        last_output = ""
+        last_status = 1
+        for candidate in candidates:
+            last_output, last_status = git_status(
+                repo, ["rev-parse", "--verify", candidate], ledger, "baseline"
+            )
+            if last_status == 0:
+                baseline_ref = candidate
+                break
+        else:
+            raise GitError(
+                ["git", "-C", str(repo), "rev-parse", "--verify", candidates[-1]],
+                last_status,
+                last_output,
+            )
+        observations["baseline"] = baseline_ref
         result = {}
         for br in branches:
-            base = git(repo, ["merge-base", baseline, br], ledger, "baseline").strip()
+            base = git(repo, ["merge-base", baseline_ref, br], ledger, "baseline").strip()
             base_date = git(repo, ["show", "-s", "--format=%aI", base], ledger, "baseline").strip()
             result[br] = {"merge_base": base, "merge_base_date": base_date}
-        payload = {"baseline": baseline, "per_branch": result}
+        payload = {"baseline": baseline_ref, "configured_baseline": baseline, "per_branch": result}
         _write_observation(obs_dir, "baseline", payload)
         return result
 
@@ -195,7 +215,7 @@ def run_bootstrap(
             behind = int(
                 git(
                     repo,
-                    ["rev-list", "--count", f"{base}..{baseline}", *code_pathspec],
+                    ["rev-list", "--count", f"{base}..{baseline_ref}", *code_pathspec],
                     ledger,
                     "merge_history",
                 ).strip()
@@ -210,7 +230,7 @@ def run_bootstrap(
             for commit in code_commits:
                 _, ancestor_status = git_status(
                     repo,
-                    ["merge-base", "--is-ancestor", commit, baseline],
+                    ["merge-base", "--is-ancestor", commit, baseline_ref],
                     ledger,
                     "merge_history",
                 )
@@ -223,7 +243,7 @@ def run_bootstrap(
                 "last_sync_date": info["merge_base_date"],
                 "merged_back": merged_back,
             }
-        _write_observation(obs_dir, "merge_history", {"baseline": baseline, "per_branch": result})
+        _write_observation(obs_dir, "merge_history", {"baseline": baseline_ref, "per_branch": result})
         return result
 
     merge_hist = run_stage(CONTRACTS["merge_history"], ledger, stage_merge_history)

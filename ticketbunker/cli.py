@@ -1510,11 +1510,26 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     Must never break git: a branch without a ticket, or any failure, exits 0."""
     import subprocess
 
+    def stop(summary: str, action: str, diagnostic: str = "") -> int:
+        # Hooks stay silent and non-blocking.  The synthesis worker passes both
+        # --quiet and --strict: it needs concise output in its local log/state
+        # even though it must not print into a user's Git command.
+        if args.strict or not args.quiet:
+            print(f"deterministic refresh stopped: {summary}", file=sys.stderr)
+            print(f"Next: {action}", file=sys.stderr)
+            if args.strict and diagnostic:
+                print(f"diagnostic: {diagnostic}", file=sys.stderr)
+        return 1 if args.strict else 0
+
     repo = Path(args.repo).resolve()
     proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
                           capture_output=True, text=True)
     if proc.returncode != 0:
-        return 1 if args.strict else 0
+        return stop(
+            "Git could not identify a checked-out branch.",
+            f"Run 'git -C {repo} status', restore a branch checkout, then retry synthesis.",
+            proc.stderr.strip(),
+        )
     branch = proc.stdout.strip()
     project = layout.find_root(repo)
     bunker = None
@@ -1526,14 +1541,32 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         assigned = _bunkers_assigned(project, branch)
         bunker = assigned[0] if len(assigned) == 1 else None
     if bunker is None:
-        return 1 if args.strict else 0
+        return stop(
+            f"the checked-out branch '{branch}' is not linked to one local ticket.",
+            "Open its ticket and attach this branch, or switch to a branch whose name contains the ticket key.",
+        )
     ticket = _ticket(bunker)
     ledger = _ledger(bunker)
-    baseline = "main"
+    locator = project_mod.load_locator(repo) or {}
+    configured_baseline = str(locator.get("base_branch") or "")
+    baseline = configured_baseline or "main"
     base_obs = layout.paths(bunker)["observations"] / "baseline.json"
     if base_obs.exists():
         try:
-            baseline = json.loads(base_obs.read_text(encoding="utf-8")).get("baseline") or "main"
+            observed_baseline = str(
+                json.loads(base_obs.read_text(encoding="utf-8")).get("baseline") or ""
+            )
+            # Companion configuration is authoritative.  Preserve its remote
+            # fallback spelling, but never let an older hard-coded "main"
+            # observation override a later/project-specific base such as ecs.
+            if configured_baseline:
+                if observed_baseline in {
+                    configured_baseline,
+                    f"origin/{configured_baseline}",
+                }:
+                    baseline = observed_baseline
+            elif observed_baseline:
+                baseline = observed_baseline
         except ValueError:
             pass
     try:
@@ -1550,9 +1583,21 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         _recompose(bunker, ledger)
         master.regenerate(bunker, ledger)
     except Exception as exc:  # a hook must never block a commit or merge
-        if not args.quiet:
-            print(f"tb refresh skipped: {exc}", file=sys.stderr)
-        return 1 if args.strict else 0
+        from .adapters.gitrun import GitError
+
+        if isinstance(exc, GitError) and "rev-parse --verify" in " ".join(exc.argv):
+            configured = configured_baseline or baseline
+            return stop(
+                f"the configured base branch '{configured}' is unavailable in local or fetched Git refs.",
+                f"Run 'git -C {repo} fetch --prune origin'. If '{configured}' is still absent, "
+                "ask the project owner to correct the TicketBunker base branch, then retry synthesis.",
+                str(exc),
+            )
+        return stop(
+            f"Git could not rebuild this ticket's observations against '{baseline}'.",
+            f"Run 'tb refresh --repo {repo}' to see the failed Git check, resolve it, then retry synthesis.",
+            str(exc),
+        )
     if not args.quiet:
         print(f"refreshed {ticket['id']}: observations, tb.md, master")
     return 0

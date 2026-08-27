@@ -326,6 +326,13 @@ tool:
   checkout; the worker owns one final companion publication after the ordinary
   report gate succeeds. A transient remote/DNS problem therefore cannot turn
   every inference into a separate failed push.
+- The pre-agent deterministic refresh takes its baseline from the project's
+  committed companion locator, never from a hard-coded `main`. It may read the
+  already-fetched `origin/<base>` ref when a collaborator has no local base
+  branch; this is observation only and never checks out, pulls, or mutates the
+  source worktree. If refresh cannot start, the worker preserves the concrete
+  failed state and next Git action in the Synthesis strip and writes the exact
+  diagnostic to View log. The model is not called.
 - Pi and Codex get one bounded report-format repair pass when their first draft
   fails mechanical lint or anchor checks. The repair receives the exact
   findings and edits the same child draft; it cannot edit source or Combined.

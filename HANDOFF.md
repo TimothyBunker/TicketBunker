@@ -176,7 +176,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.8 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.9 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -216,7 +216,7 @@ repair, fresh-clone session creation, nested-publication suppression, and a
 real post-commit hook that records a change without publishing. Focused tests
 also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, and gated child-only report updates. The current full suite
-is 131 tests.
+is 135 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
@@ -241,6 +241,14 @@ one while the worker is active; the worker owns the single final publication.
 The CLI subcommand name is separate from the harness `--cmd` option, fixing the
 Pi-only `NoneType.startswith` crash, and fresh clones recreate ignored local
 session directories before writing forms.
+
+Pre-agent refresh now takes the base from the committed project locator (for
+Coal, `ecs`) instead of silently defaulting new tickets to `main`. If a
+collaborator has only the already-fetched remote-tracking base, observation
+falls back to `origin/<base>` without changing the worktree. A stopped refresh
+keeps its concrete reason and next Git action in synthesis state and its exact
+diagnostic in View log; the generic “deterministic refresh failed” sentence is
+no longer the only explanation.
 
 Codex and the bundled pi 0.84.2 runtime have both been live-verified. On 26
 August 2026, managed pi with `openai-codex / gpt-5.6-sol` generated TB-1 in a
