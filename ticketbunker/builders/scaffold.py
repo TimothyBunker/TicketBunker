@@ -44,7 +44,8 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines += ["", "### Where", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Where: one short [real]/[speculation] claim naming up to three paths worth "
-        "checking first, in importance order, and why; [real] paths need anchors, inferred recommendations need a grounding rank"
+        "checking first, in importance order, and why; write verified source locations as @[relative/path]:line "
+        "so the viewer can open them; [real] paths need anchors, inferred recommendations need a grounding rank"
     ))
     lines += ["", "### Why", ""]
     lines.append(AGENT_AREA.format(

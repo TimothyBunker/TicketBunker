@@ -186,6 +186,54 @@ class CoworkerTests(unittest.TestCase):
         self.assertTrue((session / "messages.jsonl").is_file())
         self.assertTrue(str(session).startswith(str(self.root / ".git")))
 
+    def test_selected_synthesis_reference_is_validated_persisted_and_sent_to_pi(self) -> None:
+        reference = {
+            "category": "where",
+            "scope": "combined",
+            "branch": self.branch,
+            "text": "Start with @[source.py]:1.",
+        }
+        response = {"reply": "That location contains the current implementation.", "proposal": None}
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.object(
+            coworker, "_run_pi", return_value=(response, {"harness": "pi"})
+        ) as run_pi:
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                result = commands.dispatch(
+                    "coworker.chat",
+                    {
+                        "ticket": "TB-9",
+                        "category": "where",
+                        "scope": "combined",
+                        "message": "Why is this the first place to look?",
+                        "reference": reference,
+                    },
+                    context,
+                )
+
+        self.assertEqual(result["messages"][0]["reference"], reference)
+        self.assertEqual(run_pi.call_args.args[-1], reference)
+
+    def test_selected_synthesis_reference_cannot_cross_topic_or_scope(self) -> None:
+        with self.assertRaises(commands.CommandRejected) as caught:
+            commands.dispatch(
+                "coworker.chat",
+                {
+                    "ticket": "TB-9",
+                    "category": "why",
+                    "scope": "combined",
+                    "message": "Explain this.",
+                    "reference": {
+                        "category": "what",
+                        "scope": "combined",
+                        "text": "The viewer reads one snapshot.",
+                    },
+                },
+                commands.CommandContext(self.root, transport="test"),
+            )
+
+        self.assertEqual(caught.exception.code, "coworker_reference_scope_changed")
+
     def test_accept_updates_only_the_child_brief_and_regenerates_combined(self) -> None:
         response = {
             "reply": "I prepared a narrower What synthesis.",
@@ -255,7 +303,20 @@ class CoworkerTests(unittest.TestCase):
             with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
                 with mock.patch.object(agent_runtime, "extension_path", return_value=self.root / "tb.ts"):
                     with mock.patch.object(coworker.subprocess, "run", side_effect=run):
-                        coworker._run_pi(self.root, "", coworker._ticket(self.root, "", "TB-9"), "who", "combined", "Who owns this?")
+                        coworker._run_pi(
+                            self.root,
+                            "",
+                            coworker._ticket(self.root, "", "TB-9"),
+                            "who",
+                            "combined",
+                            "Who owns this?",
+                            {
+                                "category": "who",
+                                "scope": "combined",
+                                "branch": self.branch,
+                                "text": "Ada maintains this branch.",
+                            },
+                        )
                         coworker._run_pi(self.root, "", coworker._ticket(self.root, "", "TB-9"), "why", layout.branch_slug(self.branch), "Why this approach?")
 
         self.assertEqual(len(pi_calls), 2)
@@ -264,6 +325,8 @@ class CoworkerTests(unittest.TestCase):
         self.assertEqual(first[first.index("--session-dir") + 1], second[second.index("--session-dir") + 1])
         self.assertEqual(first[first.index("--tools") + 1], "read,grep,find,ls")
         self.assertNotIn("bash", first[first.index("--tools") + 1].split(","))
+        self.assertIn("[USER-SELECTED-SYNTHESIS]", first[-1])
+        self.assertIn("Ada maintains this branch.", first[-1])
         self.assertEqual(pi_calls[0][1]["TB_BUNKER"], pi_calls[1][1]["TB_BUNKER"])
         self.assertNotEqual(pi_calls[0][1]["TB_BRANCH"], pi_calls[1][1]["TB_BRANCH"])
 

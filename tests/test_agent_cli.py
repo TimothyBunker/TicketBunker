@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -130,6 +132,88 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(dispatched.call_args.args[0], "truth.synthesize")
         self.assertEqual(dispatched.call_args.args[1], {"project": "TB", "ticket": "TB-9"})
         self.assertEqual(dispatched.call_args.args[2].transport, "cli")
+
+    def test_open_source_cli_dispatches_the_same_guarded_editor_command(self) -> None:
+        response = {
+            "opened": True,
+            "path": "ticketbunker/viewer.py",
+            "line": 42,
+            "editor": "code",
+        }
+        with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+            with mock.patch.object(cli.commands, "dispatch", return_value=response) as dispatched:
+                code, stdout, stderr = self._run(
+                    ["open", "@[ticketbunker/viewer.py]:42"]
+                )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("ticketbunker/viewer.py:42", stdout)
+        self.assertEqual(dispatched.call_args.args[0], "editor.open")
+        self.assertEqual(
+            dispatched.call_args.args[1],
+            {"path": "ticketbunker/viewer.py", "line": 42},
+        )
+        self.assertEqual(dispatched.call_args.args[2].transport, "cli")
+
+    def test_view_opens_the_browser_by_default_and_keeps_foreground_optional(self) -> None:
+        seen: list[argparse.Namespace] = []
+
+        def view(args: argparse.Namespace) -> int:
+            seen.append(args)
+            return 0
+
+        with mock.patch.object(cli, "cmd_view", side_effect=view):
+            code, _stdout, stderr = self._run(["view"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(seen[0].open)
+        self.assertFalse(seen[0].foreground)
+
+    def test_background_viewer_passes_dash_prefixed_launch_id_as_one_argument(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {"ok": True, "launch": "-launch-id", "root": str(self.root)}
+        ).encode()
+        process = mock.Mock()
+        process.poll.return_value = None
+        log_path = self.root / "viewer.log"
+        with mock.patch.object(cli.layout, "find_root", return_value=self.root):
+            with mock.patch.object(cli.project_mod, "find_source_root", return_value=None):
+                with mock.patch.object(cli.project_mod, "load_locator", return_value=None):
+                    with mock.patch.object(cli.secrets, "token_urlsafe", return_value="-launch-id"):
+                        with mock.patch.object(cli.agent_runtime, "cli_argv", return_value=["tb"]):
+                            with mock.patch("ticketbunker.viewer.server_log_path", return_value=log_path):
+                                with mock.patch(
+                                    "urllib.request.urlopen", side_effect=[OSError(), response]
+                                ):
+                                    with mock.patch.object(
+                                        cli.subprocess, "Popen", return_value=process
+                                    ) as opened:
+                                        code, stdout, stderr = self._run(
+                                            ["view", "--no-open", "--port", "18499"]
+                                        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("--launch=-launch-id", opened.call_args.args[0])
+        self.assertNotIn("--launch", opened.call_args.args[0])
+        self.assertIn("stop after its last browser tab closes", stdout)
+
+    def test_view_and_source_open_do_not_publish_companion_data(self) -> None:
+        with mock.patch.object(cli, "cmd_view", return_value=0):
+            with mock.patch.object(cli, "cmd_open_source", return_value=0):
+                with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+                    with mock.patch.object(
+                        cli.project_mod, "load_locator", return_value={"project": "TB"}
+                    ):
+                        with mock.patch.object(cli.project_mod, "publish_data") as publish:
+                            view_code, _stdout, view_stderr = self._run(["view"])
+                            open_code, _stdout, open_stderr = self._run(
+                                ["open", "ticketbunker/viewer.py"]
+                            )
+
+        self.assertEqual(view_code, 0, view_stderr)
+        self.assertEqual(open_code, 0, open_stderr)
+        publish.assert_not_called()
 
     def test_pi_run_without_command_template_keeps_its_subcommand_name(self) -> None:
         """``tb run --cmd`` must not overwrite argparse's top-level command."""

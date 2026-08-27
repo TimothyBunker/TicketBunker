@@ -361,8 +361,12 @@ tool:
   selected category and Combined-or-branch scope. The coworker receives the
   ticket, the selected synthesis and evidence, exact child branches, and its
   prior ticket conversation. It can explain, advise, accept corrections, and
-  prepare a report-update proposal. It cannot edit source, execute shell or Git
-  mutations, or directly edit Combined.
+  prepare a report-update proposal. A message may also carry one bounded,
+  structured reference to text the user selected in the current synthesis:
+  category, scope, child branch when known, and exact visible excerpt. The quote
+  remains visible in local conversation history and is report context, never an
+  instruction or independent evidence. It cannot edit source, execute shell or
+  Git mutations, or directly edit Combined.
 - Raw coworker messages and Pi session files stay private below
   `.git/ticketbunker/coworker/<project>/<ticket>/<user>/`. Pi is launched with
   only `read`, `grep`, `find`, and `ls`. A proposal is inert until the user
@@ -444,9 +448,11 @@ shows its known generator beside its branch identity. Unknown generator fields
 stay absent instead of being guessed. Before the first report, Agent work shows
 only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips. Ticket, Project, and Agent reading remains strictly read-only.
-Each Who, What, Where, and Why synthesis has an **Ask coworker** action, and the same ticket coworker
-is available from one bottom-right launcher. This is a local conversation and
-proposal surface, not a second report writer. The other exception is an
+Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
+action, and the same ticket coworker is available from one bottom-right bubble.
+Selecting synthesis text reveals a contextual bubble that attaches only that
+excerpt, its category, scope, and branch to the next message. This is a local
+conversation and proposal surface, not a second report writer. The other exception is an
 explicit local **Work** control: a small plus beside Branches opens a form for a
 short branch name and a real base-branch choice. Its CSRF-protected POST
 dispatches the same `workflow.start` command as `tb branch`; it is not a ticket,
@@ -460,7 +466,22 @@ last succeeded and the number of commits since that report; its button is the
 only viewer route that starts the model. While running, the state stays visibly
 busy. On failure, Retry synthesis and View log sit together; the localhost-only
 log page escapes and bounds the output and names the exact local path. Every
-stopped state preserves the prior report and names the next action.
+stopped state preserves the prior report and names the next action. `tb view`
+normally starts this localhost server as a detached helper, opens the browser,
+and returns the terminal immediately. Per-page presence and close signals keep
+it alive across navigation and stop it shortly after the final tab closes;
+stale sessions expire. `--foreground` retains an attached diagnostic mode and
+`--no-open` suppresses browser launch.
+
+Verified source locations may use `@[relative/path]:line` in report or coworker
+copy. The viewer renders that notation as an explicit local-open control. Its
+CSRF-protected POST and `tb open` both dispatch `editor.open`: the handler
+resolves symlinks, rejects anything outside the current checkout or absent on
+the current branch, then launches the machine-local `TB_EDITOR`, ordinary
+editor setting, or a recognized IDE at the line without a shell. Opening is a
+user action and grants the coworker no source-writing capability. Neither
+`tb view` nor `tb open` enters the CLI's companion-publication tail; both are
+machine-local actions even in a connected project.
 Fresh clones and sparse companion checkouts recreate the ignored machine-local
 session directory before writing a form, so missing local artifacts are an
 empty state rather than a filesystem traceback.

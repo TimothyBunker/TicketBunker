@@ -25,10 +25,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import secrets
+import subprocess
 import sys
+import time
 from pathlib import Path
 
-from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
+from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -1672,6 +1676,31 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_open_source(args: argparse.Namespace) -> int:
+    root = project_mod.find_source_root()
+    if root is None:
+        print("error: run tb open inside a Git project", file=sys.stderr)
+        return 1
+    path = args.source
+    line = args.line
+    reference = re.fullmatch(r"@\[([^\]\n]+)\]:(\d+)", path)
+    if reference:
+        path = reference.group(1)
+        if line is None:
+            line = int(reference.group(2))
+    try:
+        result = commands.dispatch(
+            "editor.open",
+            {"path": path, "line": line or 1},
+            commands.CommandContext(root, transport="cli"),
+        )
+    except commands.CommandRejected as exc:
+        print(f"error: {exc.message}", file=sys.stderr)
+        return 1
+    print(f"opened {result['path']}:{result['line']} in {result['editor']}")
+    return 0
+
+
 def cmd_view(args: argparse.Namespace) -> int:
     root = layout.find_root()
     if not root:
@@ -1679,27 +1708,125 @@ def cmd_view(args: argparse.Namespace) -> int:
         return 1
     from . import viewer
 
-    try:
-        server = viewer.serve(root, args.port)
-    except OSError as exc:
-        print(f"error: cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}) — "
-              f"try another port: tb view --port {args.port + 1}", file=sys.stderr)
-        return 1
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    url = f"http://127.0.0.1:{args.port}/"
     scope = (
         project_mod.data_checkout(root)
         if project_mod.load_locator(root) is not None
         else layout.bunkers_dir(root)
     )
-    print(f"viewing ticket catalog {scope} at {url} — Ctrl-C stops it")
+    if args.foreground:
+        try:
+            server = viewer.serve(root, args.port)
+        except OSError as exc:
+            print(f"error: cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}) — "
+                  f"try another port: tb view --port {args.port + 1}", file=sys.stderr)
+            return 1
+        url = f"http://127.0.0.1:{server.server_address[1]}/"
+        print(f"viewing ticket catalog {scope} at {url} — Ctrl-C stops it")
+        if args.open:
+            import webbrowser
+
+            webbrowser.open(url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nviewer stopped")
+        finally:
+            server.server_close()
+        return 0
+
+    from urllib.request import urlopen
+
+    def health() -> dict[str, object] | None:
+        try:
+            with urlopen(f"http://127.0.0.1:{args.port}/_viewer/health", timeout=0.25) as response:
+                value = json.loads(response.read().decode("utf-8"))
+        except (OSError, TimeoutError, ValueError):
+            return None
+        return value if isinstance(value, dict) and value.get("ok") else None
+
+    existing = health()
+    if existing:
+        if Path(str(existing.get("root") or "")).resolve() != root.resolve():
+            print(
+                f"error: 127.0.0.1:{args.port} is viewing another project — "
+                f"run tb view --port {args.port + 1}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.open:
+            import webbrowser
+
+            webbrowser.open(url)
+        print(f"viewer already running at {url}")
+        return 0
+
+    launch_id = secrets.token_urlsafe(18)
+    log_path = viewer.server_log_path(root)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    argv = [
+        *agent_runtime.cli_argv(),
+        "_viewer-worker",
+        "--repo",
+        str(root),
+        "--port",
+        str(args.port),
+        f"--launch={launch_id}",
+    ]
+    kwargs: dict[str, object] = {
+        "cwd": str(root),
+        "stdin": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    else:
+        kwargs["start_new_session"] = True
+    with log_path.open("ab") as log:
+        kwargs["stdout"] = log
+        kwargs["stderr"] = subprocess.STDOUT
+        try:
+            process = subprocess.Popen(argv, **kwargs)
+        except OSError as exc:
+            print(f"error: cannot start the local viewer ({exc})", file=sys.stderr)
+            return 1
+    ready = False
+    for _attempt in range(60):
+        current = health()
+        if current and current.get("launch") == launch_id:
+            ready = True
+            break
+        if process.poll() is not None:
+            break
+        time.sleep(0.05)
+    if not ready:
+        print(
+            f"error: viewer did not start on 127.0.0.1:{args.port} — "
+            f"try tb view --port {args.port + 1}; details: {log_path}",
+            file=sys.stderr,
+        )
+        return 1
     if args.open:
         import webbrowser
 
         webbrowser.open(url)
+    print(f"opened ticket catalog {scope} at {url}")
+    print("the local viewer will stop after its last browser tab closes")
+    print(f"viewer log: {log_path}")
+    return 0
+
+
+def cmd_viewer_worker(args: argparse.Namespace) -> int:
+    from . import viewer
+
+    root = Path(args.repo).resolve()
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nviewer stopped")
+        server = viewer.serve(root, args.port, launch_id=args.launch)
+    except OSError as exc:
+        print(f"cannot listen on 127.0.0.1:{args.port}: {exc.strerror or exc}", file=sys.stderr)
+        return 1
+    try:
+        server.serve_until_closed()
     finally:
         server.server_close()
     return 0
@@ -2022,6 +2149,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("ticket", help="ticket ID")
     s.set_defaults(fn=cmd_synthesize)
 
+    s = sub.add_parser("open", help="open a project source reference in the configured local editor")
+    s.add_argument("source", help="project path or '@[path]:line' reference")
+    s.add_argument("--line", type=int, default=None, help="source line (default: 1)")
+    s.set_defaults(fn=cmd_open_source)
+
     s = sub.add_parser("hooks", help="inspect or repair the Git change-tracking hooks installed by tb init")
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     g = s.add_mutually_exclusive_group(required=True)
@@ -2041,11 +2173,20 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser(
         "view",
-        help="serve the local ticket viewer with guarded branch Work (auto-refreshes as data changes)",
+        help="open the local ticket viewer in the background",
     )
     s.add_argument("--port", type=int, default=8377, help="localhost port (default: 8377)")
-    s.add_argument("--open", action="store_true", help="open the viewer in your browser")
+    s.add_argument("--open", dest="open", action="store_true", help="open the viewer in your browser (default)")
+    s.add_argument("--no-open", dest="open", action="store_false", help="start without opening a browser")
+    s.add_argument("--foreground", action="store_true", help="keep the viewer attached to this terminal")
+    s.set_defaults(open=True)
     s.set_defaults(fn=cmd_view)
+
+    s = sub.add_parser("_viewer-worker", help=argparse.SUPPRESS)
+    s.add_argument("--repo", required=True)
+    s.add_argument("--port", type=int, required=True)
+    s.add_argument("--launch", required=True)
+    s.set_defaults(fn=cmd_viewer_worker)
 
     s = sub.add_parser("checkout", help="refresh the ticket's canonical report components and compile the master")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")
@@ -2197,7 +2338,7 @@ def main(argv: list[str] | None = None) -> int:
     if (
         result == 0
         and not os.environ.get("TB_AGENT_ACTIVE")
-        and args.command_name not in {"doctor", "agent", "synthesize"}
+        and args.command_name not in {"doctor", "agent", "synthesize", "view", "open"}
         and not args.command_name.startswith("_")
         and source_root is not None
         and project_mod.load_locator(source_root) is not None

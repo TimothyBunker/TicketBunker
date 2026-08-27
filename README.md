@@ -77,8 +77,8 @@ pinned standalone pi runtime. It needs neither Node nor a separate pi install:
 ```
 
 For example, Linux can verify an archive with
-`sha256sum -c ticketbunker-0.2.10-linux-x64.tar.gz.sha256`. In PowerShell,
-compare `Get-FileHash .\ticketbunker-0.2.10-windows-x64.zip -Algorithm SHA256`
+`sha256sum -c ticketbunker-<version>-linux-x64.tar.gz.sha256`. In PowerShell,
+compare `Get-FileHash .\ticketbunker-<version>-windows-x64.zip -Algorithm SHA256`
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
@@ -138,7 +138,9 @@ tb set TB-1267 --status in-review                  # move ticket fields through 
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
-tb view                                            # Ticket/Agent views, shared-truth state, coworker, and guarded Work on 127.0.0.1:8377
+tb view                                            # open the localhost viewer in the background; it stops after the last tab closes
+tb view --foreground --no-open                     # attached diagnostic mode without opening a browser
+tb open '@[ticketbunker/viewer.py]:1'               # open a verified local source reference in your editor
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
 tb bootstrap TB-1267 --repo . --baseline main                  # run the observation pipeline
@@ -263,6 +265,23 @@ no shell, edit, write, or Git tool. Raw chat stays below
 lint, and real anchors before changing that child and regenerating Combined.
 If companion publication stops, the accepted local report remains visible as
 **Companion publish pending** with its next action.
+
+The category actions and persistent launcher are compact chat bubbles.
+Highlighting part of a synthesis reveals a contextual bubble; pressing it
+attaches the selected excerpt, topic, report scope, and branch to the next local
+coworker message, and the quote remains visible in conversation history.
+Verified locations written as `@[relative/path]:line` are clickable. The same
+guarded operation is available as `tb open '@[relative/path]:line'`; it rejects
+paths outside the checkout and opens the current branch's file in `TB_EDITOR`,
+`$VISUAL`/`$EDITOR`, Git's `core.editor`, or a recognized local IDE. A custom
+line-jump template can be set with, for example,
+`TB_EDITOR='code --goto {file}:{line}'`.
+
+`tb view` opens the browser by default and releases the terminal after the
+localhost helper is ready. The helper follows live browser tabs and stops a few
+seconds after the final tab closes. Use `--no-open` when you only want the URL,
+or `--foreground` when debugging the server itself. Starting the viewer or
+opening a source reference never publishes companion data.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

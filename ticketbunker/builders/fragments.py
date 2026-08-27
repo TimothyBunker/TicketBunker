@@ -133,6 +133,8 @@ Your stages, in order:
      short claims for Who, What, and Why in descending apparent importance.
      Where gets one short claim that may name up to three paths, also ordered
      by importance. Make observations readable without rewriting them all.
+     Write verified source locations as `@[relative/path]:line` so the local
+     viewer can open them directly. Do not use that form for unverified paths.
      The brief is agent-authored, so never label its claims [observation]:
      use anchored [real] for verified facts and ranked [speculation] for
      synthesis. The complete trail remains unchanged below it.

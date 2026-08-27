@@ -14,6 +14,8 @@ import json
 import re
 import secrets
 import sys
+import threading
+import time
 import traceback
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import autoagent, commands, config, coworker, layout, truth, workflow
+from . import autoagent, commands, config, coworker, editor, layout, truth, workflow
 from .api import (
     ReportSnapshot,
     TicketCatalog,
@@ -66,10 +68,10 @@ body {
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-rendering: optimizeLegibility;
 }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
   outline: 3px solid color-mix(in oklch, var(--accent) 30%, transparent);
   outline-offset: 3px;
   border-radius: 2px;
@@ -234,15 +236,21 @@ p { margin: 0 0 12px; }
 .work-category-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
 .work-category h3 { margin: 0; font-size: 15px; }
 .coworker-inline {
-  min-height: 36px;
-  padding: 5px 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0;
   border: 0;
-  color: var(--accent);
+  border-radius: 999px;
+  color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
 }
+.coworker-inline:hover { color: var(--accent); background: var(--accent-soft); }
+.chat-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .brief-claims { min-width: 0; }
 .brief-claims p { margin: 0 0 7px; }
 .brief-claims p:last-child { margin-bottom: 0; }
@@ -369,7 +377,7 @@ p { margin: 0 0 12px; }
 .validation ul { margin: 5px 0 0; padding-left: 18px; }
 .empty { color: var(--muted); }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .94em; overflow-wrap: anywhere; }
-.tag { display: inline-block; margin: 0 5px 0 0; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font: 10px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; vertical-align: .08em; }
+.tag { display: inline-block; margin: 0 1px 0 0; padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; font: 10px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; vertical-align: .08em; }
 .tag.obs { color: var(--accent-strong); }
 .tag.real { color: var(--success); }
 .tag.spec { color: var(--warning); }
@@ -471,16 +479,14 @@ li { margin: 3px 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--accent);
   border-radius: 999px;
   color: var(--on-accent);
   background: var(--accent);
   box-shadow: 0 8px 22px color-mix(in oklch, var(--fg) 18%, transparent);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
   transition: transform 160ms var(--ease-out-quart), background 160ms var(--ease-out-quart);
 }
 .coworker-launcher[hidden] { display: none; }
@@ -565,6 +571,15 @@ li { margin: 3px 0; }
 .chat-message + .chat-message { border-top: 1px solid var(--line); }
 .chat-role { display: block; margin-bottom: 3px; color: var(--fg); font-size: 12px; font-weight: 700; }
 .chat-copy { margin: 0; color: var(--body); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-reference {
+  margin: 4px 0 7px;
+  padding-left: 9px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .coworker-proposal { margin: 10px 0 14px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); }
 .coworker-proposal h3 { margin-bottom: 4px; }
 .proposal-note { color: var(--muted); font-size: 12px; }
@@ -598,6 +613,28 @@ li { margin: 3px 0; }
 .proposal-actions button:disabled { color: var(--muted); background: var(--panel); cursor: wait; }
 .coworker-compose { padding: 10px 14px 14px; border-top: 1px solid var(--line); }
 .coworker-compose label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.coworker-reference {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  margin-bottom: 9px;
+  padding: 7px 8px 7px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--panel);
+}
+.coworker-reference[hidden] { display: none; }
+.coworker-reference-meta { color: var(--muted); font-size: 11px; font-weight: 650; }
+.coworker-reference-copy { grid-column: 1 / -1; margin: 0; color: var(--body); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.coworker-reference-remove {
+  width: 28px;
+  height: 28px;
+  margin: -5px -5px -2px 0;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 17px;
+}
 .coworker-compose textarea {
   width: 100%;
   min-height: 72px;
@@ -625,6 +662,55 @@ li { margin: 3px 0; }
   font-weight: 650;
 }
 .coworker-send:disabled { border-color: var(--line-strong); color: var(--muted); background: var(--panel); cursor: wait; }
+.selection-ask {
+  position: fixed;
+  z-index: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--bg);
+  box-shadow: 0 5px 16px color-mix(in oklch, var(--fg) 16%, transparent);
+  cursor: pointer;
+}
+.selection-ask[hidden] { display: none; }
+.selection-ask:hover { background: var(--accent-soft); }
+.source-link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font: .9em ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
+  text-underline-offset: 2px;
+}
+.source-link:hover { text-decoration-color: currentColor; }
+.source-status {
+  position: fixed;
+  z-index: 650;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(78px, calc(env(safe-area-inset-bottom) + 78px));
+  max-width: min(390px, calc(100vw - 32px));
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--body);
+  background: var(--bg);
+  box-shadow: 0 5px 16px color-mix(in oklch, var(--fg) 14%, transparent);
+  font-size: 12px;
+}
+.source-status[hidden] { display: none; }
+.source-status.error { color: var(--danger); border-color: var(--danger); }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
   .ticket-main { padding-right: 24px; }
@@ -687,8 +773,37 @@ li { margin: 3px 0; }
 """
 
 
-_POLL_JS = """
+_PRESENCE_JS = """
+const viewerToken = document.documentElement.dataset.viewerToken || '';
+const viewerSession = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+
+async function viewerPresence() {
+  if (!viewerToken) return;
+  try {
+    await fetch('/_viewer/presence', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': viewerToken},
+      body: JSON.stringify({session: viewerSession}),
+      keepalive: true
+    });
+  } catch (error) { /* The local viewer may already be closing. */ }
+}
+
+viewerPresence();
+window.addEventListener('pagehide', () => {
+  if (!viewerToken) return;
+  const body = new Blob(
+    [JSON.stringify({_token: viewerToken, session: viewerSession})],
+    {type: 'application/json'}
+  );
+  navigator.sendBeacon('/_viewer/close', body);
+});
+"""
+
+
+_POLL_JS = _PRESENCE_JS + r"""
 const fp = document.documentElement.dataset.fp;
+setInterval(viewerPresence, 5000);
 const viewTabs = [...document.querySelectorAll('[data-view-tab]')];
 const viewPanels = [...document.querySelectorAll('[data-view-panel]')];
 const reportSelect = document.querySelector('[data-report-select]');
@@ -892,7 +1007,8 @@ function preserveTicketUi() {
     open: !coworkerPanel.hidden,
     category: coworkerPanel.dataset.category || 'what',
     scope: coworkerPanel.querySelector('[data-coworker-scope]')?.value || 'combined',
-    draft: coworkerPanel.querySelector('textarea[name="message"]')?.value || ''
+    draft: coworkerPanel.querySelector('textarea[name="message"]')?.value || '',
+    reference: coworkerReference
   }));
 }
 
@@ -947,8 +1063,16 @@ const coworkerMessages = document.querySelector('[data-coworker-messages]');
 const coworkerForm = document.querySelector('[data-coworker-form]');
 const coworkerStatus = document.querySelector('[data-coworker-status]');
 const coworkerSend = document.querySelector('[data-coworker-send]');
+const coworkerReferenceBox = document.querySelector('[data-coworker-reference]');
+const coworkerReferenceMeta = document.querySelector('[data-coworker-reference-meta]');
+const coworkerReferenceCopy = document.querySelector('[data-coworker-reference-copy]');
+const coworkerReferenceRemove = document.querySelector('[data-coworker-reference-remove]');
+const selectionAsk = document.querySelector('[data-selection-ask]');
+const sourceStatus = document.querySelector('[data-source-status]');
 let coworkerCategory = 'what';
 let coworkerBusy = false;
+let coworkerReference = null;
+let pendingSelection = null;
 
 function setCoworkerStatus(message, kind = '') {
   if (!coworkerStatus) return;
@@ -971,6 +1095,72 @@ function setCoworkerCategory(category, moveFocus = false) {
 function selectedPageScope() {
   if (!reportSelect) return 'combined';
   return reportSelect.value === 'master' ? 'combined' : reportSelect.value;
+}
+
+function referenceLabel(reference) {
+  const place = reference.branch || (reference.scope === 'combined' ? 'Combined' : 'this branch');
+  return `${reference.category[0].toUpperCase()}${reference.category.slice(1)} · ${place}`;
+}
+
+function setCoworkerReference(reference) {
+  coworkerReference = reference?.text ? reference : null;
+  if (!coworkerReferenceBox) return;
+  coworkerReferenceBox.hidden = !coworkerReference;
+  if (coworkerReference) {
+    coworkerReferenceMeta.textContent = referenceLabel(coworkerReference);
+    coworkerReferenceCopy.textContent = coworkerReference.text;
+  } else {
+    coworkerReferenceMeta.textContent = '';
+    coworkerReferenceCopy.textContent = '';
+  }
+}
+
+function selectionElement(node) {
+  return node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+}
+
+function selectedSynthesis() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+  const anchor = selectionElement(selection.anchorNode);
+  const focus = selectionElement(selection.focusNode);
+  const start = anchor?.closest('[data-synthesis-copy]');
+  const end = focus?.closest('[data-synthesis-copy]');
+  if (!start || start !== end) return null;
+  const text = selection.toString().trim();
+  if (!text || text.length > 2400) return null;
+  const category = start.closest('[data-synthesis-category]')?.dataset.synthesisCategory;
+  const panel = start.closest('[data-report-panel]');
+  if (!category || !panel || panel.hidden) return null;
+  const scope = panel.dataset.reportPanel === 'master' ? 'combined' : panel.dataset.reportPanel;
+  const branch = anchor.closest('[data-synthesis-branch]')?.dataset.synthesisBranch
+    || panel.dataset.reportBranch
+    || '';
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  return {category, scope, branch, text, rect};
+}
+
+function hideSelectionAsk() {
+  if (selectionAsk) selectionAsk.hidden = true;
+}
+
+function showSelectionAsk() {
+  const reference = selectedSynthesis();
+  if (!selectionAsk || !reference) {
+    pendingSelection = null;
+    hideSelectionAsk();
+    return;
+  }
+  pendingSelection = {
+    category: reference.category,
+    scope: reference.scope,
+    branch: reference.branch,
+    text: reference.text
+  };
+  selectionAsk.style.left = `${Math.max(8, Math.min(window.innerWidth - 44, reference.rect.left + reference.rect.width / 2 - 18))}px`;
+  selectionAsk.style.top = `${Math.max(8, reference.rect.top - 44)}px`;
+  selectionAsk.hidden = false;
 }
 
 function openCoworker(category = coworkerCategory, focusMessage = true) {
@@ -998,6 +1188,29 @@ function textElement(tag, className, value) {
   node.className = className;
   node.textContent = value;
   return node;
+}
+
+function appendSourceText(node, value) {
+  const pattern = /@\[([^\]\n]+)\]:(\d+)/g;
+  let cursor = 0;
+  for (const match of value.matchAll(pattern)) {
+    node.append(document.createTextNode(value.slice(cursor, match.index)));
+    const link = textElement('button', 'source-link', match[0]);
+    link.type = 'button';
+    link.dataset.sourcePath = match[1];
+    link.dataset.sourceLine = match[2];
+    link.setAttribute('aria-label', `Open ${match[1]} at line ${match[2]}`);
+    node.append(link);
+    cursor = match.index + match[0].length;
+  }
+  node.append(document.createTextNode(value.slice(cursor)));
+}
+
+function setSourceStatus(message, kind = '') {
+  if (!sourceStatus) return;
+  sourceStatus.textContent = message;
+  sourceStatus.className = `source-status ${kind}`.trim();
+  sourceStatus.hidden = !message;
 }
 
 function renderProposal(proposal) {
@@ -1066,7 +1279,15 @@ function renderCoworker(value) {
     const article = document.createElement('article');
     article.className = 'chat-message';
     article.append(textElement('span', 'chat-role', message.role === 'user' ? 'You' : 'Coworker'));
-    article.append(textElement('p', 'chat-copy', message.text));
+    if (message.reference?.text) {
+      const reference = textElement('blockquote', 'chat-reference', '');
+      reference.append(textElement('strong', '', `${referenceLabel(message.reference)}\n`));
+      appendSourceText(reference, message.reference.text);
+      article.append(reference);
+    }
+    const copy = textElement('p', 'chat-copy', '');
+    appendSourceText(copy, message.text);
+    article.append(copy);
     coworkerMessages.append(article);
     if (message.proposal) {
       const proposal = value.proposals.find((item) => item.id === message.proposal);
@@ -1098,10 +1319,17 @@ async function loadCoworker() {
 coworkerLauncher?.addEventListener('click', () => openCoworker());
 coworkerClose?.addEventListener('click', closeCoworker);
 document.querySelectorAll('[data-coworker-category]').forEach((button) => {
-  button.addEventListener('click', () => openCoworker(button.dataset.coworkerCategory));
+  button.addEventListener('click', () => {
+    setCoworkerReference(null);
+    openCoworker(button.dataset.coworkerCategory);
+  });
 });
 coworkerTabs.forEach((tab, index) => {
-  tab.addEventListener('click', () => { setCoworkerCategory(tab.dataset.coworkerTab); loadCoworker(); });
+  tab.addEventListener('click', () => {
+    setCoworkerReference(null);
+    setCoworkerCategory(tab.dataset.coworkerTab);
+    loadCoworker();
+  });
   tab.addEventListener('keydown', (event) => {
     let next = null;
     if (event.key === 'ArrowRight') next = (index + 1) % coworkerTabs.length;
@@ -1110,20 +1338,61 @@ coworkerTabs.forEach((tab, index) => {
     if (event.key === 'End') next = coworkerTabs.length - 1;
     if (next !== null) {
       event.preventDefault();
+      setCoworkerReference(null);
       setCoworkerCategory(coworkerTabs[next].dataset.coworkerTab, true);
       loadCoworker();
     }
   });
 });
-coworkerScope?.addEventListener('change', loadCoworker);
+coworkerScope?.addEventListener('change', () => { setCoworkerReference(null); loadCoworker(); });
 reportSelect?.addEventListener('change', () => {
   if (coworkerScope && coworkerPanel && !coworkerPanel.hidden) {
+    setCoworkerReference(null);
     coworkerScope.value = selectedPageScope();
     loadCoworker();
   }
 });
+coworkerReferenceRemove?.addEventListener('click', () => {
+  setCoworkerReference(null);
+  coworkerForm?.querySelector('textarea')?.focus();
+});
+selectionAsk?.addEventListener('pointerdown', (event) => event.preventDefault());
+selectionAsk?.addEventListener('click', () => {
+  if (!pendingSelection) return;
+  setCoworkerReference(pendingSelection);
+  const category = pendingSelection.category;
+  hideSelectionAsk();
+  window.getSelection()?.removeAllRanges();
+  openCoworker(category);
+});
+document.addEventListener('mouseup', showSelectionAsk);
+document.addEventListener('keyup', (event) => {
+  if (event.key === 'Shift' || event.key.startsWith('Arrow')) showSelectionAsk();
+});
+document.addEventListener('touchend', () => window.setTimeout(showSelectionAsk, 0));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) closeCoworker();
+});
+document.addEventListener('click', async (event) => {
+  const link = event.target.closest('[data-source-path][data-source-line]');
+  if (!link) return;
+  const token = viewerToken || coworkerPanel?.dataset.token || truthStrip?.dataset.token || '';
+  if (!token) return;
+  link.disabled = true;
+  setSourceStatus(`Opening ${link.dataset.sourcePath}:${link.dataset.sourceLine}…`);
+  try {
+    const value = await jsonRequest('/source/open', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': token},
+      body: JSON.stringify({path: link.dataset.sourcePath, line: link.dataset.sourceLine})
+    });
+    setSourceStatus(`Opened ${value.path}:${value.line} in ${value.editor}.`);
+    window.setTimeout(() => setSourceStatus(''), 2600);
+  } catch (error) {
+    setSourceStatus(error.message, 'error');
+  } finally {
+    link.disabled = false;
+  }
 });
 
 coworkerForm?.addEventListener('submit', async (event) => {
@@ -1142,10 +1411,12 @@ coworkerForm?.addEventListener('submit', async (event) => {
         ticket: coworkerPanel.dataset.ticket,
         category: coworkerCategory,
         scope: coworkerScope.value,
-        message
+        message,
+        reference: coworkerReference
       })
     });
     coworkerForm.reset();
+    setCoworkerReference(null);
     renderCoworker(value);
   } catch (error) {
     setCoworkerStatus(error.message, 'error');
@@ -1218,6 +1489,7 @@ if (coworkerPanel) {
     if (typeof saved.draft === 'string' && coworkerForm?.querySelector('textarea[name="message"]')) {
       coworkerForm.querySelector('textarea[name="message"]').value = saved.draft;
     }
+    if (saved.reference?.text) setCoworkerReference(saved.reference);
     if (saved.open) openCoworker(coworkerCategory, false);
   } catch (error) { /* Ignore malformed local UI state. */ }
 }
@@ -1227,6 +1499,7 @@ setInterval(async () => {
     await pollTruth();
     return;
   }
+  if (!fp) return;
   try {
     const response = await fetch('/poll');
     if ((await response.text()).trim() !== fp) location.reload();
@@ -1237,6 +1510,11 @@ setInterval(async () => {
 
 _TAG_RE = re.compile(r"^\[(observation|real|speculation)\]\s*")
 _TAG_CLASS = {"observation": "obs", "real": "real", "speculation": "spec"}
+_CHAT_ICON = (
+    '<svg class="chat-icon" viewBox="0 0 24 24" aria-hidden="true">'
+    '<path d="M7.5 18.5 4 20l1-4.1A7.5 7.5 0 1 1 7.5 18.5Z"/>'
+    '<path d="M8 9.5h8M8 13h5"/></svg>'
+)
 _STATUS_ORDER = ("backlog", "open", "todo", "in-progress", "in-review", "done", "closed")
 _STATUS_LABELS = {
     "backlog": "Backlog",
@@ -1271,6 +1549,21 @@ def fingerprint(root: Path) -> str:
 
 
 def _inline(escaped: str) -> str:
+    source_references: list[str] = []
+
+    def source_reference(match: re.Match[str]) -> str:
+        path = html.unescape(match.group(1)).strip()
+        line = match.group(2)
+        placeholder = f"\x1e{len(source_references)}\x1f"
+        source_references.append(
+            '<button class="source-link" type="button" '
+            f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
+            f'aria-label="Open {html.escape(path, quote=True)} at line {line}">'
+            f'@[{html.escape(path)}]:{line}</button>'
+        )
+        return placeholder
+
+    escaped = re.sub(r"@\[([^\]\n]+)\]:(\d+)", source_reference, escaped)
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
     escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
     escaped = re.sub(r"(?<!\*)\*([^*]+)\*", r"<em>\1</em>", escaped)
@@ -1283,7 +1576,10 @@ def _inline(escaped: str) -> str:
             f'<a href="{match.group(2)}" rel="noreferrer">{match.group(1)}</a>'
         )
 
-    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, escaped)
+    rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, escaped)
+    for index, source in enumerate(source_references):
+        rendered = rendered.replace(f"\x1e{index}\x1f", source)
+    return rendered
 
 
 def _claim(escaped: str) -> str:
@@ -1293,7 +1589,7 @@ def _claim(escaped: str) -> str:
     tag = match.group(1)
     label = "speculation" if tag == "speculation" else tag
     return (
-        f'<span class="tag {_TAG_CLASS[tag]}">{label}</span>'
+        f'<span class="tag {_TAG_CLASS[tag]}">{label}</span> '
         + _inline(escaped[match.end():])
     )
 
@@ -1384,7 +1680,7 @@ def render_ticket_text(text: str) -> str:
 
 def _page(title: str, body: str, fp: str) -> bytes:
     document = (
-        f'<!doctype html><html lang="en" data-fp="{fp}"><head><meta charset="utf-8">'
+        f'<!doctype html><html lang="en" data-fp="{fp}" data-viewer-token=""><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         '<link rel="icon" href="data:,">'
         f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
@@ -1543,9 +1839,10 @@ def _master_preview(reports: tuple[ReportSnapshot, ...], label: str) -> str:
         if not preview:
             continue
         rows.append(
-            '<article class="master-branch-summary">'
+            '<article class="master-branch-summary" '
+            f'data-synthesis-branch="{html.escape(report.branch, quote=True)}">'
             f'<div class="master-branch-label mono">{html.escape(report.branch)}</div>'
-            f'<div class="brief-claims">{preview}</div></article>'
+            f'<div class="brief-claims" data-synthesis-copy>{preview}</div></article>'
         )
     return "".join(rows)
 
@@ -1572,15 +1869,19 @@ def _agent_report_panel(reports: tuple[ReportSnapshot, ...], value: str, *, mast
     categories = []
     for label in ("Who", "What", "Where", "Why"):
         preview = _master_preview(reports, label) if master else _category_preview(reports[0], label)
+        synthesis_attr = "" if master else " data-synthesis-copy"
         categories.append(
-            f'<section class="work-category"><div class="work-category-head"><h3>{label}</h3>'
+            f'<section class="work-category" data-synthesis-category="{label.casefold()}">'
+            f'<div class="work-category-head"><h3>{label}</h3>'
             f'<button class="coworker-inline" type="button" data-coworker-category="{label.casefold()}" '
-            f'aria-label="Ask the ticket coworker about {label}">Ask coworker</button></div>'
-            f'<div class="{"master-brief" if master else "brief-claims"}">{preview}</div>'
+            f'aria-label="Ask the ticket coworker about {label}" title="Ask about {label}">{_CHAT_ICON}</button></div>'
+            f'<div class="{"master-brief" if master else "brief-claims"}"{synthesis_attr}>{preview}</div>'
             f'{_category_trail(reports, label)}</section>'
         )
+    branch_attr = "" if master else f' data-report-branch="{html.escape(reports[0].branch, quote=True)}"'
     return (
-        f'<div class="report-panel" id="{panel_id}" data-report-panel="{html.escape(value, quote=True)}"{hidden}>'
+        f'<div class="report-panel" id="{panel_id}" data-report-panel="{html.escape(value, quote=True)}"'
+        f'{hidden}{branch_attr}>'
         f'{context}{"".join(categories)}<div class="report-state-trail">'
         f'{_category_trail(reports, "State", "Report state")}</div></div>'
     )
@@ -2335,7 +2636,11 @@ def _coworker_surface(
     return (
         '<button class="coworker-launcher" type="button" data-coworker-launcher '
         'aria-label="Open ticket coworker" aria-expanded="false" aria-controls="coworker-panel">'
-        '<span aria-hidden="true">Ask</span></button>'
+        f'{_CHAT_ICON}</button>'
+        '<p class="source-status" data-source-status role="status" aria-live="polite" hidden></p>'
+        '<button class="selection-ask" type="button" data-selection-ask '
+        'aria-label="Ask the ticket coworker about selected synthesis" title="Ask about selection" hidden>'
+        f'{_CHAT_ICON}</button>'
         '<section class="coworker-panel" id="coworker-panel" data-coworker '
         'aria-label="Ticket coworker" '
         f'data-ticket="{html.escape(ticket.id, quote=True)}" '
@@ -2353,6 +2658,11 @@ def _coworker_surface(
         'data-coworker-messages aria-live="polite">'
         '<p class="coworker-empty">Ask about this ticket or correct its synthesis.</p></div>'
         '<form class="coworker-compose" data-coworker-form>'
+        '<div class="coworker-reference" data-coworker-reference hidden>'
+        '<span class="coworker-reference-meta" data-coworker-reference-meta></span>'
+        '<button class="coworker-reference-remove" type="button" data-coworker-reference-remove '
+        'aria-label="Remove synthesis reference">×</button>'
+        '<p class="coworker-reference-copy" data-coworker-reference-copy></p></div>'
         '<label for="coworker-message">Message</label>'
         '<textarea id="coworker-message" name="message" maxlength="8000" '
         'placeholder="Ask for context, explain a concern, or correct the report" required></textarea>'
@@ -2529,6 +2839,14 @@ def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> Viewer
         title = "Coworker unavailable"
         state = "Your conversation, reports, and source files were not changed."
         action = action or "Run tb agent status, then retry this message."
+    elif code.startswith("source_editor"):
+        title = "Editor not ready"
+        state = "No editor was opened and your source files were not changed."
+        action = action or "Set TB_EDITOR='code --goto {file}:{line}', then retry the link."
+    elif code.startswith("source_"):
+        title = "Source link unavailable"
+        state = "No editor was opened and your source files were not changed."
+        action = action or "Switch to the referenced branch or refresh its synthesis, then retry."
     else:
         title = "TicketBunker needs attention"
         state = (
@@ -2618,11 +2936,11 @@ def _problem_page(problem: ViewerProblem, retry_path: str) -> bytes:
         f'{incident}</section>'
     )
     document = (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<!doctype html><html lang="en" data-viewer-token=""><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         '<link rel="icon" href="data:,">'
         f'<title>{html.escape(problem.title)} | TicketBunker</title><style>{_STYLE}</style></head>'
-        f'<body><main>{body}</main></body></html>'
+        f'<body><main>{body}</main><script>{_PRESENCE_JS}</script></body></html>'
     )
     return document.encode("utf-8")
 
@@ -2663,6 +2981,17 @@ class _Handler(BaseHTTPRequestHandler):
         }
         if path == "/poll":
             self._send(200, fp.encode(), "text/plain; charset=utf-8")
+            return
+        if path == "/_viewer/health":
+            server = self.server
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "launch": str(getattr(server, "launch_id", "")),
+                    "root": str(root),
+                },
+            )
             return
         if path == "/":
             self._send(200, page_index(root, fp, params))
@@ -2743,17 +3072,12 @@ class _Handler(BaseHTTPRequestHandler):
             "/coworker/chat": "coworker.chat",
             "/coworker/proposal/accept": "coworker.proposal.accept",
             "/coworker/proposal/dismiss": "coworker.proposal.dismiss",
+            "/source/open": "editor.open",
         }
         command = commands_by_path.get(path)
-        if command is None:
+        presence_action = path in {"/_viewer/presence", "/_viewer/close"}
+        if command is None and not presence_action:
             self._send_json(404, {"ok": False, "code": "not_found", "message": "No such action."})
-            return
-        supplied = self.headers.get("X-TicketBunker-Token") or ""
-        if not supplied or not secrets.compare_digest(supplied, self.token):
-            self._send_json(
-                403,
-                {"ok": False, "code": "transport_token_invalid", "message": "Reload the viewer and retry."},
-            )
             return
         try:
             length = int(self.headers.get("Content-Length") or "0")
@@ -2779,6 +3103,22 @@ class _Handler(BaseHTTPRequestHandler):
                 {"ok": False, "code": "request_invalid", "message": "The request must be one JSON object."},
             )
             return
+        supplied = self.headers.get("X-TicketBunker-Token") or str(payload.pop("_token", "") or "")
+        if not supplied or not secrets.compare_digest(supplied, self.token):
+            self._send_json(
+                403,
+                {"ok": False, "code": "transport_token_invalid", "message": "Reload the viewer and retry."},
+            )
+            return
+        if presence_action:
+            session = str(payload.get("session") or "")
+            server = self.server
+            if path == "/_viewer/presence":
+                getattr(server, "note_presence", lambda _value: None)(session)
+            else:
+                getattr(server, "note_close", lambda _value: None)(session)
+            self._send_json(200, {"ok": True})
+            return
         if command == "truth.queue":
             payload["force"] = True
         result = commands.dispatch(
@@ -2797,6 +3137,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send(self, code: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
         try:
+            if content_type.startswith("text/html") and b'data-viewer-token=""' in body:
+                body = body.replace(
+                    b'data-viewer-token=""',
+                    f'data-viewer-token="{html.escape(self.token, quote=True)}"'.encode(),
+                    1,
+                )
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -2816,6 +3162,81 @@ class _Handler(BaseHTTPRequestHandler):
 class _ViewerServer(ThreadingHTTPServer):
     daemon_threads = True
 
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        *,
+        launch_id: str = "",
+    ) -> None:
+        super().__init__(server_address, handler)
+        self.launch_id = launch_id
+        self._presence_lock = threading.Lock()
+        self._viewer_sessions: dict[str, float] = {}
+        self._started_at = time.monotonic()
+        self._saw_viewer = False
+        self._empty_since: float | None = None
+        self._active_requests = 0
+        self._monitor_stop = threading.Event()
+
+    def process_request_thread(self, request: object, client_address: object) -> None:
+        with self._presence_lock:
+            self._active_requests += 1
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self._presence_lock:
+                self._active_requests -= 1
+
+    def note_presence(self, session: str) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9._-]{8,128}", session):
+            return
+        with self._presence_lock:
+            self._viewer_sessions[session] = time.monotonic()
+            self._saw_viewer = True
+            self._empty_since = None
+
+    def note_close(self, session: str) -> None:
+        with self._presence_lock:
+            self._viewer_sessions.pop(session, None)
+            if self._saw_viewer and not self._viewer_sessions and self._empty_since is None:
+                self._empty_since = time.monotonic()
+
+    def _monitor_idle(self) -> None:
+        while not self._monitor_stop.wait(1):
+            now = time.monotonic()
+            stop = False
+            with self._presence_lock:
+                self._viewer_sessions = {
+                    session: seen
+                    for session, seen in self._viewer_sessions.items()
+                    if now - seen < 1800
+                }
+                if self._saw_viewer:
+                    if self._viewer_sessions:
+                        self._empty_since = None
+                    elif self._empty_since is None:
+                        self._empty_since = now
+                    stop = (
+                        self._empty_since is not None
+                        and now - self._empty_since >= 3
+                        and self._active_requests == 0
+                    )
+                else:
+                    stop = now - self._started_at >= 60 and self._active_requests == 0
+            if stop:
+                self.shutdown()
+                return
+
+    def serve_until_closed(self) -> None:
+        monitor = threading.Thread(target=self._monitor_idle, name="tb-viewer-idle", daemon=True)
+        monitor.start()
+        try:
+            self.serve_forever()
+        finally:
+            self._monitor_stop.set()
+            monitor.join(timeout=2)
+
     def handle_error(self, _request: object, _client_address: object) -> None:
         error = sys.exc_info()[1]
         if isinstance(error, (ConnectionError, TimeoutError)):
@@ -2823,6 +3244,10 @@ class _ViewerServer(ThreadingHTTPServer):
         print("TicketBunker viewer request stopped safely. Run tb doctor for help.", file=sys.stderr)
 
 
-def serve(root: Path, port: int) -> ThreadingHTTPServer:
+def server_log_path(root: Path) -> Path:
+    return autoagent.log_path(Path(root).resolve()).parent.parent / "viewer.log"
+
+
+def serve(root: Path, port: int, *, launch_id: str = "") -> _ViewerServer:
     handler = type("BoundHandler", (_Handler,), {"root": root, "token": secrets.token_urlsafe(32)})
-    return _ViewerServer(("127.0.0.1", port), handler)
+    return _ViewerServer(("127.0.0.1", port), handler, launch_id=launch_id)

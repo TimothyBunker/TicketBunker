@@ -163,11 +163,23 @@ exercise unless a live boundary is explicitly called out.
   path. The browser reloads only when ticket data or refs change.
 - One local Pi coworker session exists per user and ticket across every branch.
   The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
-  scope. Pi receives only read/search tools. Raw chat stays below `.git`; a
+  scope. Category actions and the persistent launcher are icon-only chat
+  bubbles. Selecting synthesis text attaches its bounded category/scope/branch
+  quote to the next message and preserves that reference in local history. Pi
+  receives only read/search tools. Raw chat stays below `.git`; a
   coworker reply can prepare an inert child Reader-brief proposal, and explicit
   acceptance rechecks digest/lint/anchors, updates the named children, then
   regenerates Combined. It cannot edit source, run Git mutations, or write
   Combined directly.
+- `@[relative/path]:line` is a clickable verified-source form in report and
+  coworker copy. The viewer and `tb open` share the guarded `editor.open`
+  command, which confines paths to the current checkout and launches the local
+  editor without a shell. `TB_EDITOR='code --goto {file}:{line}'` is the explicit
+  override.
+- `tb view` now opens the browser and returns immediately. Its detached
+  localhost worker tracks page presence, survives in-app navigation, and shuts
+  down shortly after the last tab closes; `--foreground` and `--no-open` remain
+  explicit overrides.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -176,7 +188,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.10 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.11 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -215,13 +227,16 @@ durable-input provider skipping, Pi-shaped CLI parsing, bounded malformed-draft
 repair, fresh-clone session creation, nested-publication suppression, and a
 real post-commit hook that records a change without publishing. Focused tests
 also cover cached-first truth refresh, private coworker session reuse,
-read-only Pi tools, and gated child-only report updates. The current full suite
-is 138 tests.
+read-only Pi tools, selected synthesis-reference validation/persistence,
+checkout-confined editor opening, detached viewer shutdown, and gated
+child-only report updates. The current full suite is 153 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
 scope selection, Work panel, responsive stacking, and JavaScript deep links are
-inspected. This does not replace the HTTP/CSRF tests.
+inspected. A headless-Chrome interaction check also selects Combined synthesis,
+opens its contextual bubble, and verifies the quote reaches the correct topic
+composer. This does not replace the HTTP/CSRF tests.
 
 ## Existing agent pipeline
 
@@ -302,6 +317,7 @@ exercise intentionally does not run an agent report.
 | Diagnostics | `ticketbunker/doctor.py` |
 | Read model | `ticketbunker/api.py` |
 | Ticket viewer | `ticketbunker/viewer.py` |
+| Local source opener | `ticketbunker/editor.py` |
 | Config editor | `ticketbunker/config_viewer.py` |
 | Typed intake | `ticketbunker/handlers/` |
 | Report gates | `ticketbunker/processors/reportlint.py`, `anchorcheck.py` |

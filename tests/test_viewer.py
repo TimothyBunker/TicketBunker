@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -276,6 +277,10 @@ class ViewerTests(unittest.TestCase):
         for category in ("who", "what", "where", "why"):
             self.assertIn(f'data-coworker-tab="{category}"', page)
             self.assertIn(f'data-coworker-category="{category}"', page)
+            self.assertIn(f'data-synthesis-category="{category}"', page)
+        self.assertNotIn(">Ask coworker</button>", page)
+        self.assertIn('data-selection-ask', page)
+        self.assertIn('data-coworker-reference hidden', page)
         self.assertIn('<option value="combined">Combined</option>', page)
         self.assertIn('data-coworker-form', page)
         self.assertIn("Accepting updates the named child reports through the report gate", page)
@@ -303,6 +308,31 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-truth-command="synthesize"', page)
         self.assertIn(">Retry synthesis</button>", page)
         self.assertIn('href="/truth/agent-log">View log</a>', page)
+
+    def test_state_hub_renders_never_requested_synthesis_as_a_start_action(self) -> None:
+        value = {
+            "content_revision": "revision",
+            "refresh": "idle",
+            "companion": {"status": "current", "label": "Companion current", "detail": "Ready"},
+            "git": {"status": "current", "label": "Git refs fetched", "detail": "Ready"},
+            "synthesis": {
+                "status": "missing",
+                "label": "Not synthesized",
+                "detail": "This branch has not been synthesized yet.",
+                "action": "Synthesize",
+                "command": "synthesize",
+            },
+        }
+        with mock.patch.object(viewer.truth, "state", return_value=value):
+            rendered = page_ticket(self.root, "TB-9", "fingerprint", work_token="csrf-token")
+
+        page = rendered.decode("utf-8")
+        self.assertIn("Not synthesized", page)
+        self.assertIn(">Synthesize</button>", page)
+        self.assertNotIn("Synthesis stopped", page)
+        synthesis = page.split('data-truth-item="synthesis"', 1)[1].split("</div>", 1)[0]
+        self.assertIn('class="truth-log"', synthesis)
+        self.assertIn(" hidden>View log</a>", synthesis)
 
     def test_synthesis_log_page_shows_exact_path_and_escapes_output(self) -> None:
         log = self.root / "agent.log"
@@ -405,6 +435,79 @@ class ViewerTests(unittest.TestCase):
         self.assertTrue(value["queued"])
         self.assertEqual(dispatched.call_args.args[0], "truth.synthesize")
         self.assertEqual(dispatched.call_args.args[2].transport, "http")
+
+    def test_source_open_http_route_uses_the_shared_backend_command(self) -> None:
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        token = server.RequestHandlerClass.token
+        try:
+            with mock.patch.object(
+                commands,
+                "dispatch",
+                return_value={
+                    "ok": True,
+                    "command": "editor.open",
+                    "opened": True,
+                    "path": "ticketbunker/viewer.py",
+                    "line": 1,
+                    "editor": "code",
+                },
+            ) as dispatched:
+                request = Request(
+                    f"{base}/source/open",
+                    data=json.dumps({"path": "ticketbunker/viewer.py", "line": 1}).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-TicketBunker-Token": token,
+                    },
+                    method="POST",
+                )
+                value = json.loads(urlopen(request).read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertTrue(value["opened"])
+        self.assertEqual(dispatched.call_args.args[0], "editor.open")
+        self.assertEqual(dispatched.call_args.args[1]["path"], "ticketbunker/viewer.py")
+        self.assertEqual(dispatched.call_args.args[2].transport, "http")
+
+    def test_background_viewer_stops_after_its_last_session_closes(self) -> None:
+        server = viewer.serve(self.root, 0, launch_id="test-launch")
+        thread = threading.Thread(target=server.serve_until_closed, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        token = server.RequestHandlerClass.token
+
+        def presence(path: str) -> None:
+            request = Request(
+                f"{base}{path}",
+                data=json.dumps({"session": "viewer-session-1"}).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-TicketBunker-Token": token,
+                },
+                method="POST",
+            )
+            self.assertTrue(json.loads(urlopen(request).read().decode())["ok"])
+
+        try:
+            health = json.loads(urlopen(f"{base}/_viewer/health").read().decode())
+            self.assertEqual(health["launch"], "test-launch")
+            presence("/_viewer/presence")
+            presence("/_viewer/close")
+            with server._presence_lock:
+                server._empty_since = time.monotonic() - 4
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+        finally:
+            if thread.is_alive():
+                server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_index_uses_the_same_ticket_database(self) -> None:
         page = page_index(self.root, "fingerprint", {"assignee": "*"}).decode("utf-8")
@@ -635,6 +738,24 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", rendered)
         self.assertNotIn("<img", rendered)
 
+    def test_report_source_reference_becomes_an_explicit_local_open_control(self) -> None:
+        rendered = render_report("- [real] Open @[ticketbunker/viewer.py]:1 first.")
+
+        self.assertIn('class="source-link" type="button"', rendered)
+        self.assertIn('data-source-path="ticketbunker/viewer.py"', rendered)
+        self.assertIn('data-source-line="1"', rendered)
+        self.assertIn("@[ticketbunker/viewer.py]:1</button>", rendered)
+
+    def test_source_open_error_names_the_editor_fix_without_git_recovery_copy(self) -> None:
+        problem = viewer._command_problem(
+            commands.CommandRejected("source_editor_missing", "No local editor was found."),
+            mutating=True,
+        )
+
+        self.assertEqual(problem.title, "Editor not ready")
+        self.assertIn("TB_EDITOR", problem.action)
+        self.assertNotIn("git status", problem.action.casefold())
+
     def test_ticket_markup_is_rich_but_does_not_invent_provenance(self) -> None:
         rendered = render_ticket_text(
             "[real] Tracker copy\n\n1. Visit [source](https://example.com)\n\n```\n<script>\n```"
@@ -692,7 +813,7 @@ class ViewerTests(unittest.TestCase):
 
         self.assertIn('<option value="lin__TB-9-second-view">lin/TB-9-second-view</option>', page)
         self.assertIn('id="report-lin__TB-9-second-view" data-report-panel="lin__TB-9-second-view" hidden', page)
-        self.assertEqual(page.count('<article class="master-branch-summary">'), 8)
+        self.assertEqual(page.count('<article class="master-branch-summary"'), 8)
         self.assertIn(".master-branch-summary + .master-branch-summary { border-top: 1px solid var(--line-strong); }", page)
         self.assertIn('href="#report-lin__TB-9-second-view"', page)
 
