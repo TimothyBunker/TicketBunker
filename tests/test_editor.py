@@ -116,6 +116,7 @@ class EditorTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "local_editor_missing")
         self.assertEqual(config.load()["editor"], "vim")
+        self.assertEqual(editor.local_state(self.root)["editor_mode"], "builtin")
 
     def test_builtin_format_settings_do_not_require_the_hidden_external_command(self) -> None:
         config.save({"editor_mode": "builtin", "editor": "missing-editor"})

@@ -118,7 +118,7 @@ def local_state(root: Path) -> dict[str, Any]:
     configured_mode = cfg.get("editor_mode")
     fallback_mode = (
         "external"
-        if cfg.get("editor") or os.environ.get("TB_EDITOR")
+        if os.environ.get("TB_EDITOR")
         else _DEFAULT_LOCAL_SETTINGS["editor_mode"]
     )
     mode = str(configured_mode or fallback_mode)
