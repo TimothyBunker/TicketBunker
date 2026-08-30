@@ -195,6 +195,11 @@ def _synthesis_detail(updated_at: str, changes: int | None, fallback: str) -> st
     return fallback
 
 
+def _synthesis_compact(updated_at: str, fallback: str) -> str:
+    age = _relative_age(updated_at)
+    return f"Updated {age}" if age else fallback
+
+
 def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
     """Describe user-requested synthesis, age, and changes since publication."""
     branch = _current_branch(root)
@@ -219,6 +224,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         return {
             "status": "updating",
             "label": "Synthesizing",
+            "compact": "Updating",
             "detail": f"TicketBunker is updating {branch} because you requested it.",
             "action": "",
         }
@@ -232,6 +238,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         return {
             "status": "stopped",
             "label": "Synthesis stopped",
+            "compact": "Stopped",
             "detail": str(last.get("detail") or "The last synthesis did not finish."),
             "action": "Retry synthesis",
             "command": "synthesize",
@@ -247,7 +254,11 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         updated_at = str(current.get("published_at") or (report.verified_at if report else ""))
         previous = str(report.verified_commit if report else "")
         changes = _commit_changes(root, previous, branch)
-        common = {"updated_at": updated_at, "changes": changes}
+        common = {
+            "updated_at": updated_at,
+            "changes": changes,
+            "compact": _synthesis_compact(updated_at, "Synthesis current"),
+        }
         if status == "current":
             return {
                 "status": "current",
@@ -264,6 +275,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
             return {
                 "status": "missing",
                 "label": "Not synthesized",
+                "compact": "Not synthesized",
                 "detail": detail,
                 "action": "Synthesize",
                 "command": "synthesize",
@@ -294,11 +306,13 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
             "action": "Update synthesis",
             "command": "synthesize",
             **common,
+            "compact": _synthesis_compact(updated_at, "Needs update"),
         }
     if not ticket.reports:
         return {
             "status": "missing",
             "label": "Not synthesized",
+            "compact": "Not synthesized",
             "detail": "Switch to a ticket branch, then press Synthesize.",
             "action": "",
         }
@@ -310,6 +324,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         return {
             "status": "outdated",
             "label": "Synthesis needs update",
+            "compact": "Needs update",
             "detail": f"Switch to {stale.branch}, then press Update synthesis.",
             "action": "",
         }
@@ -317,6 +332,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
     return {
         "status": "current",
         "label": "Synthesis current",
+        "compact": _synthesis_compact(latest, "Synthesis current"),
         "detail": _synthesis_detail(latest, None, "Published branch reports match cached Git state."),
         "action": "",
     }

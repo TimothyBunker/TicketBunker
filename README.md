@@ -253,16 +253,15 @@ repository.
 
 On a ticket, Lifecycle and Branches remain in one right rail while Ticket and
 Agent switch the center view. Branch state and the Work control therefore stay
-in the same place while reading tracker details or agent evidence. A quiet
-Companion / Git refs / Synthesis strip says which shared state is current,
-cached, updating, or stopped and names what to do next. Synthesis is explicitly
-user-triggered from that strip: **Synthesize**, **Update synthesis**, or
-**Retry synthesis**. It shows when the last synthesis finished and the number
-of commits since whenever those facts are available. A failed run includes a
-**View log** link; the localhost page shows a bounded, escaped tail and the
-exact `.git/ticketbunker/automatic-agent/agent.log` path. Branches without a
-generated comparison say **Needs Git state**, which names the missing program
-output.
+in the same place while reading tracker details or agent evidence. Small status
+indicators sit beside the ticket title. Healthy Companion and Git refs stay out
+of sight; loading, cached, or stopped states surface as dots. Synthesis keeps a
+dot plus its last update age, or its concise action state. Hover, focus, or click
+reveals the full detail and **Synthesize**, **Update synthesis**, **Retry
+synthesis**, or **View log** action. The log page shows a bounded, escaped tail
+and the exact `.git/ticketbunker/automatic-agent/agent.log` path. Branches
+without a generated comparison say **Needs Git state**, which names the missing
+program output.
 
 Agent defaults to **Combined**, the mechanically assembled master report, with
 each child branch kept visibly separate. Once at least one report exists, Report
@@ -290,7 +289,9 @@ inline-code `relative/path:line` anchors in Combined, branch synthesis, and
 full trails use that same control, matching coworker chat. The same
 guarded operation is available as `tb open '@[relative/path]:line'`; it rejects
 paths outside the checkout and opens the current branch's file in the included
-localhost editor. Save checks that the file has not changed since it opened and
+localhost editor. A clipboard control after every source link resolves and
+copies its absolute local path plus line through that same checkout guard. Save
+checks that the file has not changed since it opened and
 atomically writes only that file; it never stages or runs Git. Configure
 indentation, wrapping, save cleanup, or an optional external editor on `tb
 config` → Local settings.

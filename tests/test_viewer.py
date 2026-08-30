@@ -271,7 +271,8 @@ class ViewerTests(unittest.TestCase):
         self.assertIsNotNone(rendered)
         page = rendered.decode("utf-8")
 
-        self.assertIn('aria-label="Shared truth" data-truth', page)
+        self.assertIn('aria-label="Shared truth"', page)
+        self.assertIn('aria-live="polite" data-truth', page)
         self.assertIn('data-coworker aria-label="Ticket coworker" data-ticket="TB-9"', page)
         self.assertIn('class="coworker-title">', page)
         self.assertIn("· TB-9</span>", page)
@@ -309,6 +310,30 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-truth-command="synthesize"', page)
         self.assertIn(">Retry synthesis</button>", page)
         self.assertIn('href="/truth/agent-log">View log</a>', page)
+
+    def test_state_hub_hides_current_sync_and_keeps_synthesis_age_in_the_header(self) -> None:
+        value = {
+            "content_revision": "revision",
+            "refresh": "idle",
+            "companion": {"status": "current", "label": "Companion current", "detail": "Ready"},
+            "git": {"status": "current", "label": "Git refs fetched", "detail": "Ready"},
+            "synthesis": {
+                "status": "current",
+                "label": "Synthesis current",
+                "compact": "Updated 2 hours ago",
+                "detail": "Updated 2 hours ago. No commits since.",
+            },
+        }
+        with mock.patch.object(viewer.truth, "state", return_value=value):
+            rendered = page_ticket(self.root, "TB-9", "fingerprint", work_token="csrf-token")
+
+        page = rendered.decode("utf-8")
+        companion = page.split('data-truth-item="companion"', 1)[1].split(">", 1)[0]
+        git_state = page.split('data-truth-item="git"', 1)[1].split(">", 1)[0]
+        self.assertIn(" hidden", companion)
+        self.assertIn(" hidden", git_state)
+        self.assertIn('class="ticket-title-row"', page)
+        self.assertIn('<span class="truth-compact">Updated 2 hours ago</span>', page)
 
     def test_state_hub_renders_never_requested_synthesis_as_a_start_action(self) -> None:
         value = {
@@ -474,6 +499,41 @@ class ViewerTests(unittest.TestCase):
         self.assertTrue(value["opened"])
         self.assertEqual(dispatched.call_args.args[0], "editor.open")
         self.assertEqual(dispatched.call_args.args[1]["path"], "ticketbunker/viewer.py")
+        self.assertEqual(dispatched.call_args.args[2].transport, "http")
+
+    def test_source_resolve_http_route_uses_the_shared_guarded_command(self) -> None:
+        server = serve(self.root, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        token = server.RequestHandlerClass.token
+        result = {
+            "ok": True,
+            "command": "editor.resolve",
+            "path": "ticketbunker/viewer.py",
+            "absolute_path": "/checkout/ticketbunker/viewer.py",
+            "line": 1,
+            "reference": "/checkout/ticketbunker/viewer.py:1",
+        }
+        try:
+            with mock.patch.object(commands, "dispatch", return_value=result) as dispatched:
+                request = Request(
+                    f"{base}/source/resolve",
+                    data=json.dumps({"path": "ticketbunker/viewer.py", "line": 1}).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-TicketBunker-Token": token,
+                    },
+                    method="POST",
+                )
+                value = json.loads(urlopen(request).read().decode())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(value["reference"], "/checkout/ticketbunker/viewer.py:1")
+        self.assertEqual(dispatched.call_args.args[0], "editor.resolve")
         self.assertEqual(dispatched.call_args.args[2].transport, "http")
 
     def test_builtin_source_editor_reads_and_saves_through_guarded_commands(self) -> None:
@@ -798,6 +858,8 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-source-path="ticketbunker/viewer.py"', rendered)
         self.assertIn('data-source-line="1"', rendered)
         self.assertIn("@[ticketbunker/viewer.py]:1</button>", rendered)
+        self.assertIn('class="source-copy" type="button" data-source-copy', rendered)
+        self.assertIn('title="Copy absolute path"', rendered)
         self.assertIn('data-source-path="ticketbunker/editor.py"', rendered)
         self.assertIn('data-source-line="2"', rendered)
         self.assertIn("ticketbunker/editor.py:2</button>", rendered)
@@ -817,6 +879,7 @@ class ViewerTests(unittest.TestCase):
         )[1]
         for panel in (combined, branch):
             self.assertIn('class="source-link" type="button"', panel)
+            self.assertIn('class="source-copy" type="button"', panel)
             self.assertIn('data-source-path="ticketbunker/viewer.py"', panel)
             self.assertIn('data-source-line="1"', panel)
 

@@ -267,6 +267,19 @@ def read_source(root: Path, path: str, line: int = 1) -> dict[str, Any]:
     }
 
 
+def resolve_source(root: Path, path: str, line: int = 1) -> dict[str, Any]:
+    """Resolve one checked source reference without opening or reading it."""
+    root = Path(root).resolve()
+    source, relative = _source(root, path)
+    line = _line(line)
+    return {
+        "path": relative,
+        "absolute_path": str(source),
+        "line": line,
+        "reference": f"{source}:{line}",
+    }
+
+
 def _formatted_content(content: str, settings: dict[str, Any]) -> str:
     value = content.replace("\r\n", "\n").replace("\r", "\n")
     if settings["trim_trailing_whitespace"]:
@@ -495,6 +508,15 @@ def command_read(context: commands.CommandContext, payload: dict[str, Any]) -> d
     )
 
 
+@commands.register("editor.resolve")
+def command_resolve(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    return resolve_source(
+        Path(context.project_root),
+        str(payload.get("path") or ""),
+        _line(payload.get("line")),
+    )
+
+
 @commands.register("editor.save")
 def command_save(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
     content = payload.get("content")
@@ -584,6 +606,7 @@ __all__ = [
     "local_state",
     "open_source",
     "read_source",
+    "resolve_source",
     "resolve_editor",
     "save_source",
 ]

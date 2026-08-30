@@ -135,6 +135,7 @@ class SharedTruthTests(unittest.TestCase):
             value = truth.synthesis_state(self.root, ticket)
 
         self.assertEqual(value["label"], "Synthesis stopped")
+        self.assertEqual(value["compact"], "Stopped")
         self.assertEqual(value["action"], "Retry synthesis")
         self.assertEqual(value["command"], "synthesize")
         self.assertEqual(value["log_url"], "/truth/agent-log")
@@ -202,6 +203,7 @@ class SharedTruthTests(unittest.TestCase):
 
         self.assertEqual(value["label"], "Synthesis needs update")
         self.assertEqual(value["changes"], 1)
+        self.assertEqual(value["compact"], "Updated 2 hours ago")
         self.assertIn("Updated 2 hours ago", value["detail"])
         self.assertIn("1 commit since", value["detail"])
 

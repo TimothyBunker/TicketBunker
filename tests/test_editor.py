@@ -61,6 +61,17 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(value["editor"], "TicketBunker")
         external.assert_not_called()
 
+    def test_source_reference_resolves_to_a_guarded_absolute_path(self) -> None:
+        value = commands.dispatch(
+            "editor.resolve",
+            {"path": "src/main.py", "line": 2},
+            commands.CommandContext(self.root, transport="test"),
+        )
+
+        self.assertEqual(value["path"], "src/main.py")
+        self.assertEqual(value["absolute_path"], str(self.root / "src" / "main.py"))
+        self.assertEqual(value["reference"], f"{self.root / 'src' / 'main.py'}:2")
+
     def test_unavailable_external_editor_falls_back_to_the_included_editor(self) -> None:
         config.save({"editor_mode": "external", "editor": "vim"})
         problem = commands.CommandRejected(

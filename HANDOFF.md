@@ -163,13 +163,14 @@ exercise unless a live boundary is explicitly called out.
   branch remains selectable with a direct Synthesize empty state before its
   first report. Before the first report, there is a direct empty state rather
   than a meaningless Combined selector.
-- A Companion / Git refs / Synthesis strip exposes cached, refreshing, current,
-  outdated, stopped, and publication-pending states with direct actions.
-  Synthesis is explicitly started with Synthesize, Update synthesis, or Retry
-  synthesis. The state names the last successful age and commits since when
-  known. A failed run exposes View log; its localhost-only page shows a bounded,
-  escaped tail and the exact `.git/ticketbunker/automatic-agent/agent.log`
-  path. The browser reloads only when ticket data or refs change.
+- A compact state cluster sits beside the ticket title. Healthy Companion and
+  Git refs are hidden; loading, cached, and stopped states surface as small
+  dots. Synthesis stays visible as a dot plus `Updated <age>` when known, or its
+  concise state when no successful update exists. Hover, focus, and click reveal
+  the full detail and Synthesize, Update synthesis, Retry synthesis, or View log
+  action. The localhost log page shows a bounded, escaped tail and the exact
+  `.git/ticketbunker/automatic-agent/agent.log` path. The browser reloads only
+  when ticket data or refs change.
 - One local Pi coworker session exists per user and ticket across every branch.
   The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
   scope. Category actions and the persistent launcher are icon-only chat
@@ -187,8 +188,11 @@ exercise unless a live boundary is explicitly called out.
   full trails, and coworker copy. The default is the included localhost source
   editor. `editor.read` confines paths and bounded UTF-8 content to the current
   checkout; `editor.save` requires the opened digest and atomically writes one
-  file without staging or Git. External editors remain an explicit option and
-  fall back to the included editor when unavailable.
+  file without staging or Git. A small clipboard control follows every source
+  link; `editor.resolve` applies the same checkout guard and copies the absolute
+  local path plus line without opening or reading the file. External editors
+  remain an explicit option and fall back to the included editor when
+  unavailable.
 - `tb view` now opens the browser and returns immediately. Its detached
   localhost worker tracks page presence, survives in-app navigation, and shuts
   down shortly after the last tab closes. Its health response carries the
@@ -203,7 +207,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.17 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.18 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -246,12 +250,14 @@ read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
-fallback, and stale-viewer replacement. The current full suite is 173 tests.
+fallback, stale-viewer replacement, compact shared-truth indicators, and
+guarded absolute-path copying. The current full suite is 176 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
-the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,
-scope selection, Work panel, responsive stacking, and JavaScript deep links are
-inspected. A headless-Chrome interaction check also selects Combined synthesis,
+the persistent rail, compact shared-truth indicators, coworker launcher/panel,
+topic tabs, scope selection, Work panel, responsive stacking, and JavaScript
+deep links are inspected. A headless-Chrome interaction check also selects
+Combined synthesis,
 opens its contextual bubble, and verifies the quote reaches the correct topic
 composer. This does not replace the HTTP/CSRF tests.
 

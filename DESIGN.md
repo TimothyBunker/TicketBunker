@@ -467,13 +467,18 @@ comment, report, or lifecycle editor. Every ticket page renders immediately
 from cached companion data and local or already-fetched Git refs. After the
 response is sent, one coalesced background command fast-forwards the ignored
 companion checkouts when safe, fetches source remote-tracking refs without
-touching the source worktree, and never queues synthesis. A quiet three-part
-strip names Companion, Git refs, and Synthesis state. Synthesis shows when it
-last succeeded and the number of commits since that report; its button is the
-only viewer route that starts the model. While running, the state stays visibly
-busy. On failure, Retry synthesis and View log sit together; the localhost-only
-log page escapes and bounds the output and names the exact local path. Every
-stopped state preserves the prior report and names the next action. `tb view`
+touching the source worktree, and never queues synthesis. A compact header
+cluster replaces the full-width status strip. Healthy Companion and Git
+refs are absent; loading, cached, and stopped states appear as small stateful
+dots beside the title. Synthesis remains visible as its own dot plus `Updated
+<age>` when known, or its concise actionable state when no successful update
+exists. Hover, keyboard focus, and click reveal each full label, detail, and
+action, so touch and keyboard users do not depend on hover. The synthesis
+button remains the only viewer route that starts the model. While running, the
+state stays visibly busy. On failure, Retry synthesis and View log sit together
+inside the disclosure; the localhost-only log page escapes and bounds the
+output and names the exact local path. Every stopped state preserves the prior
+report and names the next action. `tb view`
 normally starts this localhost server as a detached helper, opens the browser,
 and returns the terminal immediately. Per-page presence and close signals keep
 it alive across navigation and stop it shortly after the final tab closes;
@@ -493,6 +498,9 @@ default target is TicketBunker's included browser editor, served by the same
 localhost viewer and requiring no system editor or terminal launcher. Its
 `editor.read` command resolves symlinks, rejects anything outside the current
 checkout or absent on the current branch, and admits only bounded UTF-8 text.
+Every rendered source reference ends with a small copy control. Its
+`editor.resolve` command applies the same checkout boundary without reading or
+opening the file, then copies the absolute local path and line to the clipboard.
 `editor.save` requires the digest returned by that read, refuses to overwrite a
 file changed since it opened, and atomically replaces only that file. It does
 not stage, format with an external process, or run Git. The page preserves the

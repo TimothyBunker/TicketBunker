@@ -88,35 +88,47 @@ h1 { min-width: 0; max-width: 920px; margin: 5px 0 15px; font-size: 26px; line-h
 h2 { font-size: 16px; line-height: 1.3; margin: 0 0 14px; }
 h3 { font-size: 13px; line-height: 1.35; margin: 0 0 8px; }
 p { margin: 0 0 12px; }
+.ticket-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.ticket-title-row h1 { flex: 1 1 auto; }
 .head-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; }
 .head-facts div { display: flex; align-items: center; gap: 7px; }
 .head-badges { flex-wrap: wrap; }
 .head-updated { color: var(--muted); font-size: 12px; }
 .truth-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 0;
-  margin: 18px 0 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin: 7px 0 0;
 }
 .truth-item {
-  display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  min-width: 190px;
-  padding: 9px 12px;
+  position: relative;
   color: var(--body);
   font-size: 12px;
 }
-.truth-item + .truth-item { border-left: 1px solid var(--line); }
+.truth-item[hidden] { display: none; }
+.truth-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+.truth-trigger::-webkit-details-marker { display: none; }
+.truth-trigger:hover, .truth-item[open] .truth-trigger { color: var(--fg); background: var(--panel); }
+.truth-item.truth-synthesis .truth-trigger { border-color: var(--line); }
 .truth-dot {
   width: 8px;
   height: 8px;
-  margin-top: 5px;
+  flex: 0 0 auto;
   border: 1px solid var(--muted);
   border-radius: 50%;
   background: var(--bg);
@@ -130,7 +142,23 @@ p { margin: 0 0 12px; }
 .truth-item[data-state="failed"] .truth-dot,
 .truth-item[data-state="stopped"] .truth-dot,
 .truth-item[data-state="missing"] .truth-dot { border-color: var(--danger); background: var(--danger); }
-.truth-copy { min-width: 0; }
+.truth-compact { color: inherit; font-weight: 600; }
+.truth-popover {
+  position: absolute;
+  z-index: 450;
+  top: calc(100% + 6px);
+  right: 0;
+  display: none;
+  width: min(300px, calc(100vw - 36px));
+  padding: 10px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 5px 16px color-mix(in oklch, var(--fg) 12%, transparent);
+}
+.truth-item:hover .truth-popover,
+.truth-item:focus-within .truth-popover,
+.truth-item[open] .truth-popover { display: block; }
 .truth-label { display: block; color: var(--fg); font-weight: 650; }
 .truth-detail { display: block; min-width: 0; margin-top: 1px; color: var(--muted); overflow-wrap: anywhere; }
 .truth-action {
@@ -695,6 +723,35 @@ li { margin: 3px 0; }
   text-underline-offset: 2px;
 }
 .source-link:hover { text-decoration-color: currentColor; }
+.source-reference { display: inline; }
+.source-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  margin: 0 1px 0 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  vertical-align: text-bottom;
+}
+.source-copy:hover { color: var(--accent); background: var(--accent-soft); }
+.source-copy:disabled { color: var(--line-strong); cursor: wait; }
+.copy-icon { position: relative; width: 11px; height: 11px; }
+.copy-icon::before, .copy-icon::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+}
+.copy-icon::before { top: 0; right: 0; }
+.copy-icon::after { bottom: 0; left: 0; background: var(--bg); }
 .source-status {
   position: fixed;
   z-index: 650;
@@ -712,6 +769,7 @@ li { margin: 3px 0; }
 }
 .source-status[hidden] { display: none; }
 .source-status.error { color: var(--danger); border-color: var(--danger); }
+.source-status.success { color: var(--success); border-color: var(--success); }
 .source-body { min-width: 320px; overflow: hidden; }
 .source-shell {
   display: grid;
@@ -869,9 +927,9 @@ li { margin: 3px 0; }
   .project-link { grid-template-columns: 1fr; gap: 3px; }
   .project-meta { text-align: left; }
   .pagination { justify-content: space-between; }
-  .truth-strip { grid-template-columns: minmax(0, 1fr); }
-  .truth-item { min-width: 0; }
-  .truth-item + .truth-item { border-left: 0; border-top: 1px solid var(--line); }
+  .ticket-title-row { display: block; }
+  .truth-strip { justify-content: flex-start; margin: -6px 0 12px; }
+  .truth-popover { right: auto; left: 0; }
   .coworker-panel {
     right: max(8px, env(safe-area-inset-right));
     bottom: max(8px, env(safe-area-inset-bottom));
@@ -890,7 +948,8 @@ li { margin: 3px 0; }
   .source-footer span:first-child { display: none; }
 }
 @media (pointer: coarse) {
-  .coworker-inline, .coworker-tab, .truth-action { min-height: 44px; }
+  .coworker-inline, .coworker-tab, .truth-action, .truth-trigger, .source-copy { min-height: 44px; }
+  .source-copy { width: 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
@@ -1106,9 +1165,20 @@ function updateTruth(value) {
     const item = truthStrip.querySelector(`[data-truth-item="${key}"]`);
     const current = value[key] || {};
     if (!item) return;
-    item.dataset.state = current.status || 'cached';
+    const status = current.status || 'cached';
+    item.dataset.state = status;
+    item.hidden = key !== 'synthesis' && (status === 'current' || status === 'local');
+    if (item.hidden) item.open = false;
     item.querySelector('.truth-label').textContent = current.label || key;
     item.querySelector('.truth-detail').textContent = current.detail || '';
+    const compact = item.querySelector('.truth-compact');
+    if (compact) compact.textContent = current.compact || current.label || 'Synthesis';
+    const trigger = item.querySelector('.truth-trigger');
+    if (trigger) {
+      const label = current.label || key;
+      trigger.title = label;
+      trigger.setAttribute('aria-label', current.detail ? `${label}. ${current.detail}` : label);
+    }
     const action = item.querySelector('[data-truth-action]');
     if (action) {
       action.textContent = current.action || 'Refresh';
@@ -1152,7 +1222,12 @@ async function pollTruth() {
       location.reload();
     }
   } catch (error) {
-    const detail = truthStrip.querySelector('[data-truth-item="companion"] .truth-detail');
+    const item = truthStrip.querySelector('[data-truth-item="companion"]');
+    const detail = item?.querySelector('.truth-detail');
+    if (item) {
+      item.hidden = false;
+      item.dataset.state = 'cached';
+    }
     if (detail) detail.textContent = 'The viewer kept the ticket already on screen.';
   }
 }
@@ -1332,7 +1407,17 @@ function appendSourceText(node, value) {
     link.dataset.sourcePath = match[1];
     link.dataset.sourceLine = match[2];
     link.setAttribute('aria-label', `Open ${match[1]} at line ${match[2]}`);
-    node.append(link);
+    const copy = textElement('button', 'source-copy', '');
+    copy.type = 'button';
+    copy.dataset.sourcePath = match[1];
+    copy.dataset.sourceLine = match[2];
+    copy.dataset.sourceCopy = '';
+    copy.title = 'Copy absolute path';
+    copy.setAttribute('aria-label', `Copy absolute path for ${match[1]} at line ${match[2]}`);
+    copy.append(textElement('span', 'copy-icon', ''));
+    const controls = textElement('span', 'source-reference', '');
+    controls.append(link, copy);
+    node.append(controls);
     cursor = match.index + match[0].length;
   }
   node.append(document.createTextNode(value.slice(cursor)));
@@ -1343,6 +1428,25 @@ function setSourceStatus(message, kind = '') {
   sourceStatus.textContent = message;
   sourceStatus.className = `source-status ${kind}`.trim();
   sourceStatus.hidden = !message;
+}
+
+async function writeClipboard(value) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch (error) { /* Use the local fallback below. */ }
+  const field = document.createElement('textarea');
+  field.value = value;
+  field.setAttribute('readonly', '');
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.append(field);
+  field.select();
+  const copied = document.execCommand('copy');
+  field.remove();
+  if (!copied) throw new Error(`Copy was blocked. ${value}`);
 }
 
 function renderProposal(proposal) {
@@ -1506,18 +1610,30 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) closeCoworker();
 });
 document.addEventListener('click', async (event) => {
-  const link = event.target.closest('[data-source-path][data-source-line]');
-  if (!link) return;
+  const control = event.target.closest('[data-source-path][data-source-line]');
+  if (!control) return;
   const token = viewerToken || coworkerPanel?.dataset.token || truthStrip?.dataset.token || '';
   if (!token) return;
-  link.disabled = true;
-  setSourceStatus(`Opening ${link.dataset.sourcePath}:${link.dataset.sourceLine}…`);
+  control.disabled = true;
+  const payload = {path: control.dataset.sourcePath, line: control.dataset.sourceLine};
+  const copying = control.hasAttribute('data-source-copy');
+  setSourceStatus(
+    copying
+      ? `Copying ${control.dataset.sourcePath}:${control.dataset.sourceLine}…`
+      : `Opening ${control.dataset.sourcePath}:${control.dataset.sourceLine}…`
+  );
   try {
-    const value = await jsonRequest('/source/open', {
+    const value = await jsonRequest(copying ? '/source/resolve' : '/source/open', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-TicketBunker-Token': token},
-      body: JSON.stringify({path: link.dataset.sourcePath, line: link.dataset.sourceLine})
+      body: JSON.stringify(payload)
     });
+    if (copying) {
+      await writeClipboard(value.reference);
+      setSourceStatus('Absolute path copied.', 'success');
+      window.setTimeout(() => setSourceStatus(''), 2200);
+      return;
+    }
     if (value.mode === 'builtin') {
       const query = new URLSearchParams({
         path: value.path,
@@ -1533,7 +1649,7 @@ document.addEventListener('click', async (event) => {
   } catch (error) {
     setSourceStatus(error.message, 'error');
   } finally {
-    link.disabled = false;
+    control.disabled = false;
   }
 });
 
@@ -1699,10 +1815,15 @@ def _inline(escaped: str) -> str:
         label = f"@[{path}]:{line}" if match.group(0).startswith("@[") else f"{path}:{line}"
         placeholder = f"\x1e{len(source_references)}\x1f"
         source_references.append(
-            '<button class="source-link" type="button" '
+            '<span class="source-reference"><button class="source-link" type="button" '
             f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
             f'aria-label="Open {html.escape(path, quote=True)} at line {line}">'
             f'{html.escape(label)}</button>'
+            '<button class="source-copy" type="button" data-source-copy '
+            f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
+            f'aria-label="Copy absolute path for {html.escape(path, quote=True)} at line {line}" '
+            'title="Copy absolute path"><span class="copy-icon" aria-hidden="true"></span>'
+            '</button></span>'
         )
         return placeholder
 
@@ -2917,29 +3038,39 @@ def _truth_bar(
         current = value.get(key) if isinstance(value.get(key), Mapping) else {}
         status = str(current.get("status") or "cached")
         label = str(current.get("label") or key.capitalize())
+        compact = str(current.get("compact") or (label if key == "synthesis" else ""))
         detail = str(current.get("detail") or "")
         action = str(current.get("action") or "")
         command = str(current.get("command") or "refresh")
         log_url = str(current.get("log_url") or "")
         action_html = ""
         if token:
-            hidden = "" if action else " hidden"
+            action_hidden = "" if action else " hidden"
             log_hidden = "" if log_url else " hidden"
             action_html = (
                 f'<button class="truth-action" type="button" data-truth-action '
-                f'data-truth-command="{html.escape(command, quote=True)}"{hidden}>'
+                f'data-truth-command="{html.escape(command, quote=True)}"{action_hidden}>'
                 f'{html.escape(action or "Refresh")}</button>'
                 f'<a class="truth-log" data-truth-log href="{html.escape(log_url or "/truth/agent-log", quote=True)}"'
                 f'{log_hidden}>View log</a>'
             )
+        item_hidden = " hidden" if key != "synthesis" and status in {"current", "local"} else ""
+        summary_label = f"{label}. {detail}" if detail else label
+        compact_html = (
+            f'<span class="truth-compact">{html.escape(compact)}</span>' if compact else ""
+        )
         items.append(
-            f'<div class="truth-item" data-truth-item="{key}" data-state="{html.escape(status, quote=True)}">'
-            '<span class="truth-dot" aria-hidden="true"></span><span class="truth-copy">'
+            f'<details class="truth-item truth-{key}" data-truth-item="{key}" '
+            f'data-state="{html.escape(status, quote=True)}"{item_hidden}>'
+            f'<summary class="truth-trigger" aria-label="{html.escape(summary_label, quote=True)}" '
+            f'title="{html.escape(label, quote=True)}">'
+            f'<span class="truth-dot" aria-hidden="true"></span>{compact_html}</summary>'
+            '<div class="truth-popover">'
             f'<span class="truth-label">{html.escape(label)}</span>'
-            f'<span class="truth-detail">{html.escape(detail)}</span>{action_html}</span></div>'
+            f'<span class="truth-detail">{html.escape(detail)}</span>{action_html}</div></details>'
         )
     return (
-        '<section class="truth-strip" aria-label="Shared truth" data-truth '
+        '<section class="truth-strip" aria-label="Shared truth" aria-live="polite" data-truth '
         f'data-ticket="{html.escape(ticket.id, quote=True)}" '
         f'data-project="{html.escape(project_key, quote=True)}" '
         f'data-token="{html.escape(token, quote=True)}" '
@@ -3131,8 +3262,9 @@ def page_ticket(
         f'{_validation(ticket)}'
         '<header class="ticket-head">'
         f'<div class="ticket-key">{project_html}<span class="mono">{html.escape(ticket.id)}</span></div>'
-        f'<h1>{html.escape(ticket.title or "Untitled")}</h1>{head_facts}'
-        f'{_truth_bar(root, ticket, resolved_project, work_token)}</header>'
+        '<div class="ticket-title-row">'
+        f'<h1>{html.escape(ticket.title or "Untitled")}</h1>'
+        f'{_truth_bar(root, ticket, resolved_project, work_token)}</div>{head_facts}</header>'
         f'{tabs}{panels}{_coworker_surface(root, ticket, resolved_project, work_token)}'
     )
     return _page(f"{ticket.id} — TicketBunker", body, fp)
@@ -3455,6 +3587,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/coworker/proposal/accept": "coworker.proposal.accept",
             "/coworker/proposal/dismiss": "coworker.proposal.dismiss",
             "/source/open": "editor.open",
+            "/source/resolve": "editor.resolve",
             "/source/save": "editor.save",
         }
         command = commands_by_path.get(path)
