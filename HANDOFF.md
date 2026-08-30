@@ -177,8 +177,9 @@ exercise unless a live boundary is explicitly called out.
   bubbles. The expanded surface is a right-side drawer whose arrow collapses
   it without implying that the session is closed. Topic, scope, draft,
   reference, and expanded state persist into the included source editor and
-  back. Selecting synthesis text attaches its bounded category/scope/branch
-  quote to the next message and preserves that reference in local history. Pi
+  back. Selecting synthesis or full-trail text attaches its bounded
+  category/scope/branch quote to the next message and preserves that reference
+  in local history. Pi
   receives only read/search tools. Raw chat stays below `.git`; a
   coworker reply can prepare an inert child Reader-brief proposal, and explicit
   acceptance rechecks digest/lint/anchors, updates the named children, then
@@ -188,8 +189,10 @@ exercise unless a live boundary is explicitly called out.
   Git mutations, or write Combined directly.
 - `@[relative/path]:line` and verified inline-code `relative/path:line` report
   anchors use the same clickable source control in Combined, child synthesis,
-  full trails, and coworker copy. The default is the included localhost source
-  editor. `editor.read` confines paths and bounded UTF-8 content to the current
+  full trails, and coworker copy. The path remains selectable; a drag quotes
+  it into the contextual coworker action without also opening it, while a
+  path click or the adjacent Open button retains local-open behavior. The default is the
+  included localhost source editor. `editor.read` confines paths and bounded UTF-8 content to the current
   checkout; `editor.save` requires the opened digest and atomically writes one
   file without staging or Git. A small clipboard control follows every source
   link; `editor.resolve` applies the same checkout guard and copies the absolute
@@ -212,7 +215,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.19 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.20 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,

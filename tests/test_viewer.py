@@ -859,15 +859,17 @@ class ViewerTests(unittest.TestCase):
             "- [real] Open @[ticketbunker/viewer.py]:1, then `ticketbunker/editor.py:2`."
         )
 
-        self.assertIn('class="source-link" type="button"', rendered)
+        self.assertIn('class="source-link" data-source-path=', rendered)
+        self.assertIn('title="Select to quote, or click to open"', rendered)
+        self.assertIn('class="source-open" type="button"', rendered)
         self.assertIn('data-source-path="ticketbunker/viewer.py"', rendered)
         self.assertIn('data-source-line="1"', rendered)
-        self.assertIn("@[ticketbunker/viewer.py]:1</button>", rendered)
+        self.assertIn("@[ticketbunker/viewer.py]:1</span>", rendered)
         self.assertIn('class="source-copy" type="button" data-source-copy', rendered)
         self.assertIn('title="Copy absolute path"', rendered)
         self.assertIn('data-source-path="ticketbunker/editor.py"', rendered)
         self.assertIn('data-source-line="2"', rendered)
-        self.assertIn("ticketbunker/editor.py:2</button>", rendered)
+        self.assertIn("ticketbunker/editor.py:2</span>", rendered)
 
     def test_branch_and_combined_synthesis_use_the_chat_source_control(self) -> None:
         rendered = page_ticket(self.root, "TB-9", "fingerprint")
@@ -883,8 +885,11 @@ class ViewerTests(unittest.TestCase):
             1,
         )[1]
         for panel in (combined, branch):
-            self.assertIn('class="source-link" type="button"', panel)
+            self.assertIn('class="source-link" data-source-path=', panel)
+            self.assertIn('class="source-open" type="button"', panel)
             self.assertIn('class="source-copy" type="button"', panel)
+            self.assertIn('class="trail-copy" data-synthesis-copy', panel)
+            self.assertIn('class="trail-report" data-synthesis-branch=', panel)
             self.assertIn('data-source-path="ticketbunker/viewer.py"', panel)
             self.assertIn('data-source-line="1"', panel)
 

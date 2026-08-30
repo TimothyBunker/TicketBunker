@@ -724,10 +724,13 @@ li > ul, li > ol { margin: 3px 0 2px; }
   text-decoration: underline;
   text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
   text-underline-offset: 2px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .source-link:hover { text-decoration-color: currentColor; }
+.source-link[aria-disabled="true"] { color: var(--muted); cursor: wait; }
 .source-reference { display: inline; }
-.source-copy {
+.source-open, .source-copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -742,8 +745,9 @@ li > ul, li > ol { margin: 3px 0 2px; }
   cursor: pointer;
   vertical-align: text-bottom;
 }
-.source-copy:hover { color: var(--accent); background: var(--accent-soft); }
-.source-copy:disabled { color: var(--line-strong); cursor: wait; }
+.source-open:hover, .source-copy:hover { color: var(--accent); background: var(--accent-soft); }
+.source-open:disabled, .source-copy:disabled { color: var(--line-strong); cursor: wait; }
+.source-open { margin-left: 3px; font-size: 13px; line-height: 1; }
 .copy-icon { position: relative; width: 11px; height: 11px; }
 .copy-icon::before, .copy-icon::after {
   content: "";
@@ -971,8 +975,8 @@ li > ul, li > ol { margin: 3px 0 2px; }
   .source-footer span:first-child { display: none; }
 }
 @media (pointer: coarse) {
-  .coworker-inline, .coworker-tab, .truth-action, .truth-trigger, .source-copy { min-height: 44px; }
-  .source-copy { width: 32px; }
+  .coworker-inline, .coworker-tab, .truth-action, .truth-trigger, .source-open, .source-copy { min-height: 44px; }
+  .source-open, .source-copy { width: 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
@@ -1434,11 +1438,16 @@ function appendSourceText(node, value) {
   let cursor = 0;
   for (const match of value.matchAll(pattern)) {
     node.append(document.createTextNode(value.slice(cursor, match.index)));
-    const link = textElement('button', 'source-link', match[0]);
-    link.type = 'button';
+    const link = textElement('span', 'source-link', match[0]);
     link.dataset.sourcePath = match[1];
     link.dataset.sourceLine = match[2];
-    link.setAttribute('aria-label', `Open ${match[1]} at line ${match[2]}`);
+    link.title = 'Select to quote, or click to open';
+    const open = textElement('button', 'source-open', '↗');
+    open.type = 'button';
+    open.dataset.sourcePath = match[1];
+    open.dataset.sourceLine = match[2];
+    open.title = 'Open source';
+    open.setAttribute('aria-label', `Open ${match[1]} at line ${match[2]}`);
     const copy = textElement('button', 'source-copy', '');
     copy.type = 'button';
     copy.dataset.sourcePath = match[1];
@@ -1448,7 +1457,7 @@ function appendSourceText(node, value) {
     copy.setAttribute('aria-label', `Copy absolute path for ${match[1]} at line ${match[2]}`);
     copy.append(textElement('span', 'copy-icon', ''));
     const controls = textElement('span', 'source-reference', '');
-    controls.append(link, copy);
+    controls.append(link, open, copy);
     node.append(controls);
     cursor = match.index + match[0].length;
   }
@@ -1633,7 +1642,7 @@ selectionAsk?.addEventListener('click', () => {
   window.getSelection()?.removeAllRanges();
   openCoworker(category);
 });
-document.addEventListener('mouseup', showSelectionAsk);
+document.addEventListener('mouseup', () => window.setTimeout(showSelectionAsk, 0));
 document.addEventListener('keyup', (event) => {
   if (event.key === 'Shift' || event.key.startsWith('Arrow')) showSelectionAsk();
 });
@@ -1641,14 +1650,28 @@ document.addEventListener('touchend', () => window.setTimeout(showSelectionAsk, 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) collapseCoworker();
 });
+function selectionTouches(control) {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
+  try {
+    return selection.getRangeAt(0).intersectsNode(control);
+  } catch (error) {
+    return false;
+  }
+}
 document.addEventListener('click', async (event) => {
   const control = event.target.closest('[data-source-path][data-source-line]');
   if (!control) return;
+  event.preventDefault();
+  const copying = control.hasAttribute('data-source-copy');
+  if (!copying && selectionTouches(control)) return;
+  if (control.disabled || control.getAttribute('aria-disabled') === 'true') return;
   const token = viewerToken || coworkerPanel?.dataset.token || truthStrip?.dataset.token || '';
   if (!token) return;
-  control.disabled = true;
+  const buttonControl = control.tagName === 'BUTTON';
+  if (buttonControl) control.disabled = true;
+  else control.setAttribute('aria-disabled', 'true');
   const payload = {path: control.dataset.sourcePath, line: control.dataset.sourceLine};
-  const copying = control.hasAttribute('data-source-copy');
   setSourceStatus(
     copying
       ? `Copying ${control.dataset.sourcePath}:${control.dataset.sourceLine}…`
@@ -1682,7 +1705,8 @@ document.addEventListener('click', async (event) => {
   } catch (error) {
     setSourceStatus(error.message, 'error');
   } finally {
-    control.disabled = false;
+    if (buttonControl) control.disabled = false;
+    else control.removeAttribute('aria-disabled');
   }
 });
 
@@ -1848,10 +1872,14 @@ def _inline(escaped: str) -> str:
         label = f"@[{path}]:{line}" if match.group(0).startswith("@[") else f"{path}:{line}"
         placeholder = f"\x1e{len(source_references)}\x1f"
         source_references.append(
-            '<span class="source-reference"><button class="source-link" type="button" '
+            '<span class="source-reference"><span class="source-link" '
             f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
-            f'aria-label="Open {html.escape(path, quote=True)} at line {line}">'
-            f'{html.escape(label)}</button>'
+            'title="Select to quote, or click to open">'
+            f'{html.escape(label)}</span>'
+            '<button class="source-open" type="button" '
+            f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
+            f'aria-label="Open {html.escape(path, quote=True)} at line {line}" '
+            'title="Open source">↗</button>'
             '<button class="source-copy" type="button" data-source-copy '
             f'data-source-path="{html.escape(path, quote=True)}" data-source-line="{line}" '
             f'aria-label="Copy absolute path for {html.escape(path, quote=True)} at line {line}" '
@@ -2400,12 +2428,14 @@ def _category_trail(
             f'<span class="trail-report-meta">{html.escape(metadata)}</span>' if metadata else ""
         )
         rows.append(
-            '<article class="trail-report">'
+            '<article class="trail-report" '
+            f'data-synthesis-branch="{html.escape(report.branch, quote=True)}">'
             '<div class="trail-report-head">'
             f'<div class="trail-report-name mono">{html.escape(report.branch)}'
             f'{metadata_html}</div>'
             f'<div class="trail-report-state">{_report_state_badge(report)}</div></div>'
-            f'<div class="trail-copy">{render_report(_report_section(report, label))}</div></article>'
+            f'<div class="trail-copy" data-synthesis-copy>'
+            f'{render_report(_report_section(report, label))}</div></article>'
         )
     return (
         f'<details class="category-trail" data-category="{label.casefold()}">'

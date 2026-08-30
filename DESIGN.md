@@ -458,8 +458,9 @@ only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips. Ticket, Project, and Agent reading remains strictly read-only.
 Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
 action, and the same ticket coworker is available from one bottom-right bubble.
-Selecting synthesis text reveals a contextual bubble that attaches only that
-excerpt, its category, scope, and branch to the next message. This is a local
+Selecting synthesis text or evidence inside a category's full trail reveals a
+contextual bubble that attaches only that excerpt, its category, scope, and
+branch to the next message. This is a local
 conversation and proposal surface, not a second report writer. Its expanded
 surface is a right-side drawer with a collapse control, not a close action;
 topic, scope, draft, attached reference, and expanded state survive navigation
@@ -497,7 +498,10 @@ can be closed.
 Verified source locations may use `@[relative/path]:line` in report or coworker
 copy. Existing report synthesis may also carry a verified inline-code
 `relative/path:line` anchor. The viewer renders both forms as the same explicit
-local-open control in Combined, child synthesis, full trails, and chat. The
+local-open control in Combined, child synthesis, full trails, and chat. Its
+path text remains selectable: dragging across it suppresses file opening and
+feeds the ordinary synthesis-selection coworker action, while a click on the
+path or activation of its adjacent Open button opens it. The
 default target is TicketBunker's included browser editor, served by the same
 localhost viewer and requiring no system editor or terminal launcher. Its
 `editor.read` command resolves symlinks, rejects anything outside the current

@@ -282,15 +282,16 @@ If companion publication stops, the accepted local report remains visible as
 **Companion publish pending** with its next action.
 
 The category actions and persistent launcher are compact chat bubbles.
-Highlighting part of a synthesis reveals a contextual bubble; pressing it
-attaches the selected excerpt, topic, report scope, and branch to the next local
+Highlighting part of a synthesis or its full trail reveals a contextual bubble;
+pressing it attaches the selected excerpt, topic, report scope, and branch to the next local
 coworker message, and the quote remains visible in conversation history. The
 expanded coworker is a right-side drawer; its arrow collapses it without ending
 the ticket session. Its topic, scope, draft, reference, and expanded state stay
 with you when a linked source file opens.
 Verified locations written as `@[relative/path]:line` are clickable. Verified
 inline-code `relative/path:line` anchors in Combined, branch synthesis, and
-full trails use that same control, matching coworker chat. The same
+full trails use that same control, matching coworker chat. Drag across the path
+to quote it to the contextual coworker bubble; click it to open the file. The same
 guarded operation is available as `tb open '@[relative/path]:line'`; it rejects
 paths outside the checkout and opens the current branch's file in the included
 localhost editor. A clipboard control after every source link resolves and
