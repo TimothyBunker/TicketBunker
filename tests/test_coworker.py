@@ -214,6 +214,38 @@ class CoworkerTests(unittest.TestCase):
         self.assertEqual(result["messages"][0]["reference"], reference)
         self.assertEqual(run_pi.call_args.args[-1], reference)
 
+    def test_selected_source_reference_is_guarded_persisted_and_sent_to_pi(self) -> None:
+        reference = {
+            "kind": "source",
+            "category": "what",
+            "scope": "combined",
+            "branch": "",
+            "path": "source.py",
+            "line_start": 1,
+            "line_end": 1,
+            "unsaved": False,
+            "text": "VALUE = 1",
+        }
+        response = {"reply": "That selection defines the current value.", "proposal": None}
+        with mock.patch.object(
+            coworker, "_run_pi", return_value=(response, {"harness": "pi"})
+        ) as run_pi:
+            with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+                result = commands.dispatch(
+                    "coworker.chat",
+                    {
+                        "ticket": "TB-9",
+                        "category": "what",
+                        "scope": "combined",
+                        "message": "Explain this source selection.",
+                        "reference": reference,
+                    },
+                    commands.CommandContext(self.root, transport="test"),
+                )
+
+        self.assertEqual(result["messages"][0]["reference"], reference)
+        self.assertEqual(run_pi.call_args.args[-1], reference)
+
     def test_rejected_generated_proposal_keeps_validator_details_out_of_chat(self) -> None:
         response = {
             "reply": "I prepared a report correction.",

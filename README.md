@@ -252,7 +252,8 @@ opened. Listing never composes report bodies or claims a ticket into the source
 repository.
 
 On a ticket, Lifecycle and Branches remain in one right rail while Ticket and
-Agent switch the center view. Branch state and the Work control therefore stay
+Agent switch the center view. Descriptions and reports retain nested ordered
+and unordered Markdown lists. Branch state and the Work control therefore stay
 in the same place while reading tracker details or agent evidence. Small status
 indicators sit beside the ticket title. Healthy Companion and Git refs stay out
 of sight; loading, cached, or stopped states surface as dots. Synthesis keeps a
@@ -283,7 +284,10 @@ If companion publication stops, the accepted local report remains visible as
 The category actions and persistent launcher are compact chat bubbles.
 Highlighting part of a synthesis reveals a contextual bubble; pressing it
 attaches the selected excerpt, topic, report scope, and branch to the next local
-coworker message, and the quote remains visible in conversation history.
+coworker message, and the quote remains visible in conversation history. The
+expanded coworker is a right-side drawer; its arrow collapses it without ending
+the ticket session. Its topic, scope, draft, reference, and expanded state stay
+with you when a linked source file opens.
 Verified locations written as `@[relative/path]:line` are clickable. Verified
 inline-code `relative/path:line` anchors in Combined, branch synthesis, and
 full trails use that same control, matching coworker chat. The same
@@ -294,7 +298,10 @@ copies its absolute local path plus line through that same checkout guard. Save
 checks that the file has not changed since it opened and
 atomically writes only that file; it never stages or runs Git. Configure
 indentation, wrapping, save cleanup, or an optional external editor on `tb
-config` → Local settings.
+config` → Local settings. The editor toolbar links directly back to the ticket.
+Select source text and use **Ask about selection** to attach its guarded path,
+line range, and bounded text to the same coworker; unsaved selections are
+labeled as drafts.
 
 `tb view` opens the browser by default and releases the terminal after the
 localhost helper is ready. The helper follows live browser tabs and stops a few

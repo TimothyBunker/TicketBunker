@@ -152,8 +152,8 @@ exercise unless a live boundary is explicitly called out.
   the same reference query.
 - A ticket page has explicit Ticket and Agent tabs. Ticket is a compact
   Jira-shaped read surface: project, title, mapped status, labels, source update
-  time, rich description/acceptance criteria, activity, useful details, and a
-  Metadata disclosure for transport fields.
+  time, rich description/acceptance criteria with nested list rendering,
+  activity, useful details, and a Metadata disclosure for transport fields.
 - One Lifecycle and Branches rail persists beside both tabs. Agent work owns
   only the center Agent surface. Combined is the mechanically generated master
   and separates each branch visibly;
@@ -174,7 +174,10 @@ exercise unless a live boundary is explicitly called out.
 - One local Pi coworker session exists per user and ticket across every branch.
   The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
   scope. Category actions and the persistent launcher are icon-only chat
-  bubbles. Selecting synthesis text attaches its bounded category/scope/branch
+  bubbles. The expanded surface is a right-side drawer whose arrow collapses
+  it without implying that the session is closed. Topic, scope, draft,
+  reference, and expanded state persist into the included source editor and
+  back. Selecting synthesis text attaches its bounded category/scope/branch
   quote to the next message and preserves that reference in local history. Pi
   receives only read/search tools. Raw chat stays below `.git`; a
   coworker reply can prepare an inert child Reader-brief proposal, and explicit
@@ -190,9 +193,11 @@ exercise unless a live boundary is explicitly called out.
   checkout; `editor.save` requires the opened digest and atomically writes one
   file without staging or Git. A small clipboard control follows every source
   link; `editor.resolve` applies the same checkout guard and copies the absolute
-  local path plus line without opening or reading the file. External editors
-  remain an explicit option and fall back to the included editor when
-  unavailable.
+  local path plus line without opening or reading the file. The editor toolbar
+  names the originating ticket as its back destination. Selecting bounded
+  source text can attach its guarded path, line range, text, and saved/draft
+  state to the same ticket coworker. External editors remain an explicit option
+  and fall back to the included editor when unavailable.
 - `tb view` now opens the browser and returns immediately. Its detached
   localhost worker tracks page presence, survives in-app navigation, and shuts
   down shortly after the last tab closes. Its health response carries the
@@ -207,7 +212,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.18 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.19 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -250,16 +255,19 @@ read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
-fallback, stale-viewer replacement, compact shared-truth indicators, and
-guarded absolute-path copying. The current full suite is 176 tests.
+fallback, stale-viewer replacement, compact shared-truth indicators, guarded
+absolute-path copying, nested Markdown lists, and source-selection coworker
+references. The current full suite is 178 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,
 topic tabs, scope selection, Work panel, responsive stacking, and JavaScript
 deep links are inspected. A headless-Chrome interaction check also selects
-Combined synthesis,
-opens its contextual bubble, and verifies the quote reaches the correct topic
-composer. This does not replace the HTTP/CSRF tests.
+Combined synthesis, opens its contextual bubble, and verifies the quote reaches
+the correct topic composer. The included editor is checked at desktop and
+mobile widths; a real textarea selection opens the drawer with its source
+reference, survives reload, collapses, and reopens without horizontal overflow.
+This does not replace the HTTP/CSRF tests.
 
 ## Existing agent pipeline
 

@@ -412,8 +412,9 @@ p { margin: 0 0 12px; }
 .tag.spec { color: var(--warning); }
 code { padding: 1px 3px; border-radius: 3px; background: var(--panel); color: var(--fg); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; overflow-wrap: anywhere; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
-ul { margin: 6px 0 12px; padding-left: 21px; }
+ul, ol { margin: 6px 0 12px; padding-left: 21px; }
 li { margin: 3px 0; }
+li > ul, li > ol { margin: 3px 0 2px; }
 .catalog { max-width: 1120px; }
 .catalog-nav { display: flex; gap: 22px; margin: 0 0 26px; border-bottom: 1px solid var(--line); }
 .catalog-nav a {
@@ -524,18 +525,19 @@ li { margin: 3px 0; }
 .coworker-panel {
   position: fixed;
   z-index: 400;
-  right: max(20px, env(safe-area-inset-right));
-  bottom: max(20px, env(safe-area-inset-bottom));
+  top: 0;
+  right: 0;
+  bottom: 0;
   display: grid;
   grid-template-rows: auto auto auto minmax(120px, 1fr) auto;
   width: min(430px, calc(100vw - 32px));
-  max-height: min(680px, calc(100vh - 40px));
+  max-height: 100dvh;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border: 0;
+  border-left: 1px solid var(--line-strong);
   background: var(--bg);
-  box-shadow: 0 14px 38px color-mix(in oklch, var(--fg) 18%, transparent);
-  transform-origin: bottom right;
+  box-shadow: -8px 0 28px color-mix(in oklch, var(--fg) 14%, transparent);
+  transform-origin: center right;
   transition: opacity 180ms var(--ease-out-quart), transform 180ms var(--ease-out-quart);
 }
 .coworker-panel[hidden] { display: none; }
@@ -549,7 +551,7 @@ li { margin: 3px 0; }
   border-bottom: 1px solid var(--line);
 }
 .coworker-title { color: var(--fg); font-size: 15px; font-weight: 700; }
-.coworker-close {
+.coworker-collapse {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -561,6 +563,7 @@ li { margin: 3px 0; }
   cursor: pointer;
   font-size: 20px;
 }
+.coworker-collapse:hover { color: var(--fg); background: var(--panel); }
 .coworker-tabs { display: flex; padding: 0 10px; border-bottom: 1px solid var(--line); }
 .coworker-tab {
   min-height: 44px;
@@ -780,6 +783,9 @@ li { margin: 3px 0; }
   margin: 0;
   padding: 0;
 }
+@media (min-width: 1001px) {
+  .source-body.coworker-open .source-shell { width: calc(100vw - 430px); }
+}
 .source-toolbar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -887,6 +893,25 @@ li { margin: 3px 0; }
   background: var(--panel);
   font-size: 11px;
 }
+.source-footer-tools { display: flex; align-items: center; gap: 12px; }
+.source-selection-ask {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--body);
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+.source-selection-ask[hidden] { display: none; }
+.source-selection-ask:hover { color: var(--accent); border-color: var(--accent); }
+.source-selection-ask:disabled { color: var(--muted); border-color: var(--line); cursor: default; }
+.source-selection-ask .chat-icon { width: 14px; height: 14px; }
 .source-position { color: var(--body); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 @media (min-width: 761px) and (max-width: 1000px) {
   .ticket-layout { grid-template-columns: minmax(0, 1fr) 260px; }
@@ -931,10 +956,8 @@ li { margin: 3px 0; }
   .truth-strip { justify-content: flex-start; margin: -6px 0 12px; }
   .truth-popover { right: auto; left: 0; }
   .coworker-panel {
-    right: max(8px, env(safe-area-inset-right));
-    bottom: max(8px, env(safe-area-inset-bottom));
-    width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: 100dvh;
   }
   .coworker-launcher { right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }
   .coworker-scope { align-items: stretch; flex-direction: column; gap: 4px; }
@@ -1199,7 +1222,7 @@ function preserveTicketUi() {
   if (!coworkerPanel) return;
   const key = `tb-coworker:${coworkerPanel.dataset.project || 'local'}:${coworkerPanel.dataset.ticket}`;
   sessionStorage.setItem(key, JSON.stringify({
-    open: !coworkerPanel.hidden,
+    expanded: !coworkerPanel.hidden,
     category: coworkerPanel.dataset.category || 'what',
     scope: coworkerPanel.querySelector('[data-coworker-scope]')?.value || 'combined',
     draft: coworkerPanel.querySelector('textarea[name="message"]')?.value || '',
@@ -1256,7 +1279,7 @@ truthStrip?.addEventListener('click', async (event) => {
 
 const coworkerPanel = document.querySelector('[data-coworker]');
 const coworkerLauncher = document.querySelector('[data-coworker-launcher]');
-const coworkerClose = document.querySelector('[data-coworker-close]');
+const coworkerCollapse = document.querySelector('[data-coworker-collapse]');
 const coworkerTabs = [...document.querySelectorAll('[data-coworker-tab]')];
 const coworkerScope = document.querySelector('[data-coworker-scope]');
 const coworkerMessages = document.querySelector('[data-coworker-messages]');
@@ -1298,6 +1321,7 @@ function selectedPageScope() {
 }
 
 function coworkerPageScope() {
+  if (!reportSelect) return coworkerScope?.value || 'combined';
   const selected = selectedPageScope();
   return [...(coworkerScope?.options || [])].some((option) => option.value === selected)
     ? selected
@@ -1305,6 +1329,12 @@ function coworkerPageScope() {
 }
 
 function referenceLabel(reference) {
+  if (reference.kind === 'source') {
+    const lines = reference.line_start === reference.line_end
+      ? `line ${reference.line_start}`
+      : `lines ${reference.line_start}-${reference.line_end}`;
+    return `${reference.path} · ${lines}${reference.unsaved ? ' · unsaved draft' : ''}`;
+  }
   const place = reference.branch || (reference.scope === 'combined' ? 'Combined' : 'this branch');
   return `${reference.category[0].toUpperCase()}${reference.category.slice(1)} · ${place}`;
 }
@@ -1375,15 +1405,17 @@ function openCoworker(category = coworkerCategory, focusMessage = true) {
   setCoworkerCategory(category);
   if (coworkerScope) coworkerScope.value = coworkerPageScope();
   coworkerPanel.hidden = false;
+  document.body.classList.add('coworker-open');
   coworkerLauncher.hidden = true;
   coworkerLauncher.setAttribute('aria-expanded', 'true');
   loadCoworker();
   if (focusMessage) coworkerForm?.querySelector('textarea')?.focus();
 }
 
-function closeCoworker() {
+function collapseCoworker() {
   if (!coworkerPanel || !coworkerLauncher) return;
   coworkerPanel.hidden = true;
+  document.body.classList.remove('coworker-open');
   coworkerLauncher.hidden = false;
   coworkerLauncher.setAttribute('aria-expanded', 'false');
   preserveTicketUi();
@@ -1553,7 +1585,7 @@ async function loadCoworker() {
 }
 
 coworkerLauncher?.addEventListener('click', () => openCoworker());
-coworkerClose?.addEventListener('click', closeCoworker);
+coworkerCollapse?.addEventListener('click', collapseCoworker);
 document.querySelectorAll('[data-coworker-category]').forEach((button) => {
   button.addEventListener('click', () => {
     setCoworkerReference(null);
@@ -1607,7 +1639,7 @@ document.addEventListener('keyup', (event) => {
 });
 document.addEventListener('touchend', () => window.setTimeout(showSelectionAsk, 0));
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) closeCoworker();
+  if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) collapseCoworker();
 });
 document.addEventListener('click', async (event) => {
   const control = event.target.closest('[data-source-path][data-source-line]');
@@ -1638,7 +1670,8 @@ document.addEventListener('click', async (event) => {
       const query = new URLSearchParams({
         path: value.path,
         line: String(value.line),
-        return: `${location.pathname}${location.search}${location.hash}`
+        return: document.documentElement.dataset.ticketReturn
+          || `${location.pathname}${location.search}${location.hash}`
       });
       preserveTicketUi();
       location.assign(`/source?${query}`);
@@ -1748,7 +1781,7 @@ if (coworkerPanel) {
       coworkerForm.querySelector('textarea[name="message"]').value = saved.draft;
     }
     if (saved.reference?.text) setCoworkerReference(saved.reference);
-    if (saved.open) openCoworker(coworkerCategory, false);
+    if (saved.expanded || saved.open) openCoworker(coworkerCategory, false);
   } catch (error) { /* Ignore malformed local UI state. */ }
 }
 
@@ -1866,25 +1899,41 @@ def _claim(escaped: str) -> str:
 def _render_markdown(text: str, *, claims: bool, issue_copy: bool = False) -> str:
     """Render TicketBunker's safe markdown subset after escaping input."""
     output: list[str] = []
-    list_tag = ""
+    list_stack: list[dict[str, Any]] = []
     code_lines: list[str] | None = None
 
     def close_list() -> None:
-        nonlocal list_tag
-        if list_tag:
-            output.append(f"</{list_tag}>")
-            list_tag = ""
-
-    def open_list(tag: str) -> None:
-        nonlocal list_tag
-        if list_tag == tag:
-            return
-        close_list()
-        output.append(f"<{tag}>")
-        list_tag = tag
+        while list_stack:
+            current = list_stack.pop()
+            if current["item_open"]:
+                output[-1] += "</li>"
+            output.append(f'</{current["tag"]}>')
 
     def inline(value: str) -> str:
         return _claim(value) if claims else _inline(value)
+
+    def list_item(indent: int, tag: str, value: str) -> None:
+        while list_stack and indent < list_stack[-1]["indent"]:
+            current = list_stack.pop()
+            if current["item_open"]:
+                output[-1] += "</li>"
+            output.append(f'</{current["tag"]}>')
+        if list_stack and indent == list_stack[-1]["indent"]:
+            if list_stack[-1]["tag"] == tag:
+                if list_stack[-1]["item_open"]:
+                    output[-1] += "</li>"
+            else:
+                current = list_stack.pop()
+                if current["item_open"]:
+                    output[-1] += "</li>"
+                output.append(f'</{current["tag"]}>')
+                output.append(f"<{tag}>")
+                list_stack.append({"indent": indent, "tag": tag, "item_open": False})
+        elif not list_stack or indent > list_stack[-1]["indent"]:
+            output.append(f"<{tag}>")
+            list_stack.append({"indent": indent, "tag": tag, "item_open": False})
+        output.append(f"<li>{inline(value)}")
+        list_stack[-1]["item_open"] = True
 
     for raw in text.splitlines():
         line = raw.rstrip()
@@ -1903,6 +1952,7 @@ def _render_markdown(text: str, *, claims: bool, issue_copy: bool = False) -> st
         if line.startswith("<!--"):
             continue
         escaped = html.escape(line)
+        item = re.match(r"^([ \t]*)([-*+]|\d+\.)\s+(.*)$", line)
         if not line.strip():
             close_list()
         elif line.startswith("### "):
@@ -1920,13 +1970,10 @@ def _render_markdown(text: str, *, claims: bool, issue_copy: bool = False) -> st
         elif line.strip() == "---":
             close_list()
             output.append("<hr>")
-        elif line.startswith(("- ", "* ")):
-            open_list("ul")
-            output.append(f"<li>{inline(escaped[2:])}</li>")
-        elif re.match(r"^\d+\.\s", line):
-            open_list("ol")
-            content = re.sub(r"^\d+\.\s", "", escaped, count=1)
-            output.append(f"<li>{inline(content)}</li>")
+        elif item:
+            indent = len(item.group(1).expandtabs(4))
+            tag = "ol" if item.group(2)[0].isdigit() else "ul"
+            list_item(indent, tag, html.escape(item.group(3)))
         else:
             close_list()
             output.append(f"<p>{inline(escaped)}</p>")
@@ -1964,6 +2011,7 @@ const gutter = document.querySelector('[data-source-gutter]');
 const save = document.querySelector('[data-source-save]');
 const status = document.querySelector('[data-source-save-state]');
 const position = document.querySelector('[data-source-position]');
+const sourceSelectionAsk = document.querySelector('[data-source-selection-ask]');
 let digest = source.dataset.digest;
 let savedContent = source.value;
 let saving = false;
@@ -1976,6 +2024,26 @@ function updatePosition() {
   const before = source.value.slice(0, source.selectionStart);
   const lines = before.split('\n');
   position.textContent = `Ln ${lines.length}, Col ${lines.at(-1).length + 1}`;
+}
+function selectedSource() {
+  const start = source.selectionStart;
+  const end = source.selectionEnd;
+  if (start === end) return null;
+  const text = source.value.slice(start, end);
+  const lineStart = source.value.slice(0, start).split('\n').length;
+  const lineEnd = source.value.slice(0, Math.max(start, end - 1)).split('\n').length;
+  return {text, lineStart, lineEnd};
+}
+function updateSourceSelection() {
+  if (!sourceSelectionAsk) return;
+  const selection = selectedSource();
+  sourceSelectionAsk.hidden = !selection;
+  if (!selection) return;
+  const tooLarge = selection.text.trim().length > Number(sourceSelectionAsk.dataset.maxChars || 2400);
+  sourceSelectionAsk.disabled = tooLarge;
+  sourceSelectionAsk.title = tooLarge
+    ? 'Select fewer than 2,400 characters'
+    : `Ask the ticket coworker about ${selection.lineStart === selection.lineEnd ? 'this line' : 'these lines'}`;
 }
 function updateDirty() {
   const dirty = source.value !== savedContent;
@@ -2055,7 +2123,9 @@ async function saveSource() {
 
 source.addEventListener('input', updateDirty);
 source.addEventListener('click', updatePosition);
-source.addEventListener('keyup', updatePosition);
+source.addEventListener('click', updateSourceSelection);
+source.addEventListener('keyup', () => { updatePosition(); updateSourceSelection(); });
+source.addEventListener('select', updateSourceSelection);
 source.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
     event.preventDefault(); saveSource(); return;
@@ -2064,12 +2134,29 @@ source.addEventListener('keydown', (event) => {
 });
 source.addEventListener('scroll', () => { gutter.scrollTop = source.scrollTop; });
 save.addEventListener('click', saveSource);
+sourceSelectionAsk?.addEventListener('click', () => {
+  const selection = selectedSource();
+  if (!selection || !coworkerPanel) return;
+  setCoworkerReference({
+    kind: 'source',
+    category: coworkerCategory,
+    scope: coworkerScope?.value || 'combined',
+    branch: '',
+    path: source.dataset.path,
+    line_start: selection.lineStart,
+    line_end: selection.lineEnd,
+    unsaved: source.value !== savedContent,
+    text: selection.text
+  });
+  openCoworker(coworkerCategory);
+  preserveTicketUi();
+});
 window.addEventListener('beforeunload', event => {
   if (source.value === savedContent) return;
   event.preventDefault(); event.returnValue = '';
 });
 
-updateGutter(); updateDirty();
+updateGutter(); updateDirty(); updateSourceSelection();
 const targetLine = Math.max(1, Number(source.dataset.line || 1));
 let offset = 0;
 for (let line = 1; line < targetLine; line += 1) {
@@ -2087,7 +2174,32 @@ requestAnimationFrame(() => {
 """
 
 
-def page_source(root: Path, path: str, line: int, return_to: str = "/") -> bytes:
+def _source_ticket_context(
+    root: Path, return_to: str
+) -> tuple[TicketSnapshot | None, str]:
+    path = urlsplit(return_to).path
+    project_match = re.fullmatch(
+        r"/project/([A-Z][A-Z0-9]*)/ticket/([A-Za-z0-9._-]+)", path
+    )
+    ticket_match = re.fullmatch(r"/ticket/([A-Za-z0-9._-]+)", path)
+    try:
+        if project_match:
+            project_key, ticket_id = project_match.groups()
+            return TicketCatalog(root).get_ticket(project_key, ticket_id), project_key
+        if ticket_match:
+            return TicketDatabase(root).get_ticket(ticket_match.group(1)), ""
+    except (commands.CommandRejected, FileNotFoundError, KeyError, ValueError):
+        pass
+    return None, ""
+
+
+def page_source(
+    root: Path,
+    path: str,
+    line: int,
+    return_to: str = "/",
+    work_token: str = "",
+) -> bytes:
     value = commands.dispatch(
         "editor.read",
         {"path": path, "line": line},
@@ -2097,6 +2209,23 @@ def page_source(root: Path, path: str, line: int, return_to: str = "/") -> bytes
     back = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/"
     if back.startswith("/source"):
         back = "/"
+    ticket, project_key = _source_ticket_context(root, back)
+    coworker_html = (
+        _coworker_surface(root, ticket, project_key, work_token)
+        if ticket is not None and work_token
+        else ""
+    )
+    if ticket is not None:
+        back_label = f"Back to {ticket.id}"
+    else:
+        back_label = "Back to tickets"
+    selection_action = (
+        '<button class="source-selection-ask" type="button" data-source-selection-ask '
+        f'data-max-chars="{coworker.MAX_REFERENCE_CHARS}" hidden>'
+        f'{_CHAT_ICON}<span>Ask about selection</span></button>'
+        if coworker_html
+        else ""
+    )
     wrap = "soft" if settings["line_wrap"] else "off"
     indent = "Tabs" if settings["indent_style"] == "tabs" else f'{settings["tab_size"]} spaces'
     cleanup = []
@@ -2106,13 +2235,15 @@ def page_source(root: Path, path: str, line: int, return_to: str = "/") -> bytes
         cleanup.append("final newline")
     cleanup_label = ", ".join(cleanup) if cleanup else "no save cleanup"
     document = (
-        '<!doctype html><html lang="en" data-viewer-token=""><head><meta charset="utf-8">'
+        '<!doctype html><html lang="en" data-viewer-token="" '
+        f'data-ticket-return="{html.escape(back, quote=True)}"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         '<link rel="icon" href="data:,">'
         f'<title>{html.escape(value["path"])} | TicketBunker</title><style>{_STYLE}</style></head>'
         '<body class="source-body"><main class="source-shell">'
         '<header class="source-toolbar">'
-        f'<a class="source-back" href="{html.escape(back, quote=True)}">Close</a>'
+        f'<a class="source-back" href="{html.escape(back, quote=True)}">'
+        f'<span aria-hidden="true">←</span> {html.escape(back_label)}</a>'
         '<div class="source-file">'
         f'<span class="source-path">{html.escape(value["path"])}</span>'
         f'<span class="source-branch">{html.escape(value["branch"] or "Detached checkout")}</span></div>'
@@ -2128,9 +2259,10 @@ def page_source(root: Path, path: str, line: int, return_to: str = "/") -> bytes
         f'wrap="{wrap}" spellcheck="false" '
         f'aria-label="Edit {html.escape(value["path"], quote=True)}">{html.escape(value["content"])}</textarea></div>'
         '<footer class="source-footer">'
-        f'<span>{html.escape(indent)} · {html.escape(cleanup_label)}</span>'
+        '<div class="source-footer-tools">'
+        f'<span>{html.escape(indent)} · {html.escape(cleanup_label)}</span>{selection_action}</div>'
         '<span class="source-position" data-source-position>Ln 1, Col 1</span></footer>'
-        f'</main><script>{_PRESENCE_JS}{_SOURCE_JS}</script></body></html>'
+        f'</main>{coworker_html}<script>{_POLL_JS}{_SOURCE_JS}</script></body></html>'
     )
     return document.encode("utf-8")
 
@@ -3123,7 +3255,7 @@ def _coworker_surface(
         )
     return (
         '<button class="coworker-launcher" type="button" data-coworker-launcher '
-        'aria-label="Open ticket coworker" aria-expanded="false" aria-controls="coworker-panel">'
+        'aria-label="Show ticket coworker" aria-expanded="false" aria-controls="coworker-panel">'
         f'{_CHAT_ICON}</button>'
         '<p class="source-status" data-source-status role="status" aria-live="polite" hidden></p>'
         '<button class="selection-ask" type="button" data-selection-ask '
@@ -3136,7 +3268,8 @@ def _coworker_surface(
         f'data-token="{html.escape(token, quote=True)}" hidden>'
         '<header class="coworker-titlebar">'
         f'<span class="coworker-title">{html.escape(user)} · {html.escape(ticket.id)}</span>'
-        '<button class="coworker-close" type="button" data-coworker-close aria-label="Close ticket coworker">×</button>'
+        '<button class="coworker-collapse" type="button" data-coworker-collapse '
+        'aria-label="Collapse ticket coworker" title="Collapse coworker">›</button>'
         '</header>'
         f'<div class="coworker-tabs" role="tablist" aria-label="Coworker topic">{"".join(tabs)}</div>'
         '<label class="coworker-scope"><span>Scope</span>'
@@ -3510,6 +3643,7 @@ class _Handler(BaseHTTPRequestHandler):
                     str(params.get("path") or ""),
                     line,
                     str(params.get("return") or "/"),
+                    self.token,
                 ),
             )
             return

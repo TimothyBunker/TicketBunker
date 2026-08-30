@@ -415,7 +415,8 @@ an explicit **Ticket / Agent** contract. Ticket is the default Jira-like issue
 surface. The header names the source project before the ticket, then presents
 the mapped status as the sole lifecycle ground truth beside labels and the
 source's updated time. Description and optional acceptance criteria read as
-constrained rich text. **Activity is mirrored and read-only**: legacy comments
+constrained rich text, including indentation-preserving nested ordered and
+unordered lists. **Activity is mirrored and read-only**: legacy comments
 plus provider-neutral `activity` entries (`comment`, `history`, `worklog`, `log`,
 `note`, or an integration-defined kind) retain author, text, time, and source;
 the viewer has no authoring control.
@@ -459,7 +460,10 @@ Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
 action, and the same ticket coworker is available from one bottom-right bubble.
 Selecting synthesis text reveals a contextual bubble that attaches only that
 excerpt, its category, scope, and branch to the next message. This is a local
-conversation and proposal surface, not a second report writer. The other exception is an
+conversation and proposal surface, not a second report writer. Its expanded
+surface is a right-side drawer with a collapse control, not a close action;
+topic, scope, draft, attached reference, and expanded state survive navigation
+between the ticket and its included source editor. The other exception is an
 explicit local **Work** control: a small plus beside Branches opens a form for a
 short branch name and a real base-branch choice. Its CSRF-protected POST
 dispatches the same `workflow.start` command as `tb branch`; it is not a ticket,
@@ -507,6 +511,10 @@ not stage, format with an external process, or run Git. The page preserves the
 file's LF/CRLF convention, supports configurable spaces/tabs, tab width and
 line wrapping, and can opt into deterministic trailing-whitespace and final-
 newline cleanup. Unsaved drafts stay in the browser when a save is rejected.
+The fixed toolbar names the originating ticket as its back destination. When
+the editor belongs to a ticket, selecting bounded source text reveals an Ask
+about selection control; the same ticket coworker receives the guarded relative
+path, line range, selected text, and whether that text is an unsaved draft.
 
 An external editor remains an explicit Local settings option. In that mode the
 same `editor.open` guard launches `TB_EDITOR`, the saved command,

@@ -579,7 +579,12 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('class="source-input"', page)
         self.assertIn('data-line="2"', page)
         self.assertIn('style="tab-size:4"', page)
-        self.assertIn('href="/ticket/TB-9">Close</a>', page)
+        self.assertIn('data-ticket-return="/ticket/TB-9"', page)
+        self.assertIn('href="/ticket/TB-9"><span aria-hidden="true">←</span> Back to TB-9</a>', page)
+        self.assertIn('data-coworker aria-label="Ticket coworker"', page)
+        self.assertIn('data-coworker-collapse aria-label="Collapse ticket coworker"', page)
+        self.assertIn("data-source-selection-ask", page)
+        self.assertIn("kind: 'source'", page)
         self.assertIn("data-source-save", page)
         self.assertIn("expected_digest", page)
         self.assertTrue(result["saved"])
@@ -905,6 +910,18 @@ class ViewerTests(unittest.TestCase):
         self.assertNotIn('<span class="tag real">', rendered)
         self.assertIn('<ol>\n<li>Visit <a href="https://example.com" rel="noreferrer">source</a></li>\n</ol>', rendered)
         self.assertIn("<pre><code>&lt;script&gt;</code></pre>", rendered)
+
+    def test_ticket_markdown_preserves_nested_unordered_and_ordered_lists(self) -> None:
+        rendered = render_ticket_text(
+            "- Parent\n  - First child\n  - Second child\n    1. Nested step\n- Sibling"
+        )
+
+        self.assertIn("<li>Parent\n<ul>", rendered)
+        self.assertIn("<li>First child</li>", rendered)
+        self.assertIn("<li>Second child\n<ol>", rendered)
+        self.assertIn("<li>Nested step</li>", rendered)
+        self.assertIn("<li>Sibling</li>", rendered)
+        self.assertNotIn("<p>  -", rendered)
 
     def test_legacy_report_gets_category_previews_without_inventing_a_brief(self) -> None:
         report = next(layout.paths(self.bunker)["children"].glob("*.md"))
