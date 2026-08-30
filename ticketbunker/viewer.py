@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import autoagent, commands, config, coworker, editor, layout, truth, workflow
+from . import __version__, autoagent, commands, config, coworker, editor, layout, truth, workflow
 from .api import (
     BranchSnapshot,
     ReportSnapshot,
@@ -3205,9 +3205,10 @@ def _command_problem(exc: commands.CommandRejected, *, mutating: bool) -> Viewer
         state = "The browser kept your draft. TicketBunker did not change the source file."
         action = action or "Check the file state and local permissions, then retry Save."
     elif code.startswith("source_editor"):
-        title = "Editor not ready"
+        title = "Source link did not open"
+        message = "TicketBunker could not start the optional external editor."
         state = "No editor was opened and your source files were not changed."
-        action = action or "Open tb config, choose Local settings, select an editor, then retry the link."
+        action = action or "Select Included editor in Local settings, then retry the link."
     elif code.startswith("source_"):
         title = "Source link unavailable"
         state = "No editor was opened and your source files were not changed."
@@ -3355,6 +3356,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "launch": str(getattr(server, "launch_id", "")),
                     "root": str(root),
+                    "version": __version__,
                 },
             )
             return

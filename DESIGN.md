@@ -480,6 +480,11 @@ it alive across navigation and stop it shortly after the final tab closes;
 stale sessions expire. `--foreground` retains an attached diagnostic mode and
 `--no-open` suppresses browser launch.
 
+The local health response identifies the TicketBunker version. After an update,
+`tb view` never reuses an older detached worker for the same project; it opens
+the current viewer on a nearby loopback port and tells the user the older tab
+can be closed.
+
 Verified source locations may use `@[relative/path]:line` in report or coworker
 copy. Existing report synthesis may also carry a verified inline-code
 `relative/path:line` anchor. The viewer renders both forms as the same explicit
@@ -498,8 +503,11 @@ newline cleanup. Unsaved drafts stay in the browser when a save is rejected.
 An external editor remains an explicit Local settings option. In that mode the
 same `editor.open` guard launches `TB_EDITOR`, the saved command,
 `VISUAL`/`EDITOR`, Git's `core.editor`, or automatic `vim` then `nano`, without
-a shell. On Windows it also recognizes Git's bundled Vim. Opening or saving is
-always a user action and grants the coworker no source-writing capability.
+a shell. On Windows it also recognizes Git's bundled Vim. If that optional
+editor is absent, cannot start, or requires a terminal launcher that is not
+available, the same source-link action falls back to TicketBunker's included
+editor. Opening or saving is always a user action and grants the coworker no
+source-writing capability.
 Neither
 `tb view` nor `tb open` enters the CLI's companion-publication tail; both are
 machine-local actions even in a connected project.

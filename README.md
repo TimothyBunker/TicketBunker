@@ -299,7 +299,10 @@ config` → Local settings.
 localhost helper is ready. The helper follows live browser tabs and stops a few
 seconds after the final tab closes. Use `--no-open` when you only want the URL,
 or `--foreground` when debugging the server itself. Starting the viewer or
-opening a source reference never publishes companion data.
+opening a source reference never publishes companion data. If an optional
+external editor cannot open, the source link falls back to the included editor.
+After a TicketBunker update, `tb view` detects an older detached worker and
+opens the current viewer instead of reconnecting to stale behavior.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

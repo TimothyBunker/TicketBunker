@@ -416,27 +416,39 @@ def _terminal_argv(argv: list[str]) -> list[str]:
     )
 
 
+def _builtin_open_result(relative: str, line: int, *, fallback: str = "") -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "opened": True,
+        "mode": "builtin",
+        "path": relative,
+        "line": line,
+        "editor": "TicketBunker",
+    }
+    if fallback:
+        value["fallback"] = fallback
+    return value
+
+
 def open_source(root: Path, path: str, line: int) -> dict[str, Any]:
     root = Path(root).resolve()
     source, relative = _source(root, path)
     line = _line(line)
     if local_state(root)["editor_mode"] == "builtin":
-        return {
-            "opened": True,
-            "mode": "builtin",
-            "path": relative,
-            "line": line,
-            "editor": "TicketBunker",
-        }
-    editor = _configured_editor(root)
-    if not editor:
-        raise commands.CommandRejected(
-            "source_editor_missing",
-            "No local editor was found. Open 'tb config' and choose Local settings, then select an editor.",
-        )
-    argv, terminal = _editor_argv(editor, source, line)
-    if terminal:
-        argv = _terminal_argv(argv)
+        return _builtin_open_result(relative, line)
+    try:
+        editor = _configured_editor(root)
+        if not editor:
+            raise commands.CommandRejected(
+                "source_editor_missing",
+                "No external editor was found.",
+            )
+        argv, terminal = _editor_argv(editor, source, line)
+        if terminal:
+            argv = _terminal_argv(argv)
+    except commands.CommandRejected as exc:
+        if exc.code.startswith("source_editor"):
+            return _builtin_open_result(relative, line, fallback=exc.code)
+        raise
     kwargs: dict[str, Any] = {
         "cwd": str(root),
         "stdin": subprocess.DEVNULL,
@@ -454,12 +466,8 @@ def open_source(root: Path, path: str, line: int) -> dict[str, Any]:
         kwargs["start_new_session"] = True
     try:
         subprocess.Popen(argv, **kwargs)
-    except OSError as exc:
-        raise commands.CommandRejected(
-            "source_editor_failed",
-            f"The configured editor could not start ({exc}). Open 'tb config', choose Local settings, "
-            "and select another editor.",
-        ) from exc
+    except OSError:
+        return _builtin_open_result(relative, line, fallback="source_editor_failed")
     return {
         "opened": True,
         "mode": "external",

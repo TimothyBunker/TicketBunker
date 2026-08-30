@@ -547,6 +547,7 @@ class ViewerTests(unittest.TestCase):
         try:
             health = json.loads(urlopen(f"{base}/_viewer/health").read().decode())
             self.assertEqual(health["launch"], "test-launch")
+            self.assertEqual(health["version"], viewer.__version__)
             presence("/_viewer/presence")
             presence("/_viewer/close")
             with server._presence_lock:
@@ -819,15 +820,17 @@ class ViewerTests(unittest.TestCase):
             self.assertIn('data-source-path="ticketbunker/viewer.py"', panel)
             self.assertIn('data-source-line="1"', panel)
 
-    def test_source_open_error_names_the_editor_fix_without_git_recovery_copy(self) -> None:
+    def test_source_open_error_names_the_included_editor_without_configuration_jargon(self) -> None:
         problem = viewer._command_problem(
             commands.CommandRejected("source_editor_missing", "No local editor was found."),
             mutating=True,
         )
 
-        self.assertEqual(problem.title, "Editor not ready")
-        self.assertIn("tb config", problem.action)
+        self.assertEqual(problem.title, "Source link did not open")
+        self.assertIn("Included editor", problem.action)
         self.assertIn("Local settings", problem.action)
+        self.assertNotIn("TB_EDITOR", problem.message)
+        self.assertNotIn("terminal launcher", problem.message)
         self.assertNotIn("git status", problem.action.casefold())
 
     def test_ticket_markup_is_rich_but_does_not_invent_provenance(self) -> None:

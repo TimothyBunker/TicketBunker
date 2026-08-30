@@ -83,7 +83,9 @@ exercise unless a live boundary is explicitly called out.
   included browser source editor is the default; indentation, tab width,
   wrapping, deterministic save cleanup, and the optional external command are
   stored in `~/.tbconfig` through `local.editor.update`. `tb config --editor`
-  uses that same command and does not publish companion data.
+  uses that same command and does not publish companion data. If an explicitly
+  selected external editor cannot launch, source links fall back to the
+  included editor instead of asking the user to configure a terminal launcher.
 - `tb doctor [--json] [--offline]` checks Git identity, locator/ignore state,
   companion checkouts and remote heads, resolved configuration, ticket index,
   credential presence, hooks, and worktree cleanliness. Every failure names a
@@ -185,11 +187,14 @@ exercise unless a live boundary is explicitly called out.
   full trails, and coworker copy. The default is the included localhost source
   editor. `editor.read` confines paths and bounded UTF-8 content to the current
   checkout; `editor.save` requires the opened digest and atomically writes one
-  file without staging or Git. External editors remain an explicit option.
+  file without staging or Git. External editors remain an explicit option and
+  fall back to the included editor when unavailable.
 - `tb view` now opens the browser and returns immediately. Its detached
   localhost worker tracks page presence, survives in-app navigation, and shuts
-  down shortly after the last tab closes; `--foreground` and `--no-open` remain
-  explicit overrides.
+  down shortly after the last tab closes. Its health response carries the
+  TicketBunker version; a later `tb view` detects an older worker, starts the
+  current viewer on a nearby loopback port, and tells the user the older tab can
+  be closed. `--foreground` and `--no-open` remain explicit overrides.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -198,7 +203,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.16 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.17 has a six-platform release pipeline: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,
@@ -240,8 +245,8 @@ also cover cached-first truth refresh, private coworker session reuse,
 read-only Pi tools, selected synthesis-reference validation/persistence,
 checkout-confined editor opening, detached viewer shutdown, and gated
 child-only report updates, private proposal-rejection diagnostics, and shared
-CLI/HTTP local editor selection and guarded built-in source saves. The current
-full suite is 171 tests.
+CLI/HTTP local editor selection, guarded built-in source saves, external-editor
+fallback, and stale-viewer replacement. The current full suite is 173 tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, shared-truth strip, coworker launcher/panel, topic tabs,

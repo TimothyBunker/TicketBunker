@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import agent_runtime, autoagent, commands, config, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
+from . import __version__, agent_runtime, autoagent, commands, config, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -1726,12 +1726,26 @@ def cmd_open_source(args: argparse.Namespace) -> int:
         from urllib.parse import urlencode
 
         query = urlencode({"path": result["path"], "line": result["line"]})
-        target = f"http://127.0.0.1:{args.port}/source?{query}"
+        target = f"http://127.0.0.1:{viewer_args.port}/source?{query}"
         webbrowser.open(target)
         print(f"opened {result['path']}:{result['line']} in the TicketBunker editor")
         return 0
     print(f"opened {result['path']}:{result['line']} in {result['editor']}")
     return 0
+
+
+def _next_viewer_port(port: int) -> int | None:
+    """Return a nearby loopback port that is currently available."""
+    import socket
+
+    for candidate in range(port + 1, min(port + 20, 65535) + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", candidate))
+            except OSError:
+                continue
+        return candidate
+    return None
 
 
 def cmd_view(args: argparse.Namespace) -> int:
@@ -1741,7 +1755,8 @@ def cmd_view(args: argparse.Namespace) -> int:
         return 1
     from . import viewer
 
-    url = f"http://127.0.0.1:{args.port}/"
+    port = args.port
+    url = f"http://127.0.0.1:{port}/"
     scope = (
         project_mod.data_checkout(root)
         if project_mod.load_locator(root) is not None
@@ -1770,15 +1785,15 @@ def cmd_view(args: argparse.Namespace) -> int:
 
     from urllib.request import urlopen
 
-    def health() -> dict[str, object] | None:
+    def health(candidate: int) -> dict[str, object] | None:
         try:
-            with urlopen(f"http://127.0.0.1:{args.port}/_viewer/health", timeout=0.25) as response:
+            with urlopen(f"http://127.0.0.1:{candidate}/_viewer/health", timeout=0.25) as response:
                 value = json.loads(response.read().decode("utf-8"))
         except (OSError, TimeoutError, ValueError):
             return None
         return value if isinstance(value, dict) and value.get("ok") else None
 
-    existing = health()
+    existing = health(port)
     if existing:
         if Path(str(existing.get("root") or "")).resolve() != root.resolve():
             print(
@@ -1787,12 +1802,25 @@ def cmd_view(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        if args.open:
-            import webbrowser
+        if str(existing.get("version") or "") == __version__:
+            if args.open:
+                import webbrowser
 
-            webbrowser.open(url)
-        print(f"viewer already running at {url}")
-        return 0
+                webbrowser.open(url)
+            print(f"viewer already running at {url}")
+            return 0
+        replacement = _next_viewer_port(port)
+        if replacement is None:
+            print(
+                "error: the open viewer is from an older TicketBunker version. "
+                "Close its browser tab, wait a few seconds, then run tb view again.",
+                file=sys.stderr,
+            )
+            return 1
+        port = replacement
+        args.port = port
+        url = f"http://127.0.0.1:{port}/"
+        print("TicketBunker was updated. Opening the current viewer; the older tab can be closed.")
 
     launch_id = secrets.token_urlsafe(18)
     log_path = viewer.server_log_path(root)
@@ -1803,7 +1831,7 @@ def cmd_view(args: argparse.Namespace) -> int:
         "--repo",
         str(root),
         "--port",
-        str(args.port),
+        str(port),
         f"--launch={launch_id}",
     ]
     kwargs: dict[str, object] = {
@@ -1825,7 +1853,7 @@ def cmd_view(args: argparse.Namespace) -> int:
             return 1
     ready = False
     for _attempt in range(60):
-        current = health()
+        current = health(port)
         if current and current.get("launch") == launch_id:
             ready = True
             break
@@ -1834,8 +1862,8 @@ def cmd_view(args: argparse.Namespace) -> int:
         time.sleep(0.05)
     if not ready:
         print(
-            f"error: viewer did not start on 127.0.0.1:{args.port} — "
-            f"try tb view --port {args.port + 1}; details: {log_path}",
+            f"error: viewer did not start on 127.0.0.1:{port} — "
+            f"try tb view --port {port + 1}; details: {log_path}",
             file=sys.stderr,
         )
         return 1

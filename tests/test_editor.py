@@ -61,6 +61,24 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(value["editor"], "TicketBunker")
         external.assert_not_called()
 
+    def test_unavailable_external_editor_falls_back_to_the_included_editor(self) -> None:
+        config.save({"editor_mode": "external", "editor": "vim"})
+        problem = commands.CommandRejected(
+            "source_editor_terminal_required",
+            "No supported terminal launcher was found.",
+        )
+        with mock.patch.object(editor, "_find_editor_executable", return_value="/found/vim"):
+            with mock.patch.object(editor, "_terminal_argv", side_effect=problem):
+                value = commands.dispatch(
+                    "editor.open",
+                    {"path": "src/main.py", "line": 2},
+                    commands.CommandContext(self.root, transport="test"),
+                )
+
+        self.assertEqual(value["mode"], "builtin")
+        self.assertEqual(value["editor"], "TicketBunker")
+        self.assertEqual(value["fallback"], "source_editor_terminal_required")
+
     def test_windows_git_bundled_vim_is_available_to_the_viewer(self) -> None:
         git = self.root / "Git" / "cmd" / "git.exe"
         vim = self.root / "Git" / "usr" / "bin" / "vim.exe"

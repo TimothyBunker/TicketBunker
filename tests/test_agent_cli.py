@@ -220,6 +220,43 @@ class AgentCliTests(unittest.TestCase):
         self.assertNotIn("--launch", opened.call_args.args[0])
         self.assertIn("stop after its last browser tab closes", stdout)
 
+    def test_view_replaces_an_older_detached_viewer_on_a_nearby_port(self) -> None:
+        old = mock.MagicMock()
+        old.__enter__.return_value.read.return_value = json.dumps(
+            {"ok": True, "launch": "old", "root": str(self.root)}
+        ).encode()
+        ready = mock.MagicMock()
+        ready.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "ok": True,
+                "launch": "new-launch",
+                "root": str(self.root),
+                "version": cli.__version__,
+            }
+        ).encode()
+        process = mock.Mock()
+        process.poll.return_value = None
+        log_path = self.root / "viewer.log"
+        with mock.patch.object(cli.layout, "find_root", return_value=self.root):
+            with mock.patch.object(cli.project_mod, "find_source_root", return_value=None):
+                with mock.patch.object(cli.project_mod, "load_locator", return_value=None):
+                    with mock.patch.object(cli, "_next_viewer_port", return_value=18500):
+                        with mock.patch.object(cli.secrets, "token_urlsafe", return_value="new-launch"):
+                            with mock.patch.object(cli.agent_runtime, "cli_argv", return_value=["tb"]):
+                                with mock.patch("ticketbunker.viewer.server_log_path", return_value=log_path):
+                                    with mock.patch("urllib.request.urlopen", side_effect=[old, ready]):
+                                        with mock.patch.object(
+                                            cli.subprocess, "Popen", return_value=process
+                                        ) as opened:
+                                            code, stdout, stderr = self._run(
+                                                ["view", "--no-open", "--port", "18499"]
+                                            )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("TicketBunker was updated", stdout)
+        argv = opened.call_args.args[0]
+        self.assertEqual(argv[argv.index("--port") + 1], "18500")
+
     def test_view_and_source_open_do_not_publish_companion_data(self) -> None:
         with mock.patch.object(cli, "cmd_view", return_value=0):
             with mock.patch.object(cli, "cmd_open_source", return_value=0):
