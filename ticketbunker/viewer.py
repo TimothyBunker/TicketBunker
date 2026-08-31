@@ -70,6 +70,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 button, input, select, textarea { font: inherit; }
+input, textarea { cursor: text; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
@@ -651,22 +652,24 @@ li > ul, li > ol { margin: 3px 0 2px; }
   gap: 2px 8px;
   margin-bottom: 9px;
   padding: 7px 8px 7px 10px;
-  border-left: 2px solid var(--accent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
   background: var(--panel);
 }
 .coworker-reference[hidden] { display: none; }
 .coworker-reference-meta { color: var(--muted); font-size: 11px; font-weight: 650; }
 .coworker-reference-copy { grid-column: 1 / -1; margin: 0; color: var(--body); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .coworker-reference-remove {
-  width: 28px;
-  height: 28px;
-  margin: -5px -5px -2px 0;
+  min-height: 28px;
+  padding: 0 4px;
   border: 0;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 17px;
+  font-size: 11px;
+  font-weight: 650;
 }
+.coworker-reference-remove:hover { color: var(--fg); }
 .coworker-compose textarea {
   width: 100%;
   min-height: 72px;
@@ -1020,6 +1023,11 @@ const viewPanels = [...document.querySelectorAll('[data-view-panel]')];
 const reportSelect = document.querySelector('[data-report-select]');
 const reportPanels = [...document.querySelectorAll('[data-report-panel]')];
 
+function textEntryActive() {
+  const active = document.activeElement;
+  return Boolean(active && (active.matches('input, textarea, select') || active.isContentEditable));
+}
+
 function activateView(name, moveFocus = false) {
   viewTabs.forEach((tab) => {
     const selected = tab.dataset.viewTab === name;
@@ -1300,6 +1308,7 @@ let coworkerCategory = 'what';
 let coworkerBusy = false;
 let coworkerReference = null;
 let pendingSelection = null;
+let synthesisGesture = null;
 
 function setCoworkerStatus(message, kind = '') {
   if (!coworkerStatus) return;
@@ -1383,13 +1392,13 @@ function selectedSynthesis() {
 }
 
 function hideSelectionAsk() {
+  pendingSelection = null;
   if (selectionAsk) selectionAsk.hidden = true;
 }
 
 function showSelectionAsk() {
   const reference = selectedSynthesis();
   if (!selectionAsk || !reference) {
-    pendingSelection = null;
     hideSelectionAsk();
     return;
   }
@@ -1402,6 +1411,29 @@ function showSelectionAsk() {
   selectionAsk.style.left = `${Math.max(8, Math.min(window.innerWidth - 44, reference.rect.left + reference.rect.width / 2 - 18))}px`;
   selectionAsk.style.top = `${Math.max(8, reference.rect.top - 44)}px`;
   selectionAsk.hidden = false;
+}
+
+function synthesisSelectionStart(event) {
+  if (event.target.closest('[data-selection-ask]')) return;
+  hideSelectionAsk();
+  if (event.button !== undefined && event.button !== 0) {
+    synthesisGesture = null;
+    return;
+  }
+  const copy = event.target.closest('[data-synthesis-copy]');
+  synthesisGesture = copy
+    ? {pointerId: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now()}
+    : null;
+}
+
+function synthesisSelectionEnd(event) {
+  const gesture = synthesisGesture;
+  synthesisGesture = null;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  const distance = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
+  const held = event.pointerType === 'touch' && performance.now() - gesture.at >= 450;
+  if (distance < 3 && !held) return;
+  requestAnimationFrame(showSelectionAsk);
 }
 
 function openCoworker(category = coworkerCategory, focusMessage = true) {
@@ -1642,11 +1674,21 @@ selectionAsk?.addEventListener('click', () => {
   window.getSelection()?.removeAllRanges();
   openCoworker(category);
 });
-document.addEventListener('mouseup', () => window.setTimeout(showSelectionAsk, 0));
-document.addEventListener('keyup', (event) => {
-  if (event.key === 'Shift' || event.key.startsWith('Arrow')) showSelectionAsk();
+document.addEventListener('pointerdown', synthesisSelectionStart);
+document.addEventListener('pointerup', synthesisSelectionEnd);
+document.addEventListener('pointercancel', () => { synthesisGesture = null; });
+document.addEventListener('dblclick', (event) => {
+  if (event.target.closest('[data-synthesis-copy]')) requestAnimationFrame(showSelectionAsk);
 });
-document.addEventListener('touchend', () => window.setTimeout(showSelectionAsk, 0));
+document.addEventListener('keyup', (event) => {
+  if (textEntryActive()) {
+    hideSelectionAsk();
+    return;
+  }
+  if (event.key === 'Shift' || (event.shiftKey && event.key.startsWith('Arrow'))) {
+    showSelectionAsk();
+  }
+});
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && coworkerPanel && !coworkerPanel.hidden) collapseCoworker();
 });
@@ -1811,6 +1853,7 @@ if (coworkerPanel) {
 
 setInterval(async () => {
   if (truthStrip) {
+    if (textEntryActive() || document.hidden) return;
     await pollTruth();
     return;
   }
@@ -1819,7 +1862,7 @@ setInterval(async () => {
     const response = await fetch('/poll');
     if ((await response.text()).trim() !== fp) location.reload();
   } catch (error) { /* Keep the current repository snapshot if the server exits. */ }
-}, 2000);
+}, 5000);
 """
 
 
@@ -3312,7 +3355,7 @@ def _coworker_surface(
         '<div class="coworker-reference" data-coworker-reference hidden>'
         '<span class="coworker-reference-meta" data-coworker-reference-meta></span>'
         '<button class="coworker-reference-remove" type="button" data-coworker-reference-remove '
-        'aria-label="Remove synthesis reference">×</button>'
+        'aria-label="Clear quoted synthesis">Clear quote</button>'
         '<p class="coworker-reference-copy" data-coworker-reference-copy></p></div>'
         '<label for="coworker-message">Message</label>'
         '<textarea id="coworker-message" name="message" maxlength="8000" '

@@ -538,14 +538,22 @@ function storageRemote() {
   return transport === "https" ? `https://${host}/${path}` : `git@${host}:${path}`;
 }
 
+let storagePreviewTimer = null;
+
 function updateStoragePreview() {
+  storagePreviewTimer = null;
   const remote = storageRemote();
   storagePreview.textContent = remote || "Complete the storage fields";
   storagePreview.classList.toggle("placeholder", !remote);
 }
 
+function scheduleStoragePreview() {
+  window.clearTimeout(storagePreviewTimer);
+  storagePreviewTimer = window.setTimeout(updateStoragePreview, 80);
+}
+
 for (const name of ["storage_transport", "storage_host", "storage_namespace", "storage_repository"]) {
-  connectForm.elements[name].addEventListener("input", updateStoragePreview);
+  connectForm.elements[name].addEventListener("input", scheduleStoragePreview);
   connectForm.elements[name].addEventListener("change", updateStoragePreview);
 }
 

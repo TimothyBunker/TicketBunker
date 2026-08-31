@@ -459,8 +459,13 @@ render as chips. Ticket, Project, and Agent reading remains strictly read-only.
 Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
 action, and the same ticket coworker is available from one bottom-right bubble.
 Selecting synthesis text or evidence inside a category's full trail reveals a
-contextual bubble that attaches only that excerpt, its category, scope, and
-branch to the next message. This is a local
+contextual bubble only after a deliberate drag, long touch selection, double
+click, or keyboard selection. Ordinary taps, clicks, and text-field caret
+movement clear the contextual action instead of reviving an older selection.
+Activating the bubble attaches only that excerpt, its category, scope, and
+branch to the next message. The quoted attachment sits above the composer with
+an explicit Clear quote action, never an unexplained close glyph over the input.
+This is a local
 conversation and proposal surface, not a second report writer. Its expanded
 surface is a right-side drawer with a collapse control, not a close action;
 topic, scope, draft, attached reference, and expanded state survive navigation
@@ -492,6 +497,11 @@ selects that fallback, `--foreground` retains its attached diagnostic mode,
 and `--no-open` starts only its local service. Per-page presence and close
 signals keep the browser fallback alive across navigation and stop it shortly
 after the final tab closes; stale sessions expire.
+
+The viewer checks shared truth at a human-scale cadence and pauses Git-backed
+polling while a text entry has focus or the page is hidden. Direct user actions
+still update their state immediately. Typing and selection therefore never
+compete with repeated repository scans.
 
 The local health response identifies the TicketBunker version. After an update,
 `tb view` never reuses an older detached worker for the same project; it opens
@@ -1295,7 +1305,9 @@ path is a component form, not a raw-address field: Access, Git host, Owner or
 group, and Repository are prefilled from the source remote, while a read-only
 preview shows the exact address the Python command boundary will validate and
 assemble. Technical inputs disable spelling, capitalization, and credential
-autofill. The form remains host-agnostic and accepts nested group paths. Both
+autofill, force the ordinary text cursor, suppress native clear decorations,
+and defer preview reflow until the user pauses typing. The form remains
+host-agnostic and accepts nested group paths. Both
 actions use a visible confirmation dialog and dispatch the existing
 `project.connect` command. Only a ready checkout can open the unprivileged
 ticket window. Closing that window stops its owned Python child and returns to

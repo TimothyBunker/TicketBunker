@@ -177,9 +177,12 @@ exercise unless a live boundary is explicitly called out.
   bubbles. The expanded surface is a right-side drawer whose arrow collapses
   it without implying that the session is closed. Topic, scope, draft,
   reference, and expanded state persist into the included source editor and
-  back. Selecting synthesis or full-trail text attaches its bounded
-  category/scope/branch quote to the next message and preserves that reference
-  in local history. Pi
+  back. A drag, long touch, double click, or keyboard selection over synthesis
+  or full-trail text reveals the quote action; ordinary taps and text-field
+  caret movement do not revive it. The bounded category/scope/branch quote is
+  attached to the next message, uses an explicit Clear quote action, and stays
+  in local history. Git-backed truth polling pauses while the user is typing
+  and otherwise runs at a five-second cadence. Pi
   receives only read/search tools. Raw chat stays below `.git`; a
   coworker reply can prepare an inert child Reader-brief proposal, and explicit
   acceptance rechecks digest/lint/anchors, updates the named children, then
@@ -239,7 +242,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.23 keeps the six-platform core release pipeline while the new
+- Version 0.2.24 keeps the six-platform core release pipeline while the new
   native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
@@ -297,8 +300,9 @@ Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,
 topic tabs, scope selection, Work panel, responsive stacking, and JavaScript
 deep links are inspected. A headless-Chrome interaction check also selects
-Combined synthesis, opens its contextual bubble, and verifies the quote reaches
-the correct topic composer. The included editor is checked at desktop and
+Combined synthesis, verifies an ordinary click stays inert, opens the
+contextual bubble only for a real drag selection, and confirms focused typing
+hides stale selection UI. The included editor is checked at desktop and
 mobile widths; a real textarea selection opens the drawer with its source
 reference, survives reload, collapses, and reopens without horizontal overflow.
 This does not replace the HTTP/CSRF tests.
