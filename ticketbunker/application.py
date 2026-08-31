@@ -11,8 +11,15 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import agent_runtime, commands, config, project
+
+
+_REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_REMOTE_HOST_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
+)
 
 
 def _git_value(key: str) -> str:
@@ -57,18 +64,124 @@ def _source_root(raw: str) -> Path:
     return Path(process.stdout.strip()).resolve()
 
 
+def _source_remote(root: Path) -> str:
+    process = subprocess.run(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    return process.stdout.strip() if process.returncode == 0 else ""
+
+
+def _parsed_remote(remote: str) -> dict[str, str] | None:
+    """Split common hosted Git remotes without treating local paths as hosts."""
+    value = remote.strip()
+    if not value or value.startswith(("/", "./", "../", "~")):
+        return None
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return None
+    transport = ""
+    host = ""
+    path = ""
+    scp = (
+        re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", value)
+        if "://" not in value
+        else None
+    )
+    if scp:
+        transport, host, path = "ssh", scp.group(1), scp.group(2)
+    else:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"ssh", "git+ssh"} and parsed.hostname:
+            transport, host, path = "ssh", parsed.hostname, parsed.path
+        elif parsed.scheme == "https" and parsed.hostname:
+            transport, host, path = "https", parsed.hostname, parsed.path
+    pieces = [part for part in path.strip("/").split("/") if part]
+    if not transport or not host or len(pieces) < 2:
+        return None
+    repository = pieces[-1].removesuffix(".git")
+    namespace = "/".join(pieces[:-1])
+    if not repository or not namespace:
+        return None
+    return {
+        "transport": transport,
+        "host": host,
+        "namespace": namespace,
+        "repository": repository,
+    }
+
+
+def _storage_suggestion(root: Path) -> dict[str, str]:
+    parsed = _parsed_remote(_source_remote(root)) or {}
+    source_repository = str(parsed.get("repository") or root.name)
+    repository = (
+        source_repository
+        if source_repository.lower().endswith("-ticketbunker")
+        else f"{source_repository}-ticketbunker"
+    )
+    return {
+        "backend": "git",
+        "transport": str(parsed.get("transport") or "ssh"),
+        "host": str(parsed.get("host") or "github.com"),
+        "namespace": str(parsed.get("namespace") or ""),
+        "repository": repository,
+    }
+
+
+def _storage_remote(value: Any) -> str:
+    if not isinstance(value, dict):
+        raise commands.CommandRejected(
+            "storage_required", "Choose where TicketBunker should keep shared data."
+        )
+    backend = str(value.get("backend") or "git").strip().lower()
+    transport = str(value.get("transport") or "").strip().lower()
+    host = str(value.get("host") or "").strip()
+    namespace = str(value.get("namespace") or "").strip().strip("/")
+    repository = str(value.get("repository") or "").strip().removesuffix(".git")
+    if backend != "git":
+        raise commands.CommandRejected(
+            "storage_backend_invalid", "This version connects shared storage through Git."
+        )
+    if transport not in {"ssh", "https"}:
+        raise commands.CommandRejected(
+            "storage_transport_invalid", "Choose SSH or HTTPS access."
+        )
+    if not _REMOTE_HOST_RE.fullmatch(host):
+        raise commands.CommandRejected(
+            "storage_host_invalid", "Enter only the Git host, such as github.com."
+        )
+    namespace_parts = namespace.split("/")
+    if not namespace or any(
+        not _REMOTE_PART_RE.fullmatch(part) or part in {".", ".."}
+        for part in namespace_parts
+    ):
+        raise commands.CommandRejected(
+            "storage_namespace_invalid", "Enter a valid owner or group."
+        )
+    if not _REMOTE_PART_RE.fullmatch(repository) or repository in {".", ".."}:
+        raise commands.CommandRejected(
+            "storage_repository_invalid", "Enter a valid repository name."
+        )
+    path = f"{namespace}/{repository}.git"
+    return f"git@{host}:{path}" if transport == "ssh" else f"https://{host}/{path}"
+
+
 def inspect_project(raw: str) -> dict[str, Any]:
     root = _source_root(raw)
     locator = project.load_locator(root)
     embedded = (root / ".tb").is_dir()
-    return {
+    initialized = locator is not None or embedded
+    result: dict[str, Any] = {
         "path": str(root),
         "name": root.name,
-        "initialized": locator is not None or embedded,
+        "initialized": initialized,
         "ready": embedded,
         "project": str((locator or {}).get("project") or ""),
-        "repository": str((locator or {}).get("repository") or ""),
+        "repository": str((locator or {}).get("bunker_repository") or ""),
     }
+    if not initialized:
+        result["storage"] = _storage_suggestion(root)
+    return result
 
 
 def state() -> dict[str, Any]:
@@ -236,6 +349,8 @@ def command_project_connect(
         for key in ("project", "project_name", "bunker_repo", "base_branch")
         if payload.get(key) not in (None, "")
     }
+    if payload.get("storage") is not None:
+        connect_payload["bunker_repo"] = _storage_remote(payload.get("storage"))
     result = commands.dispatch(
         "project.connect",
         connect_payload,

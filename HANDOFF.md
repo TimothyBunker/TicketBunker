@@ -215,8 +215,12 @@ exercise unless a live boundary is explicitly called out.
   window. A native picker registers normalized Git roots through typed
   `application.*` commands; machine-local identity defaults from Git, and
   remembered projects show Ready, Join, or Connect. Join/Create visibly calls
-  the existing `project.connect` backend, and Create requires a user-created
-  companion repository URL. The privileged local window and unprivileged
+  the existing `project.connect` backend. Create derives and prefills SSH/HTTPS,
+  Git host, owner/group, and a suggested `<source>-ticketbunker` repository from
+  the source `origin`; the Python boundary validates and assembles the remote.
+  Linux sessions with a stale advertised D-Bus socket use GTK's in-memory
+  settings backend, preventing WSL picker warning floods. The privileged local
+  window and unprivileged
   loopback ticket window are separate labels; only Projects receives the
   directory-dialog capability.
 - First-run and Local settings now provide the complete agent path without
@@ -235,7 +239,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.22 keeps the six-platform core release pipeline while the new
+- Version 0.2.23 keeps the six-platform core release pipeline while the new
   native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
@@ -287,7 +291,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 200 tests, plus 7 Rust shell tests.
+references. The current full suite is 204 tests, plus 8 Rust shell tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,

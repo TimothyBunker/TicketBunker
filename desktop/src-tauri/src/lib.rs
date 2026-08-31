@@ -15,6 +15,32 @@ use tauri_plugin_opener::OpenerExt;
 const DEFAULT_PORT: u16 = 8377;
 const PORT_ATTEMPTS: u16 = 20;
 
+#[cfg(target_os = "linux")]
+fn missing_session_bus(address: Option<&str>) -> bool {
+    let Some(address) = address else {
+        return true;
+    };
+    let Some(value) = address.strip_prefix("unix:path=") else {
+        return false;
+    };
+    let path = value.split(',').next().unwrap_or_default();
+    path.is_empty() || !Path::new(path).exists()
+}
+
+#[cfg(target_os = "linux")]
+fn configure_settings_backend() {
+    if env::var_os("GSETTINGS_BACKEND").is_some() {
+        return;
+    }
+    let address = env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+    if missing_session_bus(address.as_deref()) {
+        // WSL and other minimal Linux desktops can advertise a stale D-Bus
+        // socket. GTK's in-memory backend keeps the native picker responsive
+        // without asking the user to repair an unrelated desktop service.
+        env::set_var("GSETTINGS_BACKEND", "memory");
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct LaunchOptions {
     repo: Option<PathBuf>,
@@ -623,6 +649,8 @@ fn create_launcher(app: &AppHandle) -> Result<(), tauri::Error> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_settings_backend();
     let options = parse_options(env::args_os().skip(1)).unwrap_or_else(|message| {
         eprintln!("TicketBunker could not open: {message}");
         std::process::exit(2);
@@ -765,5 +793,15 @@ mod tests {
         assert!(validated_auth_url("https://auth.openai.com/authorize").is_ok());
         assert!(validated_auth_url("http://auth.openai.com/authorize").is_err());
         assert!(validated_auth_url("javascript:alert(1)").is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn missing_linux_session_bus_uses_the_memory_settings_backend() {
+        assert!(missing_session_bus(None));
+        assert!(missing_session_bus(Some(
+            "unix:path=/ticketbunker/definitely/missing/bus"
+        )));
+        assert!(!missing_session_bus(Some("unix:abstract=/tmp/dbus-test")));
     }
 }

@@ -19,6 +19,7 @@ const projectList = byId("project-list");
 const emptyState = byId("empty-state");
 const connectDialog = byId("connect-dialog");
 const connectForm = byId("connect-form");
+const storagePreview = byId("storage-preview");
 const settingsDialog = byId("settings-dialog");
 const settingsForm = byId("settings-form");
 const agentDialog = byId("agent-dialog");
@@ -527,6 +528,27 @@ async function removeProject(project, button) {
   }
 }
 
+function storageRemote() {
+  const transport = connectForm.elements.storage_transport.value;
+  const host = connectForm.elements.storage_host.value.trim();
+  const namespace = connectForm.elements.storage_namespace.value.trim().replace(/^\/+|\/+$/g, "");
+  const repository = connectForm.elements.storage_repository.value.trim().replace(/\.git$/, "");
+  if (!host || !namespace || !repository) return "";
+  const path = `${namespace}/${repository}.git`;
+  return transport === "https" ? `https://${host}/${path}` : `git@${host}:${path}`;
+}
+
+function updateStoragePreview() {
+  const remote = storageRemote();
+  storagePreview.textContent = remote || "Complete the storage fields";
+  storagePreview.classList.toggle("placeholder", !remote);
+}
+
+for (const name of ["storage_transport", "storage_host", "storage_namespace", "storage_repository"]) {
+  connectForm.elements[name].addEventListener("input", updateStoragePreview);
+  connectForm.elements[name].addEventListener("change", updateStoragePreview);
+}
+
 function showConnect(project) {
   pendingProject = project;
   connectForm.reset();
@@ -536,9 +558,17 @@ function showConnect(project) {
   const create = !project.initialized;
   byId("create-fields").hidden = !create;
   connectForm.elements.project.required = create;
-  connectForm.elements.bunker_repo.required = create;
+  const storage = project.storage || {};
+  connectForm.elements.storage_transport.value = storage.transport || "ssh";
+  connectForm.elements.storage_host.value = storage.host || "github.com";
+  connectForm.elements.storage_namespace.value = storage.namespace || "";
+  connectForm.elements.storage_repository.value = storage.repository || `${project.name}-ticketbunker`;
+  for (const name of ["storage_host", "storage_namespace", "storage_repository"]) {
+    connectForm.elements[name].required = create;
+  }
+  updateStoragePreview();
   byId("connect-copy").textContent = create
-    ? "Link this checkout to TicketBunker storage. TicketBunker will not create or host the repository."
+    ? "Connect the shared storage for this TicketBunker project."
     : "Join the TicketBunker project declared by this checkout. This fetches its companion data without merging source work.";
   byId("connect-submit").textContent = create ? "Create TicketBunker project" : "Join project";
   connectDialog.showModal();
@@ -556,7 +586,13 @@ connectForm.addEventListener("submit", async (event) => {
   const payload = { path: pendingProject.path };
   if (create) {
     payload.project = connectForm.elements.project.value.toUpperCase();
-    payload.bunker_repo = connectForm.elements.bunker_repo.value;
+    payload.storage = {
+      backend: "git",
+      transport: connectForm.elements.storage_transport.value,
+      host: connectForm.elements.storage_host.value,
+      namespace: connectForm.elements.storage_namespace.value,
+      repository: connectForm.elements.storage_repository.value,
+    };
   }
   try {
     await invoke("connect_git_project", { payload });

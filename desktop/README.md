@@ -10,7 +10,11 @@ Its native directory picker normalizes selections through the Python command
 backend, and its profile/project registry stays in the same machine-local
 TicketBunker config as the CLI. Ready projects open in a separate loopback
 window; projects that need setup receive an explicit Join or Connect dialog.
-Connect requires a repository URL the user already created.
+Connect requires a repository the user already created. The app derives and
+prefills its access method, host, owner/group, and suggested TicketBunker name
+from the source `origin`; the Python command boundary assembles and validates
+the Git address. A stale or missing Linux session D-Bus socket selects GTK's
+in-memory settings backend so the native picker remains quiet and responsive.
 
 Agent setup is also owned by the Projects window. It starts the verified Pi
 runtime in constrained RPC mode with only `tb_auth.ts`, renders provider login

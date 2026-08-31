@@ -1243,7 +1243,10 @@ First run is application-facing:
 - choose **Add Git project**, then select a local checkout;
 - if the checkout has a locator, offer to join its TicketBunker project using
   the authority that project already declares; otherwise offer to create a
-  TicketBunker project and explicitly link user-provided storage.
+  TicketBunker project and explicitly link user-provided storage. The app
+  derives the common Git host, owner/group, repository name, and SSH/HTTPS
+  access from the source checkout's `origin`; users edit those components,
+  never construct a Git URL.
 
 Agent setup is an app-native conversation with Pi, not an embedded terminal.
 The privileged Projects window starts the verified Pi runtime in RPC mode with
@@ -1286,11 +1289,23 @@ identifier, never global Git configuration.
 the selection to the working-tree root, and rejects non-Git directories before
 remembering it. An existing locator is presented as **Join** until its ignored
 companion checkouts are ready. A project without a locator is presented as
-**Connect** and requires both a project key and an already-created companion
-repository URL; the app never creates or hosts that remote. Both actions use a
-visible confirmation dialog and dispatch the existing `project.connect`
-command. Only a ready checkout can open the unprivileged ticket window. Closing
-that window stops its owned Python child and returns to the Projects window.
+**Connect** and requires both a project key and an already-created shared Git
+repository; the app never creates or hosts that remote. The common hosted-Git
+path is a component form, not a raw-address field: Access, Git host, Owner or
+group, and Repository are prefilled from the source remote, while a read-only
+preview shows the exact address the Python command boundary will validate and
+assemble. Technical inputs disable spelling, capitalization, and credential
+autofill. The form remains host-agnostic and accepts nested group paths. Both
+actions use a visible confirmation dialog and dispatch the existing
+`project.connect` command. Only a ready checkout can open the unprivileged
+ticket window. Closing that window stops its owned Python child and returns to
+the Projects window.
+
+On Linux, the shell respects an explicitly selected GSettings backend. When no
+backend was selected and the advertised session D-Bus socket is absent, as in
+some WSL sessions, it uses GTK's in-memory settings backend before creating any
+window. The native folder picker therefore remains responsive and does not
+flood a launching terminal with unrelated `dconf` warnings.
 
 The bundled Projects window is the sole recipient of the native directory
 dialog and event-listen permissions. Its Tauri commands also check the caller's

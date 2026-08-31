@@ -62,6 +62,92 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertFalse(first["project"]["initialized"])
         self.assertEqual(len(second["projects"]), 1)
 
+    def test_project_storage_defaults_from_the_source_remote(self) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.source),
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:TimothyBunker/coal.git",
+            ],
+            check=True,
+        )
+
+        storage = application.inspect_project(str(self.source))["storage"]
+
+        self.assertEqual(
+            storage,
+            {
+                "backend": "git",
+                "transport": "ssh",
+                "host": "github.com",
+                "namespace": "TimothyBunker",
+                "repository": "coal-ticketbunker",
+            },
+        )
+
+    def test_https_source_remote_preserves_nested_gitlab_group(self) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.source),
+                "remote",
+                "add",
+                "origin",
+                "https://gitlab.example.test/platform/render/voxel.git",
+            ],
+            check=True,
+        )
+
+        storage = application.inspect_project(str(self.source))["storage"]
+
+        self.assertEqual(storage["transport"], "https")
+        self.assertEqual(storage["host"], "gitlab.example.test")
+        self.assertEqual(storage["namespace"], "platform/render")
+        self.assertEqual(storage["repository"], "voxel-ticketbunker")
+
+    def test_desktop_connect_composes_structured_storage_in_the_backend(self) -> None:
+        with mock.patch.object(
+            application.commands,
+            "dispatch",
+            return_value={"project": "ECS"},
+        ) as dispatch:
+            application.command_project_connect(
+                commands.CommandContext(self.root, transport="desktop"),
+                {
+                    "path": str(self.source),
+                    "project": "ECS",
+                    "storage": {
+                        "backend": "git",
+                        "transport": "ssh",
+                        "host": "github.com",
+                        "namespace": "TimothyBunker",
+                        "repository": "coal-ticketbunker",
+                    },
+                },
+            )
+
+        dispatched_payload = dispatch.call_args.args[1]
+        self.assertEqual(
+            dispatched_payload["bunker_repo"],
+            "git@github.com:TimothyBunker/coal-ticketbunker.git",
+        )
+
+    def test_desktop_connect_rejects_a_host_that_contains_git_syntax(self) -> None:
+        with self.assertRaisesRegex(commands.CommandRejected, "only the Git host"):
+            application._storage_remote(
+                {
+                    "transport": "ssh",
+                    "host": "github.com:team/repo",
+                    "namespace": "team",
+                    "repository": "repo",
+                }
+            )
+
     def test_non_git_directory_is_rejected_actionably(self) -> None:
         outside = self.root / "outside"
         outside.mkdir()

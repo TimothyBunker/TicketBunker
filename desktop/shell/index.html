@@ -75,19 +75,39 @@
             <p class="eyebrow">Connect project</p>
             <h2 id="connect-title">Git project</h2>
           </div>
-          <button class="icon-button" value="cancel" aria-label="Cancel" type="submit">×</button>
         </div>
         <p class="dialog-copy" id="connect-copy"></p>
         <div id="create-fields" class="connect-fields">
           <label>
             <span>Project key</span>
-            <input name="project" pattern="[A-Z][A-Z0-9]*" placeholder="ECS">
+            <input name="project" pattern="[A-Z][A-Z0-9]*" placeholder="ECS" autocomplete="off" autocapitalize="characters" spellcheck="false">
           </label>
-          <label>
-            <span>Companion repository</span>
-            <input name="bunker_repo" placeholder="git@host:team/project-ticketbunker.git">
-          </label>
-          <p class="field-note">Create the empty repository on a Git host you control, then paste its URL here.</p>
+          <fieldset class="storage-fields">
+            <legend>TicketBunker storage</legend>
+            <div class="storage-grid">
+              <label>
+                <span>Access</span>
+                <select name="storage_transport">
+                  <option value="ssh">SSH</option>
+                  <option value="https">HTTPS</option>
+                </select>
+              </label>
+              <label>
+                <span>Git host</span>
+                <input name="storage_host" placeholder="github.com" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+              </label>
+              <label>
+                <span>Owner or group</span>
+                <input name="storage_namespace" placeholder="team" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+              </label>
+              <label>
+                <span>Repository</span>
+                <input name="storage_repository" placeholder="project-ticketbunker" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+              </label>
+            </div>
+            <output class="storage-preview" id="storage-preview"></output>
+          </fieldset>
+          <p class="field-note">Create this empty repository first. TicketBunker uses it for shared data and does not host it.</p>
         </div>
         <input name="path" type="hidden">
         <div class="dialog-actions">

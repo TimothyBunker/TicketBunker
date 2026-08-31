@@ -335,8 +335,10 @@ The desktop shell currently lives in `desktop/` and is built with Tauri 2. Its
 security and process-lifecycle contract is documented in
 [`desktop/README.md`](desktop/README.md). Opening the app itself lands on
 Projects. **Add Git project** chooses a local checkout; an existing locator can
-be joined, while a new TicketBunker project asks for an already-created
-companion repository URL. TicketBunker never creates or hosts that repository.
+be joined. For a new project, TicketBunker prefills the shared Git storage's
+access method, host, owner/group, and repository name from the checkout's
+`origin`; edit any part and confirm the assembled address. TicketBunker never
+creates or hosts that repository.
 The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
