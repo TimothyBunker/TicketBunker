@@ -140,6 +140,13 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertFalse(rejected.ready)
         self.assertIn("package.json", rejected.detail)
 
+    def test_desktop_resource_root_is_the_first_bundle_location(self) -> None:
+        resources = self.root / "application-resources"
+        with mock.patch.dict(os.environ, {"TB_BUNDLE_ROOT": str(resources)}):
+            roots = agent_runtime._bundle_roots()
+
+        self.assertEqual(roots[0], resources)
+
     def test_core_only_is_an_explicit_local_choice(self) -> None:
         agent_runtime.set_core_only()
 

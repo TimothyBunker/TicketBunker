@@ -24,6 +24,7 @@ struct LaunchOptions {
 struct ApplicationState {
     core: PathBuf,
     preferred_port: u16,
+    bundle_root: Mutex<Option<PathBuf>>,
     process: Mutex<Option<Child>>,
 }
 
@@ -129,8 +130,13 @@ fn launch_id() -> String {
     format!("desktop-{}-{timestamp}", std::process::id())
 }
 
-fn start_core(executable: &Path, repo: &Path, port: u16) -> Result<Child, String> {
-    Command::new(executable)
+fn bundle_root(state: &ApplicationState) -> Option<PathBuf> {
+    state.bundle_root.lock().ok()?.clone()
+}
+
+fn start_core(state: &ApplicationState, repo: &Path, port: u16) -> Result<Child, String> {
+    let mut command = Command::new(&state.core);
+    command
         .arg("_viewer-worker")
         .arg("--repo")
         .arg(repo)
@@ -140,14 +146,16 @@ fn start_core(executable: &Path, repo: &Path, port: u16) -> Result<Child, String
         .current_dir(repo)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            format!(
-                "cannot start the TicketBunker core at {}: {error}",
-                executable.display()
-            )
-        })
+        .stderr(Stdio::null());
+    if let Some(root) = bundle_root(state) {
+        command.env("TB_BUNDLE_ROOT", root);
+    }
+    command.spawn().map_err(|error| {
+        format!(
+            "cannot start the TicketBunker core at {}: {error}",
+            state.core.display()
+        )
+    })
 }
 
 fn wait_until_ready(child: &mut Child, port: u16) -> Result<(), String> {
@@ -180,12 +188,17 @@ fn stop_core(state: &ApplicationState) {
 }
 
 fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
-    let output = Command::new(&state.core)
+    let mut command = Command::new(&state.core);
+    command
         .arg("_app-command")
         .arg(name)
         .arg("--payload")
         .arg(payload.to_string())
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    if let Some(root) = bundle_root(state) {
+        command.env("TB_BUNDLE_ROOT", root);
+    }
+    let output = command
         .output()
         .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
     if !output.status.success() {
@@ -225,7 +238,7 @@ fn open_project_window(
         return Err("Close the open project before opening another one.".to_string());
     }
     let port = available_port(state.preferred_port)?;
-    let mut core = start_core(&state.core, &repo, port)?;
+    let mut core = start_core(state, &repo, port)?;
     if let Err(message) = wait_until_ready(&mut core, port) {
         let _ = core.kill();
         let _ = core.wait();
@@ -377,6 +390,7 @@ pub fn run() {
     let state = ApplicationState {
         core: core_executable(options.core),
         preferred_port: options.port,
+        bundle_root: Mutex::new(None),
         process: Mutex::new(None),
     };
 
@@ -392,6 +406,11 @@ pub fn run() {
             open_git_project
         ])
         .setup(move |app| {
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                if let Ok(mut root) = app.state::<ApplicationState>().bundle_root.lock() {
+                    *root = Some(resource_dir);
+                }
+            }
             if let Some(repo) = initial_repo.as_deref() {
                 open_project_window(
                     app.handle(),

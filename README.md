@@ -59,14 +59,19 @@ only what TicketBunker owns.
 
 ## Installing
 
-The normal download is one platform archive containing both `tb` and the
-pinned standalone pi runtime. It needs neither Node nor a separate pi install:
+The normal download is the native TicketBunker app for your platform. It
+contains the app, `tb`, and the pinned standalone Pi runtime, and needs neither
+Python, Node, nor a separate Pi install:
 
 1. Open [TicketBunker Releases](https://github.com/TimothyBunker/TicketBunker/releases).
-2. Download the archive whose name matches your machine: `linux`, `darwin`
-   (macOS), or `windows`, followed by `x64` or `arm64`.
-3. Download its adjacent `.sha256` file and verify it.
-4. Unpack the archive and run the installer inside it:
+2. Download the TicketBunker AppImage or Debian package on Linux, DMG on macOS,
+   or setup executable on Windows for your architecture. Its adjacent
+   `.sha256` file lets managed installs verify the download first.
+3. Install or open it, then choose **Add Git project**.
+
+The CLI-first portable archive remains beside the app for servers, air-gapped
+transfer, and managed installs. It contains the same frozen core and Pi runtime.
+Download its adjacent `.sha256` file, verify it, then run its installer:
 
 ```sh
 # Linux/macOS, after checking the adjacent digest with sha256sum or shasum:
@@ -82,9 +87,9 @@ compare `Get-FileHash .\ticketbunker-<version>-windows-x64.zip -Algorithm SHA256
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
-Release bundles cover Linux, macOS, and Windows on x64 and arm64. The build
-verifies the official pi archive checksum before extraction; the installed
-`tb` verifies the bundled pi executable against its own release manifest.
+Native and portable bundles cover Linux, macOS, and Windows on x64 and arm64.
+The build verifies the official Pi archive checksum before extraction; the
+installed `tb` verifies the bundled Pi distribution against its own release manifest.
 Provider logins, API keys, OAuth tokens, and model weights are never bundled.
 
 The stdlib-only core remains available for constrained or air-gapped setups.
@@ -106,8 +111,11 @@ installs it below TicketBunker's local data directory, and records `pi_bin` in
 an explicit administrator/developer override. `tb init --core-only` prevents
 the download and disables local agent execution intentionally.
 
-Maintainers build a full archive with `python3 tools/build_release.py`; tag
-builds produce all six platform bundles and SHA-256 sidecars automatically.
+Maintainers build a native app with `python3 tools/build_desktop.py` after
+freezing `dist/tb`, or a portable archive with `python3
+tools/build_release.py`. The native builder flattens each installer and its
+checksum into `dist/releases/`; tag builds produce both formats on all six
+targets.
 
 ## Usage
 

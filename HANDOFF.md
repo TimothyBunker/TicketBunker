@@ -228,13 +228,17 @@ exercise unless a live boundary is explicitly called out.
 ### Distribution
 
 - Version 0.2.21 keeps the six-platform core release pipeline while the new
-  native app bundle is integrated: Linux, macOS, and Windows
-  on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
-  the complete official pi 0.84.2 standalone distribution, the packaged
-  TicketBunker extension, upstream MIT license and notice, a per-file manifest,
-  and Unix/PowerShell installers. Official archive SHA-256 values are pinned in
-  the source tree and enforced before extraction; archive SHA-256 sidecars are
-  emitted for users.
+  native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
+  `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
+  sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
+  emits Debian/AppImage, app/DMG, or NSIS outputs. The app supplies its private
+  resource root to the core, whose existing per-file integrity gate verifies
+  Pi before use. Native installers are flattened into `dist/releases/` with
+  adjacent SHA-256 files. The Linux Debian (67 MB) and AppImage (136 MB) were
+  built and launched live; the extracted Debian reported bundled Pi integrity
+  verified.
+- The CLI-first portable archives remain release assets with the same frozen
+  core, Pi distribution, adapter, licenses, manifest, and install scripts.
 - The wheel/pipx package and stdlib zipapp remain small core-only options. They
   now correctly include the pi adapter, version/checksum manifest, and license;
   an ordinary `tb init` automatically downloads, verifies, installs, and
@@ -273,7 +277,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 178 tests.
+references. The current full suite is 193 tests, plus 5 Rust shell tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,

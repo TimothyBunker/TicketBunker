@@ -1132,15 +1132,30 @@ everything a person or agent reads whole — `tb.md`, `reports/`,
 
 ### 3.18 Distribution and local agent readiness
 
-The ordinary end-user artifact is a self-contained platform bundle: a frozen
-`tb` executable, the official standalone pi executable, TicketBunker's thin pi
-adapter, the upstream license, and a per-file checksum manifest. TicketBunker
-pins one reviewed pi version. Release construction downloads the corresponding
-official platform archive and refuses to extract it unless its recorded
-SHA-256 digest matches; runtime discovery verifies the extracted pi executable
-against the bundle manifest before invoking it. Linux, macOS, and Windows on
-x64 and arm64 are first-class release targets. Updating the pi pin is an
-explicit, tested TicketBunker release change, never an ambient npm update.
+The ordinary end-user artifact is a self-contained native desktop bundle: the
+Tauri app, a frozen `tb` sidecar, the official standalone pi executable,
+TicketBunker's thin pi adapter, the upstream license, and a per-file checksum
+manifest. Linux produces Debian and AppImage packages, macOS an app bundle and
+DMG, and Windows an NSIS installer; x64 and arm64 remain first-class release
+targets. The app passes its private resource directory to the core as
+`TB_BUNDLE_ROOT`, so GUI launch never depends on a shell's PATH and runtime
+verification uses the same manifest as the CLI.
+
+TicketBunker pins one reviewed pi version. Release construction downloads the
+corresponding official platform archive and refuses to extract it unless its
+recorded SHA-256 digest matches; runtime discovery verifies every extracted Pi
+file against the bundle manifest before invoking it. The native build also
+stages `tb` under Tauri's target-triple sidecar name and refuses to proceed when
+the frozen core or declared Pi executable is missing. Each native installer is
+copied into the flat release-asset directory with an adjacent SHA-256 file, so
+publishing does not depend on a build runner's nested Tauri directories.
+Updating the Pi pin is an explicit, tested TicketBunker release change, never
+an ambient npm update.
+
+A portable CLI-first archive with the same frozen core and verified Pi runtime
+remains available for servers, air-gapped transfer, and environments that do
+not install desktop applications. It is a distribution alternative, not a
+different data or command model.
 
 The **stdlib-only core stays independently installable** as a wheel, pipx
 application, or Python zipapp. It carries the adapter, pin manifest, and

@@ -106,6 +106,9 @@ def cli_argv() -> list[str]:
 
 def _bundle_roots() -> list[Path]:
     roots: list[Path] = []
+    explicit_root = os.environ.get("TB_BUNDLE_ROOT")
+    if explicit_root:
+        roots.append(Path(explicit_root).expanduser())
     executable = Path(sys.executable if getattr(sys, "frozen", False) else sys.argv[0]).expanduser()
     try:
         executable = executable.resolve()

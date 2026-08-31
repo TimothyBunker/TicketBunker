@@ -24,11 +24,23 @@ npm install
 TB_DESKTOP_CORE="$(command -v tb)" npm run tauri -- dev -- --repo /path/to/project
 ```
 
-The production bundle will place `tb` beside the desktop executable. `--core`
-and `TB_DESKTOP_CORE` are explicit development and managed-install overrides.
+The production bundle embeds `tb` as a Tauri sidecar and the verified Pi
+distribution as private application resources. `--core` and `TB_DESKTOP_CORE`
+are explicit development and managed-install overrides.
 
 Linux builds require Tauri's WebKitGTK prerequisites. The release workflow will
 build each desktop target on its native runner rather than cross-compiling it.
+
+After freezing `dist/tb`, build the platform-native artifacts with:
+
+```sh
+python tools/build_desktop.py --tb dist/tb
+```
+
+The staging step checks the pinned Pi archive before Tauri sees it. Successful
+builds copy the installer and an adjacent SHA-256 file into `dist/releases/`.
+Use `--stage-only` to inspect the ignored `src-tauri/binaries/` and
+`src-tauri/resources/` inputs without running the native bundler.
 
 The desktop boundary and first-run target are authoritative in `DESIGN.md`
 section 3.19. In particular, the native project picker remains in a separate
