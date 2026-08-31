@@ -140,8 +140,9 @@ tb set TB-1267 --status in-review                  # move ticket fields through 
 tb list                                            # every ticket, grouped by status, priority+recency ordered
 tb show TB-1267                                    # the whole ticket: fields, comments, development state, reports
 tb checkout TB-1267                                # refresh companion data and compile the master
-tb view                                            # open the localhost viewer in the background; it stops after the last tab closes
-tb view --foreground --no-open                     # attached diagnostic mode without opening a browser
+tb view                                            # open this project in the TicketBunker app
+tb view --browser                                  # explicitly use the localhost browser fallback
+tb view --browser --foreground --no-open           # attached diagnostic mode without opening a browser
 tb open '@[ticketbunker/viewer.py]:1'               # open a verified local source reference in your editor
 tb list --fetch --sort updated                     # include remote-only tickets; flat Jira-style sorting
 tb comment TB-1267 --bulk                          # paste a whole tracker thread ('--- author [when] [source]' separators)
@@ -304,14 +305,22 @@ Select source text and use **Ask about selection** to attach its guarded path,
 line range, and bounded text to the same coworker; unsaved selections are
 labeled as drafts.
 
-`tb view` opens the browser by default and releases the terminal after the
-localhost helper is ready. The helper follows live browser tabs and stops a few
-seconds after the final tab closes. Use `--no-open` when you only want the URL,
-or `--foreground` when debugging the server itself. Starting the viewer or
+`tb view` prefers the installed TicketBunker desktop app and releases the
+terminal immediately. The app owns its localhost core process and stops it when
+the project window closes. If the desktop shell is not installed, the command
+uses the same localhost browser viewer automatically. Use `--browser` to choose
+that fallback explicitly, `--no-open` when you only want its local service, or
+`--foreground` when debugging the server itself. Starting the app/viewer or
 opening a source reference never publishes companion data. If an optional
 external editor cannot open, the source link falls back to the included editor.
-After a TicketBunker update, `tb view` detects an older detached worker and
+After a TicketBunker update, browser mode detects an older detached worker and
 opens the current viewer instead of reconnecting to stale behavior.
+
+The desktop shell currently lives in `desktop/` and is built with Tauri 2. Its
+security and process-lifecycle contract is documented in
+[`desktop/README.md`](desktop/README.md). The existing portable CLI release
+continues to work while native application packaging and first-run project
+onboarding are completed.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

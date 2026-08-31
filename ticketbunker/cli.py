@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, agent_runtime, autoagent, commands, config, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
+from . import __version__, agent_runtime, autoagent, commands, config, desktop, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -1714,19 +1714,30 @@ def cmd_open_source(args: argparse.Namespace) -> int:
         print(f"error: {exc.message}", file=sys.stderr)
         return 1
     if result.get("mode") == "builtin":
+        from urllib.parse import urlencode
+
+        query = urlencode({"path": result["path"], "line": result["line"]})
+        route = f"/source?{query}"
+        try:
+            if desktop.open_project(root, port=args.port, route=route):
+                print(f"opened {result['path']}:{result['line']} in the TicketBunker app")
+                return 0
+        except desktop.DesktopLaunchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
         viewer_args = argparse.Namespace(
             port=args.port,
             foreground=False,
             open=False,
+            browser=True,
         )
         code = cmd_view(viewer_args)
         if code:
             return code
         import webbrowser
-        from urllib.parse import urlencode
 
-        query = urlencode({"path": result["path"], "line": result["line"]})
-        target = f"http://127.0.0.1:{viewer_args.port}/source?{query}"
+        target = f"http://127.0.0.1:{viewer_args.port}{route}"
         webbrowser.open(target)
         print(f"opened {result['path']}:{result['line']} in the TicketBunker editor")
         return 0
@@ -1753,6 +1764,14 @@ def cmd_view(args: argparse.Namespace) -> int:
     if not root:
         print("error: no .tb/ found here or above — run 'tb init' inside your git repo first", file=sys.stderr)
         return 1
+    if args.open and not args.foreground and not getattr(args, "browser", False):
+        try:
+            if desktop.open_project(root, port=args.port):
+                print(f"opened TicketBunker for {root}")
+                return 0
+        except desktop.DesktopLaunchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     from . import viewer
 
     port = args.port
@@ -2235,13 +2254,14 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser(
         "view",
-        help="open the local ticket viewer in the background",
+        help="open this project in TicketBunker",
     )
     s.add_argument("--port", type=int, default=8377, help="localhost port (default: 8377)")
-    s.add_argument("--open", dest="open", action="store_true", help="open the viewer in your browser (default)")
-    s.add_argument("--no-open", dest="open", action="store_false", help="start without opening a browser")
-    s.add_argument("--foreground", action="store_true", help="keep the viewer attached to this terminal")
-    s.set_defaults(open=True)
+    s.add_argument("--open", dest="open", action="store_true", help="open TicketBunker (default)")
+    s.add_argument("--no-open", dest="open", action="store_false", help="start only the local viewer service")
+    s.add_argument("--browser", action="store_true", help="use a browser instead of the desktop app")
+    s.add_argument("--foreground", action="store_true", help="run the browser viewer in this terminal")
+    s.set_defaults(open=True, browser=False)
     s.set_defaults(fn=cmd_view)
 
     s = sub.add_parser("_viewer-worker", help=argparse.SUPPRESS)

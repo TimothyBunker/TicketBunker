@@ -479,16 +479,19 @@ dots beside the title. Synthesis remains visible as its own dot plus `Updated
 <age>` when known, or its concise actionable state when no successful update
 exists. Hover, keyboard focus, and click reveal each full label, detail, and
 action, so touch and keyboard users do not depend on hover. The synthesis
-button remains the only viewer route that starts the model. While running, the
+button remains the only application route that starts the model. While running, the
 state stays visibly busy. On failure, Retry synthesis and View log sit together
 inside the disclosure; the localhost-only log page escapes and bounds the
 output and names the exact local path. Every stopped state preserves the prior
-report and names the next action. `tb view`
-normally starts this localhost server as a detached helper, opens the browser,
-and returns the terminal immediately. Per-page presence and close signals keep
-it alive across navigation and stop it shortly after the final tab closes;
-stale sessions expire. `--foreground` retains an attached diagnostic mode and
-`--no-open` suppresses browser launch.
+report and names the next action. `tb view` normally opens the installed
+TicketBunker desktop shell and returns the terminal immediately. The shell owns
+one localhost core child for the selected project and stops it when the window
+closes. If the desktop app is not installed, the command keeps the existing
+detached browser viewer as a compatibility fallback. `--browser` explicitly
+selects that fallback, `--foreground` retains its attached diagnostic mode,
+and `--no-open` starts only its local service. Per-page presence and close
+signals keep the browser fallback alive across navigation and stop it shortly
+after the final tab closes; stale sessions expire.
 
 The local health response identifies the TicketBunker version. After an update,
 `tb view` never reuses an older detached worker for the same project; it opens
@@ -1178,6 +1181,61 @@ resolved pi executable, so a packaged installation keeps working outside the
 terminal environment that ran init. Git events remain non-blocking: readiness
 is established during init/doctor, while any later provider outage is recorded
 by the existing background worker without failing Git.
+
+### 3.19 Desktop application shell
+
+The ordinary interactive surface is a distinct TicketBunker desktop
+application. It preserves the ticket viewer's restrained browser-quality UI;
+the app shell is a distribution and lifecycle boundary, not a competing UI or
+a second backend. The CLI remains fully supported for scripts, hooks, remote
+terminals, and direct commands.
+
+The application has three layers:
+
+1. A small Tauri shell owns windows, application startup and shutdown, and the
+   local-only project chooser.
+2. The frozen Python `tb` executable remains the application core. It owns Git,
+   tracker adapters, typed commands, the read model, agent orchestration, and
+   all durable TicketBunker state.
+3. The existing stdlib viewer renders the application UI at an ephemeral exact
+   loopback origin. CLI, desktop, and browser fallback therefore reach the same
+   Python command handlers and cannot drift into separate behavior.
+
+The packaged desktop executable and `tb` core are siblings. The shell starts
+`tb _viewer-worker` with an explicit canonical project, port, and unguessable
+launch ID, waits for readiness, and kills that exact child when its project
+window is destroyed. `tb view` discovers the sibling or PATH desktop binary
+and passes structured arguments without a shell. `TB_DESKTOP_APP` and
+`TB_DESKTOP_CORE` are developer/managed-install overrides, never required user
+setup. Source links pass only a same-origin application route; they do not ask
+the shell to read or edit a path.
+
+**Ticket content has no native bridge.** A project window loads only its exact
+`http://127.0.0.1:<owned-port>` origin, rejects navigation to every other
+origin, and receives no Tauri capability. File reads, saves, Git operations,
+and synthesis continue through the Python server's existing typed and
+checkout-confined commands. A later privileged local Projects/onboarding
+window must use a separate webview label and must never navigate to tracker,
+agent, or loopback ticket HTML. Remote HTML is never loaded into either native
+context.
+
+First run is application-facing:
+
+- establish a machine-local TicketBunker profile (display name and email),
+  defaulting to Git identity when available;
+- select or defer an agent provider/model, with login handled in the app and
+  secrets retained by the provider/runtime rather than TicketBunker;
+- choose **Add Git project**, then select a local checkout;
+- if the checkout has a locator, offer to join its TicketBunker project using
+  the authority that project already declares; otherwise offer to create a
+  TicketBunker project and explicitly link user-provided storage.
+
+There is no universal TicketBunker account or hosted database implied by the
+desktop shell. Identity and membership are local or scoped to the storage
+authority selected by the project. TicketBunker may provide adapters and setup
+guidance, but teams own their database, credentials, access rules, and remote.
+Browser mode remains an explicit accessibility, diagnostics, server, and
+air-gapped fallback rather than a lesser command path.
 
 ## 4. Ordering & atomicity principles
 

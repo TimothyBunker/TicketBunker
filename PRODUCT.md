@@ -50,6 +50,7 @@ and report provenance easier to reach. It should disappear into the task.
 10. Make synthesis intentional. Ordinary checkout, commit, merge, and rebase events mark the affected ticket as changed without calling a model; the user starts synthesis from the ticket state hub when a new summary is useful.
 11. Make shared truth explicit. Render cached ticket data immediately, refresh companion and Git refs in the background, and name synthesis age, commits since, preserved state, and the next action whenever work stops.
 12. Keep the coworker in the ticket layer. One private per-user/per-ticket session may explain and propose gated child-report synthesis updates; it never edits source or Combined directly.
+13. Make it feel like one application. Preserve the direct ticket interface inside a distinct desktop shell; keep the Python core and CLI as the one behavior boundary, and keep browser mode as an explicit fallback.
 
 ## Accessibility & Inclusion
 

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TicketBunker">
+  <rect width="512" height="512" rx="112" fill="#172a4a"/>
+  <path d="M128 142h256v76H292v170h-72V218h-92z" fill="#f6f8fc"/>
+  <path d="M292 256h92v132h-92v-62h38v-14h-38z" fill="#6687f5"/>
+</svg>

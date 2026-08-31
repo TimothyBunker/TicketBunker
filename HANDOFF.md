@@ -201,12 +201,16 @@ exercise unless a live boundary is explicitly called out.
   source text can attach its guarded path, line range, text, and saved/draft
   state to the same ticket coworker. External editors remain an explicit option
   and fall back to the included editor when unavailable.
-- `tb view` now opens the browser and returns immediately. Its detached
-  localhost worker tracks page presence, survives in-app navigation, and shuts
-  down shortly after the last tab closes. Its health response carries the
-  TicketBunker version; a later `tb view` detects an older worker, starts the
-  current viewer on a nearby loopback port, and tells the user the older tab can
-  be closed. `--foreground` and `--no-open` remain explicit overrides.
+- A Tauri 2 desktop shell now gives the existing interface a distinct app
+  window without creating a second frontend or backend. It starts the Python
+  core as an owned child, loads only that exact loopback origin, exposes no
+  native capabilities to ticket content, accepts guarded in-app routes such as
+  the included source editor, and stops the core when its window closes.
+- `tb view` prefers that app when installed and returns immediately;
+  `tb view --browser` explicitly selects the prior detached browser viewer.
+  If no app is installed, browser mode remains the automatic fallback. Its
+  health/version replacement, page-presence shutdown, `--foreground`, and
+  `--no-open` behavior are unchanged.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -215,7 +219,8 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.20 has a six-platform release pipeline: Linux, macOS, and Windows
+- Version 0.2.21 keeps the six-platform core release pipeline while the new
+  native app bundle is integrated: Linux, macOS, and Windows
   on x64 and arm64. Each normal archive contains a frozen, Python-free `tb`,
   the complete official pi 0.84.2 standalone distribution, the packaged
   TicketBunker extension, upstream MIT license and notice, a per-file manifest,

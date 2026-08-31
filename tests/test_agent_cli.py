@@ -165,17 +165,43 @@ class AgentCliTests(unittest.TestCase):
         }
         with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
             with mock.patch.object(cli.commands, "dispatch", return_value=response):
-                with mock.patch.object(cli, "cmd_view", return_value=0) as start_viewer:
-                    with mock.patch("webbrowser.open") as opened:
-                        code, stdout, stderr = self._run(
-                            ["open", "@[ticketbunker/viewer.py]:42"]
-                        )
+                with mock.patch.object(cli.desktop, "open_project", return_value=False):
+                    with mock.patch.object(cli, "cmd_view", return_value=0) as start_viewer:
+                        with mock.patch("webbrowser.open") as opened:
+                            code, stdout, stderr = self._run(
+                                ["open", "@[ticketbunker/viewer.py]:42"]
+                            )
 
         self.assertEqual(code, 0, stderr)
         self.assertIn("TicketBunker editor", stdout)
         start_viewer.assert_called_once()
         self.assertIn("/source?", opened.call_args.args[0])
         self.assertIn("ticketbunker%2Fviewer.py", opened.call_args.args[0])
+
+    def test_open_source_cli_routes_the_owned_editor_into_the_desktop_app(self) -> None:
+        response = {
+            "opened": True,
+            "mode": "builtin",
+            "path": "ticketbunker/viewer.py",
+            "line": 42,
+            "editor": "TicketBunker",
+        }
+        with mock.patch.object(cli.project_mod, "find_source_root", return_value=self.root):
+            with mock.patch.object(cli.commands, "dispatch", return_value=response):
+                with mock.patch.object(cli.desktop, "open_project", return_value=True) as opened:
+                    with mock.patch.object(cli, "cmd_view") as start_viewer:
+                        code, stdout, stderr = self._run(
+                            ["open", "@[ticketbunker/viewer.py]:42"]
+                        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("TicketBunker app", stdout)
+        opened.assert_called_once_with(
+            self.root,
+            port=8378,
+            route="/source?path=ticketbunker%2Fviewer.py&line=42",
+        )
+        start_viewer.assert_not_called()
 
     def test_view_opens_the_browser_by_default_and_keeps_foreground_optional(self) -> None:
         seen: list[argparse.Namespace] = []
@@ -190,6 +216,37 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertTrue(seen[0].open)
         self.assertFalse(seen[0].foreground)
+        self.assertFalse(seen[0].browser)
+
+    def test_view_prefers_the_desktop_app_when_it_is_installed(self) -> None:
+        with mock.patch.object(cli.layout, "find_root", return_value=self.root):
+            with mock.patch.object(cli.desktop, "open_project", return_value=True) as opened:
+                code, stdout, stderr = self._run(["view", "--port", "18499"])
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("opened TicketBunker", stdout)
+        opened.assert_called_once_with(self.root, port=18499)
+
+    def test_view_browser_flag_skips_the_desktop_app(self) -> None:
+        server = mock.Mock()
+        server.server_address = ("127.0.0.1", 18499)
+        server.serve_forever.side_effect = KeyboardInterrupt
+        with mock.patch.object(cli.layout, "find_root", return_value=self.root):
+            with mock.patch.object(cli.desktop, "open_project") as opened:
+                with mock.patch("ticketbunker.viewer.serve", return_value=server):
+                    code, _stdout, stderr = self._run(
+                        [
+                            "view",
+                            "--browser",
+                            "--foreground",
+                            "--no-open",
+                            "--port",
+                            "18499",
+                        ]
+                    )
+
+        self.assertEqual(code, 0, stderr)
+        opened.assert_not_called()
 
     def test_background_viewer_passes_dash_prefixed_launch_id_as_one_argument(self) -> None:
         response = mock.MagicMock()

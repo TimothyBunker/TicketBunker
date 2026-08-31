@@ -1,0 +1,17 @@
+[package]
+name = "ticketbunker-desktop"
+version = "0.2.21"
+description = "The TicketBunker desktop application shell"
+authors = ["TicketBunker contributors"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "ticketbunker_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.5", features = [] }
