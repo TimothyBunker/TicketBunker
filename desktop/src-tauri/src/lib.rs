@@ -7,38 +7,46 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const DEFAULT_PORT: u16 = 8377;
 const PORT_ATTEMPTS: u16 = 20;
 
 #[derive(Debug, PartialEq, Eq)]
 struct LaunchOptions {
-    repo: PathBuf,
+    repo: Option<PathBuf>,
     port: u16,
     core: Option<PathBuf>,
     route: String,
 }
 
-struct CoreProcess(Mutex<Option<Child>>);
+struct ApplicationState {
+    core: PathBuf,
+    preferred_port: u16,
+    process: Mutex<Option<Child>>,
+}
 
-fn parse_options<I>(args: I, current_dir: &Path) -> Result<LaunchOptions, String>
+fn parse_options<I>(args: I) -> Result<LaunchOptions, String>
 where
     I: IntoIterator<Item = OsString>,
 {
     let mut values = args.into_iter();
-    let mut repo = current_dir.to_path_buf();
+    let mut repo = None;
     let mut port = DEFAULT_PORT;
     let mut core = None;
     let mut route = "/".to_string();
     while let Some(value) = values.next() {
         match value.to_string_lossy().as_ref() {
             "--repo" => {
-                repo = PathBuf::from(
+                let raw = PathBuf::from(
                     values
                         .next()
                         .ok_or_else(|| "--repo requires a Git project path".to_string())?,
                 );
+                repo = Some(raw.canonicalize().map_err(|error| {
+                    format!("cannot open Git project {}: {error}", raw.display())
+                })?);
             }
             "--port" => {
                 let raw = values
@@ -63,21 +71,24 @@ where
                     .ok_or_else(|| "--route requires an application path".to_string())?
                     .to_string_lossy()
                     .into_owned();
-                if !route.starts_with('/') || route.starts_with("//") || route.contains("://") {
-                    return Err("--route must begin with one '/'".to_string());
-                }
+                validate_route(&route)?;
             }
             unknown => return Err(format!("unknown desktop option: {unknown}")),
         }
     }
     Ok(LaunchOptions {
-        repo: repo
-            .canonicalize()
-            .map_err(|error| format!("cannot open Git project {}: {error}", repo.display()))?,
+        repo,
         port,
         core,
         route,
     })
+}
+
+fn validate_route(route: &str) -> Result<(), String> {
+    if !route.starts_with('/') || route.starts_with("//") || route.contains("://") {
+        return Err("--route must begin with one '/'".to_string());
+    }
+    Ok(())
 }
 
 fn available_port(preferred: u16) -> Result<u16, String> {
@@ -103,10 +114,8 @@ fn sibling_core() -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-fn core_executable(options: &LaunchOptions) -> PathBuf {
-    options
-        .core
-        .clone()
+fn core_executable(explicit: Option<PathBuf>) -> PathBuf {
+    explicit
         .or_else(|| env::var_os("TB_DESKTOP_CORE").map(PathBuf::from))
         .or_else(sibling_core)
         .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "tb.exe" } else { "tb" }))
@@ -120,16 +129,15 @@ fn launch_id() -> String {
     format!("desktop-{}-{timestamp}", std::process::id())
 }
 
-fn start_core(options: &LaunchOptions, port: u16) -> Result<Child, String> {
-    let executable = core_executable(options);
-    Command::new(&executable)
+fn start_core(executable: &Path, repo: &Path, port: u16) -> Result<Child, String> {
+    Command::new(executable)
         .arg("_viewer-worker")
         .arg("--repo")
-        .arg(&options.repo)
+        .arg(repo)
         .arg("--port")
         .arg(port.to_string())
         .arg(format!("--launch={}", launch_id()))
-        .current_dir(&options.repo)
+        .current_dir(repo)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -161,8 +169,8 @@ fn wait_until_ready(child: &mut Child, port: u16) -> Result<(), String> {
     Err("the TicketBunker core did not become ready within five seconds".to_string())
 }
 
-fn stop_core(process: &CoreProcess) {
-    let Ok(mut guarded) = process.0.lock() else {
+fn stop_core(state: &ApplicationState) {
+    let Ok(mut guarded) = state.process.lock() else {
         return;
     };
     if let Some(mut child) = guarded.take() {
@@ -171,50 +179,240 @@ fn stop_core(process: &CoreProcess) {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let options = parse_options(env::args_os().skip(1), &current_dir).unwrap_or_else(|message| {
-        eprintln!("TicketBunker could not open: {message}");
-        std::process::exit(2);
-    });
-    let port = available_port(options.port).unwrap_or_else(|message| {
-        eprintln!("TicketBunker could not open: {message}");
-        std::process::exit(2);
-    });
-    let mut core = start_core(&options, port).unwrap_or_else(|message| {
-        eprintln!("TicketBunker could not open: {message}");
-        std::process::exit(2);
-    });
+fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
+    let output = Command::new(&state.core)
+        .arg("_app-command")
+        .arg(name)
+        .arg("--payload")
+        .arg(payload.to_string())
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .trim_start_matches("error:")
+            .trim()
+            .to_string();
+        return Err(if detail.is_empty() {
+            "TicketBunker could not complete that action.".to_string()
+        } else {
+            detail
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|_| "TicketBunker received an invalid response from its core.".to_string())
+}
+
+fn require_launcher(window: &WebviewWindow) -> Result<(), String> {
+    if window.label() != "launcher" {
+        return Err("This action is available only from the local Projects window.".to_string());
+    }
+    Ok(())
+}
+
+fn open_project_window(
+    app: &AppHandle,
+    state: &ApplicationState,
+    repo: &Path,
+    route: &str,
+) -> Result<(), String> {
+    validate_route(route)?;
+    let repo = repo
+        .canonicalize()
+        .map_err(|error| format!("cannot open Git project {}: {error}", repo.display()))?;
+    if app.get_webview_window("project").is_some() {
+        return Err("Close the open project before opening another one.".to_string());
+    }
+    let port = available_port(state.preferred_port)?;
+    let mut core = start_core(&state.core, &repo, port)?;
     if let Err(message) = wait_until_ready(&mut core, port) {
         let _ = core.kill();
         let _ = core.wait();
+        return Err(message);
+    }
+    let url: tauri::Url = format!("http://127.0.0.1:{port}{route}")
+        .parse()
+        .map_err(|_| "TicketBunker could not build its local project URL.".to_string())?;
+    let window = WebviewWindowBuilder::new(app, "project", WebviewUrl::External(url))
+        .title(format!(
+            "TicketBunker · {}",
+            repo.file_name().unwrap_or_default().to_string_lossy()
+        ))
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(760.0, 560.0)
+        .zoom_hotkeys_enabled(true)
+        .on_navigation(move |candidate| {
+            candidate.scheme() == "http"
+                && candidate.host_str() == Some("127.0.0.1")
+                && candidate.port() == Some(port)
+        })
+        .build()
+        .map_err(|error| {
+            let _ = core.kill();
+            let _ = core.wait();
+            format!("TicketBunker could not create its project window: {error}")
+        })?;
+    let mut guarded = state
+        .process
+        .lock()
+        .map_err(|_| "TicketBunker could not own its local core process.".to_string())?;
+    *guarded = Some(core);
+    drop(guarded);
+    if let Some(launcher) = app.get_webview_window("launcher") {
+        let _ = launcher.hide();
+    }
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+fn desktop_state(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.state", json!({}))
+}
+
+#[tauri::command]
+fn update_profile(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.profile.update", payload)
+}
+
+#[tauri::command]
+fn add_git_project(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    path: String,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.project.add", json!({ "path": path }))
+}
+
+#[tauri::command]
+fn remove_git_project(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    path: String,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(
+        &state,
+        "application.project.remove",
+        json!({ "path": path }),
+    )
+}
+
+#[tauri::command]
+fn connect_git_project(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<(), String> {
+    require_launcher(&window)?;
+    let response = core_command(&state, "application.project.connect", payload)?;
+    let path = response
+        .get("project")
+        .and_then(|value| value.get("path"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "TicketBunker did not return the connected project path.".to_string())?;
+    open_project_window(&app, &state, Path::new(path), "/")
+}
+
+#[tauri::command]
+fn open_git_project(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    path: String,
+) -> Result<(), String> {
+    require_launcher(&window)?;
+    let response = core_command(&state, "application.project.add", json!({ "path": path }))?;
+    let project = response
+        .get("project")
+        .ok_or_else(|| "TicketBunker did not return the selected project.".to_string())?;
+    if !project
+        .get("ready")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(
+            "Connect this Git project to its TicketBunker data before opening it.".to_string(),
+        );
+    }
+    let path = project
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "TicketBunker did not return the selected project path.".to_string())?;
+    open_project_window(&app, &state, Path::new(path), "/")
+}
+
+fn create_launcher(app: &AppHandle) -> Result<(), tauri::Error> {
+    WebviewWindowBuilder::new(app, "launcher", WebviewUrl::App("index.html".into()))
+        .title("TicketBunker")
+        .inner_size(1040.0, 700.0)
+        .min_inner_size(720.0, 520.0)
+        .on_navigation(|candidate| {
+            candidate.scheme() == "tauri" || candidate.host_str() == Some("tauri.localhost")
+        })
+        .build()?;
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let options = parse_options(env::args_os().skip(1)).unwrap_or_else(|message| {
         eprintln!("TicketBunker could not open: {message}");
         std::process::exit(2);
-    }
-    let url: tauri::Url = format!("http://127.0.0.1:{port}{}", options.route)
-        .parse()
-        .expect("the loopback viewer URL is valid");
+    });
+    let initial_repo = options.repo.clone();
+    let initial_route = options.route.clone();
+    let state = ApplicationState {
+        core: core_executable(options.core),
+        preferred_port: options.port,
+        process: Mutex::new(None),
+    };
 
     tauri::Builder::default()
-        .manage(CoreProcess(Mutex::new(Some(core))))
+        .plugin(tauri_plugin_dialog::init())
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            desktop_state,
+            update_profile,
+            add_git_project,
+            remove_git_project,
+            connect_git_project,
+            open_git_project
+        ])
         .setup(move |app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
-                .title("TicketBunker")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(760.0, 560.0)
-                .zoom_hotkeys_enabled(true)
-                .on_navigation(move |candidate| {
-                    candidate.scheme() == "http"
-                        && candidate.host_str() == Some("127.0.0.1")
-                        && candidate.port() == Some(port)
-                })
-                .build()?;
+            if let Some(repo) = initial_repo.as_deref() {
+                open_project_window(
+                    app.handle(),
+                    app.state::<ApplicationState>().inner(),
+                    repo,
+                    &initial_route,
+                )
+                .map_err(std::io::Error::other)?;
+            } else {
+                create_launcher(app.handle())?;
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                stop_core(&window.state::<CoreProcess>());
+            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "project" {
+                stop_core(window.state::<ApplicationState>().inner());
+                if let Some(launcher) = window.app_handle().get_webview_window("launcher") {
+                    let _ = launcher.show();
+                    let _ = launcher.set_focus();
+                    let _ = launcher.eval("window.ticketBunkerReload?.()");
+                }
             }
         })
         .run(tauri::generate_context!())
@@ -228,22 +426,19 @@ mod tests {
     #[test]
     fn desktop_arguments_keep_the_project_and_core_explicit() {
         let root = env::current_dir().expect("current directory");
-        let options = parse_options(
-            [
-                OsString::from("--repo"),
-                root.clone().into_os_string(),
-                OsString::from("--port"),
-                OsString::from("18499"),
-                OsString::from("--core"),
-                OsString::from("/opt/ticketbunker/tb"),
-                OsString::from("--route"),
-                OsString::from("/source?path=ticketbunker%2Fviewer.py&line=42"),
-            ],
-            &root,
-        )
+        let options = parse_options([
+            OsString::from("--repo"),
+            root.clone().into_os_string(),
+            OsString::from("--port"),
+            OsString::from("18499"),
+            OsString::from("--core"),
+            OsString::from("/opt/ticketbunker/tb"),
+            OsString::from("--route"),
+            OsString::from("/source?path=ticketbunker%2Fviewer.py&line=42"),
+        ])
         .expect("valid desktop options");
 
-        assert_eq!(options.repo, root.canonicalize().unwrap());
+        assert_eq!(options.repo, Some(root.canonicalize().unwrap()));
         assert_eq!(options.port, 18499);
         assert_eq!(options.core, Some(PathBuf::from("/opt/ticketbunker/tb")));
         assert_eq!(
@@ -253,22 +448,24 @@ mod tests {
     }
 
     #[test]
+    fn desktop_can_start_without_a_project_for_the_projects_window() {
+        let options = parse_options(Vec::<OsString>::new()).expect("empty desktop options");
+        assert_eq!(options.repo, None);
+        assert_eq!(options.route, "/");
+    }
+
+    #[test]
     fn desktop_rejects_an_unknown_option() {
-        let root = env::current_dir().expect("current directory");
-        let error = parse_options([OsString::from("--surprise")], &root).unwrap_err();
+        let error = parse_options([OsString::from("--surprise")]).unwrap_err();
         assert_eq!(error, "unknown desktop option: --surprise");
     }
 
     #[test]
     fn desktop_rejects_a_route_that_can_escape_the_loopback_origin() {
-        let root = env::current_dir().expect("current directory");
-        let error = parse_options(
-            [
-                OsString::from("--route"),
-                OsString::from("//example.com/not-ticketbunker"),
-            ],
-            &root,
-        )
+        let error = parse_options([
+            OsString::from("--route"),
+            OsString::from("//example.com/not-ticketbunker"),
+        ])
         .unwrap_err();
         assert_eq!(error, "--route must begin with one '/'");
     }

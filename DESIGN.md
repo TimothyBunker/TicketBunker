@@ -1230,6 +1230,30 @@ First run is application-facing:
   the authority that project already declares; otherwise offer to create a
   TicketBunker project and explicitly link user-provided storage.
 
+Opening the app without `--repo` therefore creates one bundled **Projects**
+window. It reads a machine-local profile and project-path registry through
+typed `application.*` Python commands; Rust does not invent another config
+file. The profile defaults to Git's global name and email and the configured
+branch identifier, so a complete Git identity does not create a ceremonial
+signup step. Editing it changes only TicketBunker's local profile and branch
+identifier, never global Git configuration.
+
+**Add Git project** uses the operating system's directory chooser, normalizes
+the selection to the working-tree root, and rejects non-Git directories before
+remembering it. An existing locator is presented as **Join** until its ignored
+companion checkouts are ready. A project without a locator is presented as
+**Connect** and requires both a project key and an already-created companion
+repository URL; the app never creates or hosts that remote. Both actions use a
+visible confirmation dialog and dispatch the existing `project.connect`
+command. Only a ready checkout can open the unprivileged ticket window. Closing
+that window stops its owned Python child and returns to the Projects window.
+
+The bundled Projects window is the sole recipient of the native directory
+dialog permission. Its Tauri commands also check the caller's window label.
+The loopback ticket window has no capability and no allowed remote-origin IPC;
+Tauri 2.11.5 or newer is required because remote origins are always subject to
+that ACL boundary.
+
 There is no universal TicketBunker account or hosted database implied by the
 desktop shell. Identity and membership are local or scoped to the storage
 authority selected by the project. TicketBunker may provide adapters and setup

@@ -211,6 +211,14 @@ exercise unless a live boundary is explicitly called out.
   If no app is installed, browser mode remains the automatic fallback. Its
   health/version replacement, page-presence shutdown, `--foreground`, and
   `--no-open` behavior are unchanged.
+- Opening the app without CLI arguments now lands on its bundled Projects
+  window. A native picker registers normalized Git roots through typed
+  `application.*` commands; machine-local identity defaults from Git, and
+  remembered projects show Ready, Join, or Connect. Join/Create visibly calls
+  the existing `project.connect` backend, and Create requires a user-created
+  companion repository URL. The privileged local window and unprivileged
+  loopback ticket window are separate labels; only Projects receives the
+  directory-dialog capability.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the

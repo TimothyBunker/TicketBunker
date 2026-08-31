@@ -318,9 +318,14 @@ opens the current viewer instead of reconnecting to stale behavior.
 
 The desktop shell currently lives in `desktop/` and is built with Tauri 2. Its
 security and process-lifecycle contract is documented in
-[`desktop/README.md`](desktop/README.md). The existing portable CLI release
-continues to work while native application packaging and first-run project
-onboarding are completed.
+[`desktop/README.md`](desktop/README.md). Opening the app itself lands on
+Projects. **Add Git project** chooses a local checkout; an existing locator can
+be joined, while a new TicketBunker project asks for an already-created
+companion repository URL. TicketBunker never creates or hosts that repository.
+The local profile defaults from Git and can be changed from the identity button
+without changing global Git configuration. The existing portable CLI release
+continues to work while native application packaging and in-app agent login are
+completed.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

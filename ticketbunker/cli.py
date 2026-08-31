@@ -1912,6 +1912,34 @@ def cmd_viewer_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_application_command(args: argparse.Namespace) -> int:
+    allowed = {
+        "application.state",
+        "application.profile.update",
+        "application.project.add",
+        "application.project.connect",
+        "application.project.remove",
+    }
+    if args.application_command not in allowed:
+        print("error: command is not available to the desktop shell", file=sys.stderr)
+        return 1
+    try:
+        payload = json.loads(args.payload)
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        result = commands.dispatch(
+            args.application_command,
+            payload,
+            commands.CommandContext(Path.cwd(), transport="desktop"),
+        )
+    except (ValueError, commands.CommandRejected) as exc:
+        message = exc.message if isinstance(exc, commands.CommandRejected) else str(exc)
+        print(f"error: {message}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def cmd_checkout(args: argparse.Namespace) -> int:
     bunker = _resolve_bunker(args.bunker)
     if bunker is None:
@@ -2269,6 +2297,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, required=True)
     s.add_argument("--launch", required=True)
     s.set_defaults(fn=cmd_viewer_worker)
+
+    s = sub.add_parser("_app-command", help=argparse.SUPPRESS)
+    s.add_argument("application_command")
+    s.add_argument("--payload", default="{}")
+    s.set_defaults(fn=cmd_application_command)
 
     s = sub.add_parser("checkout", help="refresh the ticket's canonical report components and compile the master")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")

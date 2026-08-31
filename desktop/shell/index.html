@@ -4,27 +4,126 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TicketBunker</title>
-    <style>
-      :root {
-        color: oklch(0.28 0.012 250);
-        background: oklch(0.975 0.004 250);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-      }
-      body {
-        min-height: 100vh;
-        margin: 0;
-        display: grid;
-        place-items: center;
-      }
-      main { text-align: center; }
-      h1 { margin: 0; font-size: 1.25rem; font-weight: 650; }
-      p { margin: 8px 0 0; color: oklch(0.52 0.012 250); }
-    </style>
+    <link rel="stylesheet" href="app.css">
+    <script src="app.js" defer></script>
   </head>
   <body>
+    <header class="app-header">
+      <div class="brand" aria-label="TicketBunker">
+        <span class="brand-mark" aria-hidden="true">TB</span>
+        <span>TicketBunker</span>
+      </div>
+      <button class="identity-button" id="identity-button" type="button" hidden>
+        <span class="identity-name"></span>
+        <span class="avatar" aria-hidden="true"></span>
+      </button>
+    </header>
+
     <main>
-      <h1>TicketBunker</h1>
-      <p>Opening your projects…</p>
+      <section class="loading-state" id="loading-state" aria-live="polite">
+        <span class="loading-mark" aria-hidden="true"></span>
+        <p>Opening your projects</p>
+      </section>
+
+      <section class="onboarding" id="onboarding" hidden>
+        <p class="eyebrow">First run</p>
+        <h1>Set up TicketBunker</h1>
+        <p class="lead">Your profile stays on this computer.</p>
+        <form id="onboarding-form" class="profile-form">
+          <label>
+            <span>Name</span>
+            <input name="name" autocomplete="name" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required>
+          </label>
+          <label>
+            <span>Branch name</span>
+            <input name="branch_user" autocomplete="username" required>
+          </label>
+          <div class="form-actions">
+            <button class="primary" type="submit">Continue</button>
+            <output class="form-status" aria-live="polite"></output>
+          </div>
+        </form>
+      </section>
+
+      <section class="projects-view" id="projects-view" hidden>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">Workspace</p>
+            <h1>Projects</h1>
+          </div>
+          <button class="primary" id="add-project" type="button">
+            <span aria-hidden="true">+</span> Add Git project
+          </button>
+        </div>
+        <div class="project-list" id="project-list"></div>
+        <div class="empty-state" id="empty-state" hidden>
+          <h2>Add your first Git project</h2>
+          <p>Choose a local checkout. TicketBunker will find its existing setup or help you connect one.</p>
+          <button class="primary" id="empty-add-project" type="button">Add Git project</button>
+        </div>
+      </section>
     </main>
+
+    <dialog id="connect-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="connect-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Connect project</p>
+            <h2 id="connect-title">Git project</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Cancel" type="submit">×</button>
+        </div>
+        <p class="dialog-copy" id="connect-copy"></p>
+        <div id="create-fields" class="connect-fields">
+          <label>
+            <span>Project key</span>
+            <input name="project" pattern="[A-Z][A-Z0-9]*" placeholder="ECS">
+          </label>
+          <label>
+            <span>Companion repository</span>
+            <input name="bunker_repo" placeholder="git@host:team/project-ticketbunker.git">
+          </label>
+          <p class="field-note">Create the empty repository on a Git host you control, then paste its URL here.</p>
+        </div>
+        <input name="path" type="hidden">
+        <div class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button class="primary" id="connect-submit" value="default" type="submit">Connect</button>
+        </div>
+        <output class="form-status" id="connect-status" aria-live="polite"></output>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog" class="dialog">
+      <form method="dialog" class="dialog-card settings-card" id="settings-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Local settings</p>
+            <h2>Your profile</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close" type="submit">×</button>
+        </div>
+        <div class="profile-form">
+          <label><span>Name</span><input name="name" autocomplete="name" required></label>
+          <label><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+          <label><span>Branch name</span><input name="branch_user" autocomplete="username" required></label>
+        </div>
+        <div class="agent-summary">
+          <span>Agent</span>
+          <strong id="agent-status">Not set up</strong>
+        </div>
+        <div class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button class="primary" id="settings-save" value="default" type="submit">Save</button>
+        </div>
+        <output class="form-status" id="settings-status" aria-live="polite"></output>
+      </form>
+    </dialog>
+
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
   </body>
 </html>
