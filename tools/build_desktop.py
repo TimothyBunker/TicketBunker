@@ -90,6 +90,10 @@ def stage(
         resources / "share" / "ticketbunker" / "harness" / "pi" / "tb.ts",
     )
     build_release.copy_file(
+        ROOT / "ticketbunker" / "harness" / "pi" / "tb_auth.ts",
+        resources / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts",
+    )
+    build_release.copy_file(
         ROOT / "ticketbunker" / "licenses" / "pi-MIT.txt",
         resources / "share" / "licenses" / "pi" / "LICENSE.txt",
     )
@@ -109,12 +113,16 @@ def stage(
     return sidecar, resources
 
 
-def publish_native_packages(bundle_root: Path, release_root: Path) -> list[Path]:
-    """Flatten native installers into the release directory with checksums."""
+def publish_native_packages(
+    bundle_root: Path, release_root: Path, *, version: str
+) -> list[Path]:
+    """Flatten this build's native installers with adjacent checksums."""
     packages = sorted(
         path
         for path in bundle_root.rglob("*")
-        if path.is_file() and path.suffix.lower() in NATIVE_PACKAGE_SUFFIXES
+        if path.is_file()
+        and path.suffix.lower() in NATIVE_PACKAGE_SUFFIXES
+        and version in path.name
     )
     if not packages:
         raise ValueError("Tauri produced no native installer to publish")
@@ -139,6 +147,13 @@ def build(args: argparse.Namespace) -> None:
     )
     print(f"staged core: {sidecar}")
     print(f"staged runtime: {resources}")
+    build_release.smoke_auth_bridge(
+        resources / "libexec" / "ticketbunker" / Path(
+            json.loads(PI_MANIFEST.read_text(encoding="utf-8"))["platforms"][args.platform]["executable"]
+        ),
+        resources / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts",
+    )
+    print("agent auth bridge: verified")
     if args.stage_only:
         return
     command = [
@@ -161,6 +176,7 @@ def build(args: argparse.Namespace) -> None:
     published = publish_native_packages(
         DESKTOP / "src-tauri" / "target" / "release" / "bundle",
         ROOT / "dist" / "releases",
+        version=build_release.package_version(),
     )
     for artifact in published:
         print(f"release asset: {artifact}")

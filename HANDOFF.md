@@ -219,6 +219,14 @@ exercise unless a live boundary is explicitly called out.
   companion repository URL. The privileged local window and unprivileged
   loopback ticket window are separate labels; only Projects receives the
   directory-dialog capability.
+- First-run and Local settings now provide the complete agent path without
+  opening Pi's terminal UI. The Projects window starts verified Pi in
+  constrained RPC mode with only TicketBunker's pinned auth bridge, renders
+  OAuth, device-code, select, and secret prompts itself, and sends replies
+  directly from Rust to Pi. Pi alone writes credentials; Python receives only
+  readiness and the selected provider/model. Closing setup kills the child,
+  and opening/cancelling does not silently enable an agent. The explicit
+  **Use without agent** route preserves non-agent work.
 - Harness/provider/model identity is displayed separately from work authors.
   Unknown generator fields are omitted, never guessed.
 - Report publication still passes lint plus anchor verification and stamps the
@@ -227,13 +235,15 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.21 keeps the six-platform core release pipeline while the new
+- Version 0.2.22 keeps the six-platform core release pipeline while the new
   native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
   emits Debian/AppImage, app/DMG, or NSIS outputs. The app supplies its private
   resource root to the core, whose existing per-file integrity gate verifies
-  Pi before use. Native installers are flattened into `dist/releases/` with
+  Pi before use. Release construction also opens the staged Pi RPC runtime and
+  requires a valid provider/model catalog from the pinned auth bridge. Native
+  installers are flattened into `dist/releases/` with
   adjacent SHA-256 files. The Linux Debian (67 MB) and AppImage (136 MB) were
   built and launched live; the extracted Debian reported bundled Pi integrity
   verified.
@@ -277,7 +287,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 193 tests, plus 5 Rust shell tests.
+references. The current full suite is 200 tests, plus 7 Rust shell tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,

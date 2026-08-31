@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import commands, config, project
+from . import agent_runtime, commands, config, project
 
 
 def _git_value(key: str) -> str:
@@ -102,6 +102,7 @@ def state() -> dict[str, Any]:
             "provider": str(agent.get("provider") or ""),
             "model": str(agent.get("model") or ""),
             "configured": bool(agent.get("provider") and agent.get("model")),
+            "decided": "agent" in settings,
         },
     }
 
@@ -133,6 +134,68 @@ def command_profile_update(
     settings["user"] = branch_user
     config.save(settings)
     return {"profile": _profile(settings)}
+
+
+@commands.register("application.agent.state")
+def command_agent_state(
+    context: commands.CommandContext, _payload: dict[str, Any]
+) -> dict[str, Any]:
+    return {"agent": agent_runtime.state(context.project_root)}
+
+
+@commands.register("application.agent.prepare")
+def command_agent_prepare(
+    context: commands.CommandContext, _payload: dict[str, Any]
+) -> dict[str, Any]:
+    before = config.load()
+    prior_agent = before.get("agent") if isinstance(before.get("agent"), dict) else None
+    try:
+        runtime = agent_runtime.ensure_runtime()
+    except agent_runtime.RuntimeInstallError as exc:
+        raise commands.CommandRejected("agent_runtime_unavailable", exc.summary) from exc
+    after = config.load()
+    if prior_agent is None:
+        after.pop("agent", None)
+        config.save(after)
+    elif prior_agent.get("enabled") is False:
+        current_agent = after.get("agent") if isinstance(after.get("agent"), dict) else {}
+        after["agent"] = {**current_agent, "enabled": False}
+        config.save(after)
+    return {
+        "runtime": runtime.path,
+        "extension": str(agent_runtime.auth_extension_path()),
+        "agent": agent_runtime.state(context.project_root),
+    }
+
+
+@commands.register("application.agent.configure")
+def command_agent_configure(
+    context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    if payload.get("enabled") is False:
+        agent_runtime.set_core_only()
+        return {"agent": agent_runtime.state(context.project_root)}
+    provider = str(payload.get("provider") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    if not provider or not model:
+        raise commands.CommandRejected(
+            "agent_selection_required", "Choose both a provider and a model."
+        )
+    prior = config.load().get("agent")
+    was_disabled = isinstance(prior, dict) and prior.get("enabled") is False
+    try:
+        runtime = agent_runtime.ensure_runtime()
+    except agent_runtime.RuntimeInstallError as exc:
+        raise commands.CommandRejected("agent_runtime_unavailable", exc.summary) from exc
+    result = agent_runtime.configure_selection(
+        runtime, provider=provider, model=model, repo=context.project_root
+    )
+    if not result.get("ready") and was_disabled:
+        settings = config.load()
+        current = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
+        settings["agent"] = {**current, "enabled": False}
+        config.save(settings)
+    return {"agent": result}
 
 
 @commands.register("application.project.add")

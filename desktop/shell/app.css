@@ -9,9 +9,9 @@
 [hidden] { display: none !important; }
 
 body { min-width: 320px; min-height: 100vh; margin: 0; background: #f7f8fa; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 3px solid rgba(28, 92, 171, .24); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgba(28, 92, 171, .24); outline-offset: 2px; }
 
 .app-header {
   height: 60px;
@@ -58,7 +58,8 @@ h2 { margin-bottom: 0; font-size: 18px; line-height: 1.3; letter-spacing: -.02em
 .profile-form, .connect-fields { display: grid; gap: 16px; }
 label { display: grid; gap: 6px; color: #3c495d; font-size: 12px; font-weight: 650; }
 input { width: 100%; height: 40px; padding: 0 11px; border: 1px solid #cfd6e1; border-radius: 5px; color: #172033; background: #fff; font-size: 13px; }
-input:hover { border-color: #aeb9c9; }
+select { width: 100%; height: 40px; padding: 0 32px 0 11px; border: 1px solid #cfd6e1; border-radius: 5px; color: #172033; background: #fff; font-size: 13px; }
+input:hover, select:hover { border-color: #aeb9c9; }
 .form-actions { display: flex; align-items: center; gap: 14px; margin-top: 7px; }
 .form-status { color: #a03b3b; font-size: 12px; }
 
@@ -93,8 +94,25 @@ button:disabled { cursor: wait; opacity: .6; }
 .dialog-copy { margin-bottom: 20px; color: #5d6a7f; font-size: 13px; line-height: 1.55; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 23px; }
 .field-note { margin: -5px 0 0; color: #748196; font-size: 11px; line-height: 1.45; }
-.agent-summary { display: flex; justify-content: space-between; margin-top: 23px; padding: 15px 0; border-top: 1px solid #e2e6ed; border-bottom: 1px solid #e2e6ed; color: #627086; font-size: 12px; }
+.agent-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 23px; padding: 13px 0; border-top: 1px solid #e2e6ed; border-bottom: 1px solid #e2e6ed; color: #627086; font-size: 12px; }
+.agent-summary > div { display: grid; gap: 3px; }
 .agent-summary strong { color: #27354a; font-weight: 650; }
+.agent-dialog { width: min(610px, calc(100% - 32px)); }
+.agent-loading { min-height: 190px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #68768a; font-size: 12px; }
+.agent-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.agent-auth-row { grid-column: 1 / -1; min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-top: 1px solid #e1e6ed; border-bottom: 1px solid #e1e6ed; }
+.agent-auth-row > div:first-child { display: grid; gap: 3px; }
+.agent-auth-label { color: #657287; font-size: 11px; font-weight: 650; }
+.agent-auth-row strong { color: #29374c; font-size: 12px; font-weight: 650; }
+.agent-auth-actions { display: flex; align-items: center; gap: 8px; }
+.agent-auth-actions select { width: auto; min-width: 132px; height: 34px; }
+.agent-progress { grid-column: 1 / -1; padding: 12px 14px; border: 1px solid #d8e2ef; border-radius: 6px; color: #42526a; background: #f6f9fd; font-size: 12px; line-height: 1.5; }
+.agent-progress strong { display: block; margin-bottom: 5px; color: #20324c; font-size: 14px; letter-spacing: .02em; }
+.agent-progress button { margin-top: 9px; }
+.agent-prompt { grid-column: 1 / -1; padding: 14px; border: 1px solid #d8e2ef; border-radius: 6px; background: #fafbfd; }
+.prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 11px; }
+.agent-dialog-actions { justify-content: space-between; }
+.agent-dialog-status { display: block; min-height: 18px; margin-top: 10px; }
 .notice { position: fixed; right: 22px; bottom: 22px; max-width: 420px; padding: 11px 14px; border: 1px solid #d7dee8; border-radius: 6px; color: #364359; background: #fff; box-shadow: 0 8px 24px rgba(30, 48, 74, .12); font-size: 12px; }
 .notice.error { border-color: #e4c6c6; color: #8d3131; background: #fffafa; }
 
@@ -105,4 +123,8 @@ button:disabled { cursor: wait; opacity: .6; }
   .project-row { grid-template-columns: 1fr; gap: 13px; }
   .project-actions { justify-content: flex-start; }
   .onboarding { margin-top: 12px; padding: 28px 24px; }
+  .agent-fields { grid-template-columns: 1fr; }
+  .agent-auth-row { grid-column: auto; align-items: start; flex-direction: column; }
+  .agent-auth-actions { width: 100%; }
+  .agent-auth-actions select { flex: 1; }
 }

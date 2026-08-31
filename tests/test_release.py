@@ -29,7 +29,12 @@ class ReleaseBuilderTests(unittest.TestCase):
             pi_tree = root / "payload" / "pi"
             pi_tree.mkdir(parents=True)
             fake_pi = pi_tree / "pi"
-            fake_pi.write_text("#!/bin/sh\necho 0.84.2\n", encoding="utf-8")
+            fake_pi.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"--version\" ]; then echo 0.84.2; exit 0; fi\n"
+                "echo '{\"type\":\"extension_ui_request\",\"method\":\"notify\",\"message\":\"TB_AUTH_EVENT:{\\\"kind\\\":\\\"catalog\\\",\\\"providers\\\":[]}\"}'\n",
+                encoding="utf-8",
+            )
             archive = root / "pi.tar.gz"
             with tarfile.open(archive, "w:gz") as value:
                 value.add(pi_tree, arcname="pi")
@@ -78,6 +83,7 @@ class ReleaseBuilderTests(unittest.TestCase):
             expected = manifest["files"]["libexec/ticketbunker/pi/pi"]["sha256"]
             self.assertEqual(hashlib.sha256(pi_path.read_bytes()).hexdigest(), expected)
             self.assertTrue((bundle / "share" / "ticketbunker" / "harness" / "pi" / "tb.ts").is_file())
+            self.assertTrue((bundle / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").is_file())
             self.assertTrue((bundle / "share" / "licenses" / "pi" / "LICENSE.txt").is_file())
             self.assertTrue((bundle / "share" / "ticketbunker" / "pi-runtime.json").is_file())
 

@@ -12,6 +12,12 @@ TicketBunker config as the CLI. Ready projects open in a separate loopback
 window; projects that need setup receive an explicit Join or Connect dialog.
 Connect requires a repository URL the user already created.
 
+Agent setup is also owned by the Projects window. It starts the verified Pi
+runtime in constrained RPC mode with only `tb_auth.ts`, renders provider login
+as native forms, and sends secret responses straight from Rust to Pi. The
+Python core never receives provider secrets. Closing the dialog kills that Pi
+child; choosing no model records an explicit machine-local opt-out.
+
 `tb view` prefers an installed `ticketbunker-desktop` executable and falls back
 to the browser when it is absent. `tb view --browser` always uses the fallback.
 `tb open` passes a guarded same-origin `/source` route so the included editor
@@ -45,3 +51,4 @@ Use `--stage-only` to inspect the ignored `src-tauri/binaries/` and
 The desktop boundary and first-run target are authoritative in `DESIGN.md`
 section 3.19. In particular, the native project picker remains in a separate
 local webview and must never navigate that privileged window to ticket HTML.
+The same rule confines agent-setup events to that window.

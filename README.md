@@ -69,6 +69,13 @@ Python, Node, nor a separate Pi install:
    `.sha256` file lets managed installs verify the download first.
 3. Install or open it, then choose **Add Git project**.
 
+On first run, TicketBunker uses your Git identity when it is complete, then
+offers agent setup. Choose a provider, sign in through a normal app dialog, and
+select a model, or choose **Use without agent** to keep synthesis off on that
+computer. Pi owns provider credentials; TicketBunker saves only the selected
+provider and model. Change the choice later from your identity menu →
+**Configure** beside Agent, or with `tb agent model` in the CLI.
+
 The CLI-first portable archive remains beside the app for servers, air-gapped
 transfer, and managed installs. It contains the same frozen core and Pi runtime.
 Download its adjacent `.sha256` file, verify it, then run its installer:
@@ -332,8 +339,8 @@ be joined, while a new TicketBunker project asks for an already-created
 companion repository URL. TicketBunker never creates or hosts that repository.
 The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
-continues to work while native application packaging and in-app agent login are
-completed.
+continues to provide the same backend commands. Agent login and model choice
+are available directly in the app; the app never exposes Pi's terminal UI.
 
 The same repository-owned view is available to Python integrations without
 going through HTML or scraping CLI output:

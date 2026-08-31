@@ -1916,6 +1916,9 @@ def cmd_application_command(args: argparse.Namespace) -> int:
     allowed = {
         "application.state",
         "application.profile.update",
+        "application.agent.state",
+        "application.agent.prepare",
+        "application.agent.configure",
         "application.project.add",
         "application.project.connect",
         "application.project.remove",

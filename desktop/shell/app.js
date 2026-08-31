@@ -1,8 +1,14 @@
 const invoke = window.__TAURI__.core.invoke;
 const chooseDirectory = window.__TAURI__.dialog.open;
+const listen = window.__TAURI__.event.listen;
 
 let applicationState = null;
 let pendingProject = null;
+let agentCatalog = [];
+let agentCurrent = null;
+let agentPromptRequest = null;
+let agentListener = null;
+let agentDecisionRequired = false;
 
 const byId = (id) => document.getElementById(id);
 const loading = byId("loading-state");
@@ -15,6 +21,14 @@ const connectDialog = byId("connect-dialog");
 const connectForm = byId("connect-form");
 const settingsDialog = byId("settings-dialog");
 const settingsForm = byId("settings-form");
+const agentDialog = byId("agent-dialog");
+const agentProvider = byId("agent-provider");
+const agentModel = byId("agent-model");
+const agentMethod = byId("agent-method");
+const agentLogin = byId("agent-login");
+const agentSave = byId("agent-save");
+const agentProgress = byId("agent-progress");
+const agentPrompt = byId("agent-prompt");
 const notice = byId("notice");
 
 function initials(name) {
@@ -47,6 +61,12 @@ function profilePayload(form) {
     email: form.elements.email.value,
     branch_user: form.elements.branch_user.value,
   };
+}
+
+function agentLabel(agent) {
+  if (!agent.enabled) return "Off on this computer";
+  if (agent.configured) return `${agent.model} · ${agent.provider}`;
+  return "Not set up";
 }
 
 function updateIdentity() {
@@ -131,6 +151,9 @@ async function loadState() {
   try {
     applicationState = await invoke("desktop_state");
     render();
+    if (applicationState.profile.complete && !applicationState.agent.decided) {
+      await showAgentSetup(true);
+    }
   } catch (error) {
     const detail = document.createElement("p");
     detail.textContent = String(error);
@@ -156,16 +179,306 @@ async function saveProfile(form, button, status) {
 
 byId("onboarding-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  await saveProfile(event.currentTarget, event.submitter, event.currentTarget.querySelector("output"));
+  const offerAgent = !applicationState.agent.decided;
+  const saved = await saveProfile(event.currentTarget, event.submitter, event.currentTarget.querySelector("output"));
+  if (saved && offerAgent) await showAgentSetup(true);
 });
 
 identityButton.addEventListener("click", () => {
   fillProfile(settingsForm, applicationState.profile);
   const agent = applicationState.agent;
-  byId("agent-status").textContent = agent.configured ? `${agent.model} · ${agent.provider}` : agent.enabled ? "Not set up" : "Off on this computer";
+  byId("agent-status").textContent = agentLabel(agent);
   byId("settings-status").textContent = "";
   settingsDialog.showModal();
 });
+
+byId("agent-configure").addEventListener("click", async () => {
+  settingsDialog.close();
+  await showAgentSetup();
+});
+
+function preferredProviders(providers) {
+  const preferred = [agentCurrent?.provider, "openai-codex", "anthropic", "github-copilot", "google", "openai"];
+  const rank = (id) => {
+    const index = preferred.indexOf(id);
+    return index < 0 ? preferred.length : index;
+  };
+  return providers
+    .filter((provider) => provider.models?.length)
+    .sort((left, right) => rank(left.id) - rank(right.id) || left.name.localeCompare(right.name));
+}
+
+function selectedProvider() {
+  return agentCatalog.find((provider) => provider.id === agentProvider.value);
+}
+
+function fillAgentProvider() {
+  const provider = selectedProvider();
+  agentModel.replaceChildren();
+  agentMethod.replaceChildren();
+  if (!provider) {
+    agentSave.disabled = true;
+    return;
+  }
+  for (const model of provider.models) {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.name === model.id ? model.id : `${model.name} · ${model.id}`;
+    agentModel.append(option);
+  }
+  const currentProvider = agentCurrent?.provider || applicationState.agent.provider;
+  const currentModel = agentCurrent?.model || applicationState.agent.model;
+  if (currentProvider === provider.id && currentModel) agentModel.value = currentModel;
+  for (const method of provider.methods) {
+    const option = document.createElement("option");
+    option.value = method;
+    option.textContent = method === "oauth" ? "Provider account" : "API key";
+    agentMethod.append(option);
+  }
+  const authenticated = Boolean(agentCurrent?.ready && agentCurrent.provider === provider.id);
+  const hasLogin = provider.methods.length > 0;
+  agentMethod.hidden = !hasLogin;
+  agentLogin.hidden = !hasLogin;
+  byId("agent-auth-state").textContent = authenticated ? "Connected" : hasLogin ? "Not connected" : "Uses local credentials";
+  agentSave.disabled = !agentModel.value;
+  updateAgentLoginLabel();
+}
+
+function fillAgentCatalog() {
+  const desired = agentCurrent?.provider || applicationState.agent.provider || "openai-codex";
+  agentProvider.replaceChildren();
+  agentCatalog = preferredProviders(agentCatalog);
+  for (const provider of agentCatalog) {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = provider.name;
+    agentProvider.append(option);
+  }
+  if (agentCatalog.some((provider) => provider.id === desired)) agentProvider.value = desired;
+  fillAgentProvider();
+  byId("agent-loading").hidden = true;
+  byId("agent-fields").hidden = false;
+}
+
+function updateAgentLoginLabel() {
+  agentLogin.textContent = agentMethod.value === "api_key" ? "Add API key" : "Sign in";
+}
+
+function setAgentLoginBusy(busy) {
+  setBusy(agentLogin, busy);
+  agentProvider.disabled = busy;
+  agentMethod.disabled = busy;
+}
+
+function showAgentProgress(text, { url = "", code = "" } = {}) {
+  agentProgress.replaceChildren();
+  if (code) {
+    const value = document.createElement("strong");
+    value.textContent = code;
+    agentProgress.append(value);
+  }
+  const copy = document.createElement("span");
+  copy.textContent = text;
+  agentProgress.append(copy);
+  if (url) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = "Open sign-in";
+    open.addEventListener("click", async () => {
+      try {
+        await invoke("open_agent_auth_url", { url });
+      } catch (error) {
+        byId("agent-dialog-status").textContent = String(error);
+      }
+    });
+    agentProgress.append(document.createElement("br"), open);
+  }
+  agentProgress.hidden = false;
+}
+
+function handleAuthPayload(payload) {
+  if (payload.kind === "catalog") {
+    agentCatalog = payload.providers || [];
+    fillAgentCatalog();
+  } else if (payload.kind === "auth_url") {
+    showAgentProgress(payload.instructions || "Continue in your browser.", { url: payload.url });
+  } else if (payload.kind === "device_code") {
+    showAgentProgress("Enter this code on the provider sign-in page.", {
+      url: payload.verification_url,
+      code: payload.user_code,
+    });
+  } else if (payload.kind === "info" || payload.kind === "progress") {
+    const link = payload.links?.find((item) => item.url)?.url || "";
+    showAgentProgress(payload.message || "Continuing login", { url: link });
+  } else if (payload.kind === "complete") {
+    agentCurrent = { ...agentCurrent, ready: true, provider: payload.provider };
+    byId("agent-auth-state").textContent = "Connected";
+    showAgentProgress("Login complete. Choose the model TicketBunker should use.");
+    agentPrompt.hidden = true;
+    setAgentLoginBusy(false);
+  } else if (payload.kind === "cancelled") {
+    showAgentProgress("Login cancelled.");
+    agentPrompt.hidden = true;
+    setAgentLoginBusy(false);
+  } else if (payload.kind === "error") {
+    byId("agent-dialog-status").textContent = payload.message || "Login could not finish.";
+    agentPrompt.hidden = true;
+    setAgentLoginBusy(false);
+  }
+}
+
+function showAgentPrompt(payload) {
+  agentPromptRequest = payload.id;
+  const title = payload.title || "Continue login";
+  const input = byId("agent-prompt-value");
+  const select = byId("agent-prompt-select");
+  byId("agent-prompt-title").textContent = title.replace(/^TB_(SECRET|INPUT):/, "");
+  input.hidden = payload.method === "select";
+  select.hidden = payload.method !== "select";
+  input.value = "";
+  input.type = title.startsWith("TB_SECRET:") ? "password" : "text";
+  select.replaceChildren();
+  for (const value of payload.options || []) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.append(option);
+  }
+  agentPrompt.hidden = false;
+  (payload.method === "select" ? select : input).focus();
+}
+
+function handleAgentEvent(payload) {
+  if (payload.type === "ticketbunker_agent_error") {
+    byId("agent-dialog-status").textContent = payload.message;
+    agentPrompt.hidden = true;
+    setAgentLoginBusy(false);
+    return;
+  }
+  if (payload.type !== "extension_ui_request") return;
+  if (payload.method === "notify" && payload.message?.startsWith("TB_AUTH_EVENT:")) {
+    try {
+      handleAuthPayload(JSON.parse(payload.message.slice("TB_AUTH_EVENT:".length)));
+    } catch (_error) {
+      byId("agent-dialog-status").textContent = "Agent setup returned an unreadable response. Retry setup.";
+    }
+  } else if (payload.method === "input" || payload.method === "select") {
+    showAgentPrompt(payload);
+  }
+}
+
+async function ensureAgentListener() {
+  if (!agentListener) agentListener = await listen("agent-setup-event", (event) => handleAgentEvent(event.payload));
+}
+
+async function showAgentSetup(requireDecision = false) {
+  agentDecisionRequired = requireDecision;
+  byId("agent-close").hidden = requireDecision;
+  agentCatalog = [];
+  agentCurrent = null;
+  agentPromptRequest = null;
+  byId("agent-loading").hidden = false;
+  byId("agent-fields").hidden = true;
+  agentProgress.hidden = true;
+  agentPrompt.hidden = true;
+  setAgentLoginBusy(false);
+  byId("agent-dialog-status").textContent = "";
+  agentSave.disabled = true;
+  agentDialog.showModal();
+  try {
+    await ensureAgentListener();
+    agentCurrent = await invoke("start_agent_setup");
+    if (agentCatalog.length) fillAgentCatalog();
+  } catch (error) {
+    byId("agent-loading").hidden = true;
+    byId("agent-dialog-status").textContent = String(error);
+  }
+}
+
+agentProvider.addEventListener("change", fillAgentProvider);
+agentMethod.addEventListener("change", updateAgentLoginLabel);
+
+agentLogin.addEventListener("click", async () => {
+  setAgentLoginBusy(true);
+  byId("agent-dialog-status").textContent = "";
+  showAgentProgress("Starting secure login");
+  try {
+    await invoke("begin_agent_login", { provider: agentProvider.value, method: agentMethod.value });
+  } catch (error) {
+    byId("agent-dialog-status").textContent = String(error);
+    setAgentLoginBusy(false);
+  }
+});
+
+agentPrompt.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const value = byId("agent-prompt-select").hidden ? byId("agent-prompt-value").value : byId("agent-prompt-select").value;
+  try {
+    await invoke("answer_agent_prompt", { requestId: agentPromptRequest, value, cancelled: false });
+    agentPrompt.hidden = true;
+    byId("agent-prompt-value").value = "";
+  } catch (error) {
+    byId("agent-dialog-status").textContent = String(error);
+  }
+});
+
+byId("agent-prompt-cancel").addEventListener("click", async () => {
+  try {
+    await invoke("answer_agent_prompt", { requestId: agentPromptRequest, value: null, cancelled: true });
+  } catch (error) {
+    byId("agent-dialog-status").textContent = String(error);
+  }
+  agentPrompt.hidden = true;
+});
+
+agentSave.addEventListener("click", async () => {
+  setBusy(agentSave, true);
+  byId("agent-dialog-status").textContent = "";
+  try {
+    const result = await invoke("configure_agent", {
+      payload: { enabled: true, provider: agentProvider.value, model: agentModel.value },
+    });
+    if (!result.agent.ready) {
+      byId("agent-dialog-status").textContent = result.agent.summary || "Sign in before using this model.";
+      byId("agent-auth-state").textContent = "Not connected";
+      return;
+    }
+    applicationState.agent = {
+      enabled: true,
+      configured: true,
+      decided: true,
+      provider: result.agent.provider,
+      model: result.agent.model,
+    };
+    agentDecisionRequired = false;
+    agentDialog.close();
+    message(`Agent set to ${result.agent.model}`);
+  } catch (error) {
+    byId("agent-dialog-status").textContent = String(error);
+  } finally {
+    setBusy(agentSave, false);
+  }
+});
+
+byId("agent-disable").addEventListener("click", async () => {
+  try {
+    await invoke("configure_agent", { payload: { enabled: false } });
+    applicationState.agent = { enabled: false, configured: false, decided: true, provider: "", model: "" };
+    agentDecisionRequired = false;
+    agentDialog.close();
+    message("Agent is off on this computer");
+  } catch (error) {
+    byId("agent-dialog-status").textContent = String(error);
+  }
+});
+
+byId("agent-close").addEventListener("click", () => {
+  if (!agentDecisionRequired) agentDialog.close();
+});
+agentDialog.addEventListener("cancel", (event) => {
+  if (agentDecisionRequired) event.preventDefault();
+});
+agentDialog.addEventListener("close", () => { invoke("stop_agent_setup_command").catch(() => {}); });
 
 settingsForm.addEventListener("submit", async (event) => {
   if (event.submitter?.value !== "default") return;

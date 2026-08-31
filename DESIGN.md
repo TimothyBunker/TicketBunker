@@ -1245,6 +1245,35 @@ First run is application-facing:
   the authority that project already declares; otherwise offer to create a
   TicketBunker project and explicitly link user-provided storage.
 
+Agent setup is an app-native conversation with Pi, not an embedded terminal.
+The privileged Projects window starts the verified Pi runtime in RPC mode with
+sessions, tools, context files, skills, prompt templates, themes, and ambient
+extension discovery disabled. It loads only TicketBunker's pinned
+`tb_auth.ts` bridge. That bridge enumerates Pi's provider/model catalog and
+calls Pi's own `ModelRuntime.login`; Pi remains the sole credential-store
+writer and the sole implementation of provider OAuth and API-key flows.
+
+Provider notifications and prompts cross a short-lived JSONL pipe into native
+forms. Secret input travels from the local webview through Rust directly to
+Pi's stdin; it never enters the Python command dispatcher, `~/.tbconfig`, a
+TicketBunker log, or shared project data. Login URLs are displayed before a
+user action and a label-guarded Rust command opens only valid HTTPS URLs in the
+system browser. The Projects window alone may listen for these setup events;
+the ticket webview still has no native IPC capability.
+
+The bridge is packaged with the frozen core and materialized into a stable,
+digest-addressed machine-local asset path before the one-file core exits. Its
+small compatibility seam to Pi's pinned `ModelRegistry` is integration-tested
+against that exact Pi version, and release construction must complete a live
+catalog exchange through the staged Pi executable before producing an
+installer. The seam must be reviewed with every pin update.
+Native artifact publication filters by the current package version so a stale
+local Tauri build can never be mistaken for output from the active release.
+Closing setup kills the owned Pi child. Merely opening or cancelling setup does
+not enable an agent or record a first-run choice. **Use without agent** records
+the explicit local opt-out; **Use this model** saves only a successfully
+authenticated provider/model selection.
+
 Opening the app without `--repo` therefore creates one bundled **Projects**
 window. It reads a machine-local profile and project-path registry through
 typed `application.*` Python commands; Rust does not invent another config
@@ -1264,7 +1293,8 @@ command. Only a ready checkout can open the unprivileged ticket window. Closing
 that window stops its owned Python child and returns to the Projects window.
 
 The bundled Projects window is the sole recipient of the native directory
-dialog permission. Its Tauri commands also check the caller's window label.
+dialog and event-listen permissions. Its Tauri commands also check the caller's
+window label.
 The loopback ticket window has no capability and no allowed remote-origin IPC;
 Tauri 2.11.5 or newer is required because remote origins are always subject to
 that ACL boundary.

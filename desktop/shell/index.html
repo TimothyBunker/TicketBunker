@@ -113,8 +113,11 @@
           <label><span>Branch name</span><input name="branch_user" autocomplete="username" required></label>
         </div>
         <div class="agent-summary">
-          <span>Agent</span>
-          <strong id="agent-status">Not set up</strong>
+          <div>
+            <span>Agent</span>
+            <strong id="agent-status">Not set up</strong>
+          </div>
+          <button id="agent-configure" type="button">Configure</button>
         </div>
         <div class="dialog-actions">
           <button value="cancel" type="submit">Cancel</button>
@@ -122,6 +125,65 @@
         </div>
         <output class="form-status" id="settings-status" aria-live="polite"></output>
       </form>
+    </dialog>
+
+    <dialog id="agent-dialog" class="dialog agent-dialog">
+      <section class="dialog-card">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Local settings</p>
+            <h2>Agent</h2>
+          </div>
+          <button class="icon-button" id="agent-close" aria-label="Close" type="button">×</button>
+        </div>
+        <p class="dialog-copy">Choose the model that maintains ticket synthesis. Login stays with the model provider.</p>
+
+        <div class="agent-loading" id="agent-loading" aria-live="polite">
+          <span class="loading-mark" aria-hidden="true"></span>
+          <span>Preparing models</span>
+        </div>
+
+        <div id="agent-fields" class="agent-fields" hidden>
+          <label>
+            <span>Provider</span>
+            <select id="agent-provider"></select>
+          </label>
+          <label>
+            <span>Model</span>
+            <select id="agent-model"></select>
+          </label>
+          <div class="agent-auth-row">
+            <div>
+              <span class="agent-auth-label">Login</span>
+              <strong id="agent-auth-state">Not connected</strong>
+            </div>
+            <div class="agent-auth-actions">
+              <select id="agent-method" aria-label="Login method"></select>
+              <button id="agent-login" type="button">Sign in</button>
+            </div>
+          </div>
+
+          <div class="agent-progress" id="agent-progress" aria-live="polite" hidden></div>
+
+          <form id="agent-prompt" class="agent-prompt" hidden>
+            <label>
+              <span id="agent-prompt-title">Continue login</span>
+              <input id="agent-prompt-value" autocomplete="off">
+              <select id="agent-prompt-select" hidden></select>
+            </label>
+            <div class="prompt-actions">
+              <button id="agent-prompt-cancel" type="button">Cancel</button>
+              <button class="primary" type="submit">Continue</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="dialog-actions agent-dialog-actions">
+          <button id="agent-disable" type="button">Use without agent</button>
+          <button class="primary" id="agent-save" type="button" disabled>Use this model</button>
+        </div>
+        <output class="form-status" id="agent-dialog-status" aria-live="polite"></output>
+      </section>
     </dialog>
 
     <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>

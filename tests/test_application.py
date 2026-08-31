@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import application, commands, config
+from ticketbunker import agent_runtime, application, commands, config
 
 
 class ApplicationStateTests(unittest.TestCase):
@@ -67,6 +67,117 @@ class ApplicationStateTests(unittest.TestCase):
         outside.mkdir()
         with self.assertRaisesRegex(commands.CommandRejected, "Git working tree"):
             application.inspect_project(str(outside))
+
+    def test_agent_decision_is_distinct_from_model_configuration(self) -> None:
+        self.assertFalse(application.state()["agent"]["decided"])
+        config.save({"agent": {"enabled": False}})
+
+        value = application.state()["agent"]
+
+        self.assertTrue(value["decided"])
+        self.assertFalse(value["enabled"])
+        self.assertFalse(value["configured"])
+
+    def test_agent_prepare_returns_only_runtime_paths_and_non_secret_state(self) -> None:
+        runtime = agent_runtime.Runtime(
+            str(self.root / "pi"), "managed", version="0.84.2", ready=True
+        )
+        status = {
+            "ready": False,
+            "enabled": True,
+            "status": "selection-required",
+            "provider": "",
+            "model": "",
+        }
+        with mock.patch.object(agent_runtime, "ensure_runtime", return_value=runtime):
+            with mock.patch.object(
+                agent_runtime, "auth_extension_path", return_value=self.root / "tb_auth.ts"
+            ):
+                with mock.patch.object(agent_runtime, "state", return_value=status):
+                    result = commands.dispatch(
+                        "application.agent.prepare",
+                        {},
+                        commands.CommandContext(self.root, transport="desktop"),
+                    )
+
+        self.assertEqual(result["runtime"], runtime.path)
+        self.assertEqual(result["agent"], status)
+        self.assertNotIn("credential", json.dumps(result).lower())
+
+    def test_opening_agent_setup_does_not_make_an_agent_decision(self) -> None:
+        runtime = agent_runtime.Runtime(
+            str(self.root / "pi"), "managed", version="0.84.2", ready=True
+        )
+
+        def installed_runtime():
+            config.save({"agent": {"enabled": True, "pi_bin": runtime.path}})
+            return runtime
+
+        with mock.patch.object(agent_runtime, "ensure_runtime", side_effect=installed_runtime):
+            with mock.patch.object(
+                agent_runtime, "auth_extension_path", return_value=self.root / "tb_auth.ts"
+            ):
+                with mock.patch.object(
+                    agent_runtime,
+                    "state",
+                    return_value={"ready": False, "status": "selection-required"},
+                ):
+                    commands.dispatch(
+                        "application.agent.prepare",
+                        {},
+                        commands.CommandContext(self.root, transport="desktop"),
+                    )
+
+        self.assertNotIn("agent", config.load())
+
+    def test_agent_configuration_supports_explicit_no_model_mode(self) -> None:
+        with mock.patch.object(agent_runtime, "set_core_only") as disabled:
+            with mock.patch.object(
+                agent_runtime,
+                "state",
+                return_value={"ready": True, "enabled": False, "status": "disabled"},
+            ):
+                result = commands.dispatch(
+                    "application.agent.configure",
+                    {"enabled": False},
+                    commands.CommandContext(self.root, transport="desktop"),
+                )
+
+        disabled.assert_called_once_with()
+        self.assertFalse(result["agent"]["enabled"])
+
+    def test_agent_configuration_uses_the_shared_validated_selection(self) -> None:
+        runtime = agent_runtime.Runtime(
+            str(self.root / "pi"), "managed", version="0.84.2", ready=True
+        )
+        configured = {
+            "ready": True,
+            "enabled": True,
+            "status": "ready",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-sol",
+        }
+        with mock.patch.object(agent_runtime, "ensure_runtime", return_value=runtime):
+            with mock.patch.object(
+                agent_runtime, "configure_selection", return_value=configured
+            ) as selection:
+                result = commands.dispatch(
+                    "application.agent.configure",
+                    {
+                        "enabled": True,
+                        "provider": "openai-codex",
+                        "model": "gpt-5.6-sol",
+                    },
+                    commands.CommandContext(self.source, transport="desktop"),
+                )
+
+        selection.assert_called_once_with(
+            runtime,
+            provider="openai-codex",
+            model="gpt-5.6-sol",
+            repo=self.source,
+        )
+        self.assertEqual(result["agent"], configured)
 
 
 if __name__ == "__main__":

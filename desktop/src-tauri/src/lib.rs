@@ -1,14 +1,16 @@
 use std::env;
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 
 const DEFAULT_PORT: u16 = 8377;
 const PORT_ATTEMPTS: u16 = 20;
@@ -26,6 +28,12 @@ struct ApplicationState {
     preferred_port: u16,
     bundle_root: Mutex<Option<PathBuf>>,
     process: Mutex<Option<Child>>,
+    agent_setup: Mutex<Option<AgentSetupProcess>>,
+}
+
+struct AgentSetupProcess {
+    child: Child,
+    input: ChildStdin,
 }
 
 fn parse_options<I>(args: I) -> Result<LaunchOptions, String>
@@ -187,6 +195,54 @@ fn stop_core(state: &ApplicationState) {
     }
 }
 
+fn stop_agent_setup(state: &ApplicationState) {
+    let Ok(mut guarded) = state.agent_setup.lock() else {
+        return;
+    };
+    if let Some(mut process) = guarded.take() {
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+    }
+}
+
+fn send_agent_setup(process: &mut AgentSetupProcess, value: Value) -> Result<(), String> {
+    serde_json::to_writer(&mut process.input, &value)
+        .map_err(|_| "TicketBunker could not encode the agent setup response.".to_string())?;
+    process
+        .input
+        .write_all(b"\n")
+        .and_then(|_| process.input.flush())
+        .map_err(|_| "The agent setup helper stopped. Retry setup.".to_string())
+}
+
+fn valid_agent_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+}
+
+fn validated_auth_url(raw: &str) -> Result<tauri::Url, String> {
+    let parsed: tauri::Url = raw
+        .parse()
+        .map_err(|_| "The login service returned an invalid address.".to_string())?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err("TicketBunker only opens secure login addresses.".to_string());
+    }
+    Ok(parsed)
+}
+
+fn relay_agent_output(app: AppHandle, output: impl std::io::Read + Send + 'static) {
+    thread::spawn(move || {
+        for line in BufReader::new(output).lines().map_while(Result::ok) {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                let _ = app.emit_to("launcher", "agent-setup-event", value);
+            }
+        }
+    });
+}
+
 fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
     let mut command = Command::new(&state.core);
     command
@@ -231,6 +287,7 @@ fn open_project_window(
     route: &str,
 ) -> Result<(), String> {
     validate_route(route)?;
+    stop_agent_setup(state);
     let repo = repo
         .canonicalize()
         .map_err(|error| format!("cannot open Git project {}: {error}", repo.display()))?;
@@ -296,6 +353,191 @@ fn update_profile(
 ) -> Result<Value, String> {
     require_launcher(&window)?;
     core_command(&state, "application.profile.update", payload)
+}
+
+#[tauri::command]
+fn start_agent_setup(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    stop_agent_setup(&state);
+    let prepared = core_command(&state, "application.agent.prepare", json!({}))?;
+    let runtime = prepared
+        .get("runtime")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "TicketBunker could not find its verified agent runtime.".to_string())?;
+    let extension = prepared
+        .get("extension")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "TicketBunker could not find its agent setup bridge.".to_string())?;
+    let mut command = Command::new(runtime);
+    command
+        .args([
+            "--mode",
+            "rpc",
+            "--no-session",
+            "--no-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--no-approve",
+            "--extension",
+        ])
+        .arg(extension)
+        .current_dir(env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|_| "TicketBunker could not start agent setup. Retry setup.".to_string())?;
+    let input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "TicketBunker could not connect to agent setup.".to_string())?;
+    let output = child
+        .stdout
+        .take()
+        .ok_or_else(|| "TicketBunker could not read agent setup.".to_string())?;
+    let errors = child
+        .stderr
+        .take()
+        .ok_or_else(|| "TicketBunker could not monitor agent setup.".to_string())?;
+    relay_agent_output(app.clone(), output);
+    thread::spawn(move || {
+        let has_error = BufReader::new(errors)
+            .lines()
+            .map_while(Result::ok)
+            .any(|line| !line.trim().is_empty());
+        if has_error {
+            let _ = app.emit_to(
+                "launcher",
+                "agent-setup-event",
+                json!({
+                    "type": "ticketbunker_agent_error",
+                    "message": "The agent setup helper stopped. Retry setup."
+                }),
+            );
+        }
+    });
+    let mut process = AgentSetupProcess { child, input };
+    if let Err(message) = send_agent_setup(
+        &mut process,
+        json!({
+            "id": launch_id(),
+            "type": "prompt",
+            "message": "/tb-auth-catalog"
+        }),
+    ) {
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        return Err(message);
+    }
+    let mut guarded = state
+        .agent_setup
+        .lock()
+        .map_err(|_| "TicketBunker could not own agent setup.".to_string())?;
+    *guarded = Some(process);
+    Ok(prepared.get("agent").cloned().unwrap_or_else(|| json!({})))
+}
+
+#[tauri::command]
+fn begin_agent_login(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    provider: String,
+    method: String,
+) -> Result<(), String> {
+    require_launcher(&window)?;
+    if !valid_agent_identifier(&provider) || !matches!(method.as_str(), "oauth" | "api_key") {
+        return Err("Choose a valid provider and login method.".to_string());
+    }
+    let mut guarded = state
+        .agent_setup
+        .lock()
+        .map_err(|_| "TicketBunker could not access agent setup.".to_string())?;
+    let process = guarded
+        .as_mut()
+        .ok_or_else(|| "Open agent setup again, then retry login.".to_string())?;
+    send_agent_setup(
+        process,
+        json!({
+            "id": launch_id(),
+            "type": "prompt",
+            "message": format!("/tb-auth-login {provider} {method}")
+        }),
+    )
+}
+
+#[tauri::command]
+fn answer_agent_prompt(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    request_id: String,
+    value: Option<String>,
+    cancelled: bool,
+) -> Result<(), String> {
+    require_launcher(&window)?;
+    if !valid_agent_identifier(&request_id) {
+        return Err("The agent setup request is no longer valid.".to_string());
+    }
+    if value.as_ref().is_some_and(|text| text.len() > 32_768) {
+        return Err("That agent setup response is too long.".to_string());
+    }
+    let response = if cancelled {
+        json!({ "type": "extension_ui_response", "id": request_id, "cancelled": true })
+    } else {
+        json!({
+            "type": "extension_ui_response",
+            "id": request_id,
+            "value": value.unwrap_or_default()
+        })
+    };
+    let mut guarded = state
+        .agent_setup
+        .lock()
+        .map_err(|_| "TicketBunker could not access agent setup.".to_string())?;
+    let process = guarded
+        .as_mut()
+        .ok_or_else(|| "Open agent setup again, then retry.".to_string())?;
+    send_agent_setup(process, response)
+}
+
+#[tauri::command]
+fn stop_agent_setup_command(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+) -> Result<(), String> {
+    require_launcher(&window)?;
+    stop_agent_setup(&state);
+    Ok(())
+}
+
+#[tauri::command]
+fn configure_agent(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.agent.configure", payload)
+}
+
+#[tauri::command]
+fn open_agent_auth_url(app: AppHandle, window: WebviewWindow, url: String) -> Result<(), String> {
+    require_launcher(&window)?;
+    let parsed = validated_auth_url(&url)?;
+    app.opener()
+        .open_url(parsed, None::<&str>)
+        .map_err(|_| "TicketBunker could not open the login page in your browser.".to_string())
 }
 
 #[tauri::command]
@@ -392,14 +634,22 @@ pub fn run() {
         preferred_port: options.port,
         bundle_root: Mutex::new(None),
         process: Mutex::new(None),
+        agent_setup: Mutex::new(None),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             desktop_state,
             update_profile,
+            start_agent_setup,
+            begin_agent_login,
+            answer_agent_prompt,
+            stop_agent_setup_command,
+            configure_agent,
+            open_agent_auth_url,
             add_git_project,
             remove_git_project,
             connect_git_project,
@@ -425,6 +675,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "launcher" {
+                stop_agent_setup(window.state::<ApplicationState>().inner());
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "project" {
                 stop_core(window.state::<ApplicationState>().inner());
                 if let Some(launcher) = window.app_handle().get_webview_window("launcher") {
@@ -498,5 +751,19 @@ mod tests {
         }
         let selected = available_port(occupied).expect("nearby port");
         assert_ne!(selected, occupied);
+    }
+
+    #[test]
+    fn agent_setup_identifiers_cannot_inject_rpc_commands() {
+        assert!(valid_agent_identifier("openai-codex"));
+        assert!(!valid_agent_identifier("openai-codex\n/another-command"));
+        assert!(!valid_agent_identifier(""));
+    }
+
+    #[test]
+    fn agent_login_opens_only_secure_web_addresses() {
+        assert!(validated_auth_url("https://auth.openai.com/authorize").is_ok());
+        assert!(validated_auth_url("http://auth.openai.com/authorize").is_err());
+        assert!(validated_auth_url("javascript:alert(1)").is_err());
     }
 }

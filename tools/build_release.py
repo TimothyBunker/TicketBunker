@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -127,6 +128,53 @@ def copy_file(source: Path, destination: Path, executable: bool = False) -> None
         destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def smoke_auth_bridge(pi_executable: Path, extension: Path) -> None:
+    """Prove the pinned Pi/bridge RPC seam before publishing a bundle."""
+    command = [
+        str(pi_executable),
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--no-tools",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--no-approve",
+        "--extension",
+        str(extension),
+    ]
+    environment = os.environ.copy()
+    environment["PI_OFFLINE"] = "1"
+    environment["PI_TELEMETRY"] = "0"
+    try:
+        completed = subprocess.run(
+            command,
+            input='{"id":"release-smoke","type":"prompt","message":"/tb-auth-catalog"}\n',
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"pi auth bridge could not start: {exc}") from exc
+    valid_catalog = False
+    for line in completed.stdout.splitlines():
+        try:
+            value = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        message = str(value.get("message") or "") if isinstance(value, dict) else ""
+        if isinstance(value, dict) and value.get("method") == "notify" and message.startswith(
+            'TB_AUTH_EVENT:{"kind":"catalog"'
+        ):
+            valid_catalog = True
+            break
+    if completed.returncode != 0 or not valid_catalog:
+        raise ValueError("the pinned Pi runtime rejected TicketBunker's auth bridge")
+
+
 def write_bundle_manifest(bundle: Path, tb_version: str, pi_version: str, platform_name: str) -> None:
     files = {}
     for path in sorted(value for value in bundle.rglob("*") if value.is_file() and value.name != "manifest.json"):
@@ -179,11 +227,14 @@ def build(args: argparse.Namespace) -> Path:
             raise ValueError(f"pi archive lacks its declared executable: {entry['executable']}")
         pi_executable.chmod(pi_executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         copy_file(ROOT / "ticketbunker" / "harness" / "pi" / "tb.ts", bundle / "share" / "ticketbunker" / "harness" / "pi" / "tb.ts")
+        auth_extension = bundle / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts"
+        copy_file(ROOT / "ticketbunker" / "harness" / "pi" / "tb_auth.ts", auth_extension)
         copy_file(ROOT / "ticketbunker" / "licenses" / "pi-MIT.txt", bundle / "share" / "licenses" / "pi" / "LICENSE.txt")
         copy_file(PI_MANIFEST, bundle / "share" / "ticketbunker" / "pi-runtime.json")
         copy_file(ROOT / "THIRD_PARTY_NOTICES.md", bundle / "THIRD_PARTY_NOTICES.md")
         copy_file(ROOT / "tools" / "install.sh", bundle / "install.sh", executable=True)
         copy_file(ROOT / "tools" / "install.ps1", bundle / "install.ps1")
+        smoke_auth_bridge(pi_executable, auth_extension)
         (bundle / "README.txt").write_text(
             "TicketBunker portable release\n\n"
             "Unix: ./install.sh\nWindows PowerShell: .\\install.ps1\n\n"

@@ -31,6 +31,7 @@ from . import config
 
 MANIFEST_RESOURCE = ("runtime", "pi-runtime.json")
 EXTENSION_RESOURCE = ("harness", "pi", "tb.ts")
+AUTH_EXTENSION_RESOURCE = ("harness", "pi", "tb_auth.ts")
 AUTH_TIMEOUT_SECONDS = 20
 VERSION_TIMEOUT_SECONDS = 10
 DOWNLOAD_TIMEOUT_SECONDS = 90
@@ -778,20 +779,32 @@ def onboard(
     return state(repo)
 
 
-def extension_path() -> Path:
-    """Return the packaged adapter as a real file, extracting zipapps once."""
+def _asset_path(parts: tuple[str, ...]) -> Path:
+    """Return a packaged asset as a real file, extracting zipapps once."""
     target = resources.files("ticketbunker")
-    for part in EXTENSION_RESOURCE:
+    for part in parts:
         target = target.joinpath(part)
     direct = Path(str(target))
-    if direct.is_file():
+    if direct.is_file() and not getattr(sys, "frozen", False):
         return direct.resolve()
     content = target.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
-    cached = data_root() / "assets" / digest / "harness" / "pi" / "tb.ts"
+    cached = data_root() / "assets" / digest
+    for part in parts:
+        cached = cached / part
     if not cached.exists() or _sha256(cached) != digest:
         cached.parent.mkdir(parents=True, exist_ok=True)
         temporary = cached.with_suffix(".tmp")
         temporary.write_bytes(content)
         temporary.replace(cached)
     return cached
+
+
+def extension_path() -> Path:
+    """Return the packaged report adapter as a real file."""
+    return _asset_path(EXTENSION_RESOURCE)
+
+
+def auth_extension_path() -> Path:
+    """Return the packaged app-auth bridge as a real file."""
+    return _asset_path(AUTH_EXTENSION_RESOURCE)

@@ -115,6 +115,23 @@ class AgentRuntimeTests(unittest.TestCase):
             (Path(__file__).resolve().parent.parent / "harness" / "pi" / "tb.ts").read_text(encoding="utf-8"),
         )
 
+    def test_packaged_auth_extension_keeps_pi_as_the_credential_writer(self) -> None:
+        path = agent_runtime.auth_extension_path()
+
+        self.assertTrue(path.is_file())
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("runtime.login(provider, method", text)
+        self.assertIn("TB_AUTH_EVENT", text)
+        self.assertNotIn("auth.json", text)
+
+    def test_frozen_auth_extension_is_materialized_outside_temporary_extraction(self) -> None:
+        with mock.patch.object(agent_runtime.sys, "frozen", True, create=True):
+            with mock.patch.object(agent_runtime, "data_root", return_value=self.root / "data"):
+                path = agent_runtime.auth_extension_path()
+
+        self.assertTrue(path.is_file())
+        self.assertTrue(path.is_relative_to(self.root / "data" / "assets"))
+
     def test_bundled_runtime_verifies_every_distribution_file(self) -> None:
         bundle = self.root / "bundle"
         runtime_dir = bundle / "libexec" / "ticketbunker" / "pi"

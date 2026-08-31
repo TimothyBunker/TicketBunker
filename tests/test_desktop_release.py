@@ -29,6 +29,7 @@ class DesktopReleaseTests(unittest.TestCase):
             (source / "ticketbunker" / "runtime").mkdir(parents=True)
             (source / "desktop" / "src-tauri").mkdir(parents=True)
             (source / "ticketbunker" / "harness" / "pi" / "tb.ts").write_text("adapter")
+            (source / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").write_text("auth adapter")
             (source / "ticketbunker" / "licenses" / "pi-MIT.txt").write_text("license")
             (source / "THIRD_PARTY_NOTICES.md").write_text("notice")
             (source / "pyproject.toml").write_text('[project]\nversion = "9.8.7"\n')
@@ -78,6 +79,10 @@ class DesktopReleaseTests(unittest.TestCase):
             manifest = json.loads((resources / "manifest.json").read_text())
             self.assertEqual(manifest["ticketbunker_version"], "9.8.7")
             self.assertIn("libexec/ticketbunker/pi/pi", manifest["files"])
+            self.assertEqual(
+                (resources / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").read_text(),
+                "auth adapter",
+            )
 
     def test_publish_native_packages_flattens_installers_with_checksums(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:
@@ -86,10 +91,11 @@ class DesktopReleaseTests(unittest.TestCase):
             (bundle / "deb").mkdir(parents=True)
             (bundle / "app").mkdir(parents=True)
             (bundle / "deb" / "TicketBunker_1.0_amd64.deb").write_bytes(b"package")
+            (bundle / "deb" / "TicketBunker_0.9_amd64.deb").write_bytes(b"stale")
             (bundle / "app" / "TicketBunker.app").write_text("directory marker")
             release = root / "release"
 
-            published = builder.publish_native_packages(bundle, release)
+            published = builder.publish_native_packages(bundle, release, version="1.0")
 
             package = release / "TicketBunker_1.0_amd64.deb"
             checksum = release / "TicketBunker_1.0_amd64.deb.sha256"
@@ -99,6 +105,7 @@ class DesktopReleaseTests(unittest.TestCase):
                 checksum.read_text(),
                 f"{hashlib.sha256(b'package').hexdigest()}  {package.name}\n",
             )
+            self.assertFalse((release / "TicketBunker_0.9_amd64.deb").exists())
 
 
 if __name__ == "__main__":
