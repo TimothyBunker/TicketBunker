@@ -10,7 +10,7 @@
     - Every user action enters the same typed TicketBunker API contract.
     - Git, tracker providers, and the agent runtime are replaceable adapters.
     - The team database is never accessed directly by the desktop client.
-    - This concept does not supersede DESIGN.md until the architecture is accepted.
+    - DESIGN.md section 3.19 is the authority for the implemented transport boundary.
   -->
   <style>
     :root {
@@ -460,9 +460,9 @@
 
               <path class="connector" d="M192 220 V250"/>
 
-              <g class="node ui" data-key="app-shell" tabindex="0" role="button" aria-label="Desktop app shell">
+              <g class="node ui" data-key="app-shell" tabindex="0" role="button" aria-label="Desktop app host">
                 <rect x="78" y="250" width="228" height="58"/>
-                <text class="node-title" x="192" y="275" text-anchor="middle">Desktop App Shell</text>
+                <text class="node-title" x="192" y="275" text-anchor="middle">Desktop App Host</text>
                 <text class="node-subtitle" x="192" y="294" text-anchor="middle">window · router · lifecycle</text>
               </g>
 
@@ -743,7 +743,7 @@
 
     <footer class="footnote">
       <span>Click or keyboard-focus a component to see its responsibility. Use <strong>SVG</strong> for a portable vector copy.</span>
-      <span class="version-note">Concept artifact · 31 Aug 2026</span>
+      <span class="version-note">Implemented architecture · 1 Sep 2026</span>
     </footer>
   </main>
 
@@ -753,7 +753,7 @@
 
       const details = {
         user: ["Entry point", "User", "The person works through explicit application actions instead of assembling TicketBunker workflows in a terminal.", "Intent, confirmation, and local choices.", "Backend sequencing or knowledge of tool-specific commands."],
-        "app-shell": ["Desktop experience", "Desktop App Shell", "Owns the native window, routing, Bunker selection, and application lifecycle.", "Navigation, window state, and starting or stopping the local runtime.", "Ticket rules, Git operations, or persistence semantics."],
+        "app-shell": ["Desktop experience", "Desktop App Host", "Loads the bundled shared UI and owns the native window, routing, Bunker selection, and application lifecycle without a localhost server.", "Navigation, narrow machine services, and starting or stopping one private core worker.", "Ticket rules, Git operations, or persistence semantics."],
         "projects-view": ["Desktop view", "Bunkers", "Creates local Bunkers or joins remote ones before Projects and repositories enter the flow.", "Bunker discovery, explicit membership entry points, recursive Project navigation, and clear storage state.", "Inferring membership from Git or making remote authorization decisions."],
         "tickets-view": ["Desktop view", "Tickets", "Presents ticket lifecycle, branches, evidence, reports, and the persistent coworker surface.", "Readable ticket state and user intent.", "Tracker-specific fields or report publication rules."],
         "config-view": ["Desktop view", "Configuration", "Edits global and project field composition, mappings, integrations, and local preferences.", "A clear editing experience and change previews.", "Permission enforcement or storage implementation."],

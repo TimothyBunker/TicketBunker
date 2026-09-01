@@ -32,6 +32,9 @@ DESKTOP_ACTIONS = frozenset(
         "application.project.connect",
         "application.project.remove",
         "application.bunker.create",
+        "application.bunker.get",
+        "application.bunker.configuration.get",
+        "application.bunker.configuration.replace",
         "application.bunker.project.create",
         "application.repository.inspect",
         "application.bunker.repository.attach",
@@ -39,6 +42,21 @@ DESKTOP_ACTIONS = frozenset(
         "application.invitation.inspect",
         "application.bunker.join",
         "application.bunker.import.companion",
+        "application.ticket.list",
+        "application.ticket.get",
+        "coworker.state",
+        "coworker.chat",
+        "coworker.proposal.accept",
+        "coworker.proposal.dismiss",
+        "editor.read",
+        "editor.resolve",
+        "editor.save",
+        "local.editor.update",
+        "truth.queue",
+        "truth.refresh",
+        "truth.synthesize",
+        "workflow.start",
+        "workflow.attach",
     }
 )
 
@@ -47,7 +65,7 @@ def _error(request_id: Any, code: str, message: str, **extra: Any) -> dict[str, 
     return {"id": request_id, "ok": False, "code": code, "message": message, **extra}
 
 
-def _diagnostic(action: str, exc: BaseException) -> str:
+def _diagnostic(action: str, exc: BaseException) -> tuple[str, str]:
     diagnostic_id = uuid.uuid4().hex[:12]
     path = platform_services.current().data_home() / "diagnostics" / "app-worker.jsonl"
     try:
@@ -73,7 +91,7 @@ def _diagnostic(action: str, exc: BaseException) -> str:
             stream.write(json.dumps(value, ensure_ascii=False) + "\n")
     except OSError:
         pass
-    return diagnostic_id
+    return diagnostic_id, str(path)
 
 
 def dispatch_request(value: Any, *, default_root: Path | None = None) -> dict[str, Any]:
@@ -112,12 +130,13 @@ def dispatch_request(value: Any, *, default_root: Path | None = None) -> dict[st
     except commands.CommandRejected as exc:
         return _error(request_id, exc.code, exc.message)
     except Exception as exc:  # the native shell is an error boundary
-        diagnostic_id = _diagnostic(action, exc)
+        diagnostic_id, diagnostic_path = _diagnostic(action, exc)
         return _error(
             request_id,
             "internal_error",
-            f"TicketBunker could not complete that action. Diagnostic: {diagnostic_id}",
+            f"TicketBunker could not complete that action. Diagnostic {diagnostic_id} was saved at {diagnostic_path}.",
             diagnostic_id=diagnostic_id,
+            diagnostic_path=diagnostic_path,
         )
 
 

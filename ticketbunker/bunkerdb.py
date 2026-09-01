@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import subprocess
@@ -19,12 +20,73 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from . import platform_services, project as companion, remote
+from . import layout, platform_services, project as companion, remote
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9-]{0,31}$")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+INTEGRATION_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+
+DEFAULT_TICKET_FIELDS: tuple[dict[str, Any], ...] = (
+    {"key": "title", "label": "Title", "type": "string", "required": True},
+    {"key": "description", "label": "Description", "type": "text", "required": False},
+    {"key": "type", "label": "Type", "type": "enum", "required": False, "values": ["Task", "Bug", "Story"]},
+    {"key": "status", "label": "Status", "type": "string", "required": True},
+    {"key": "priority", "label": "Priority", "type": "string", "required": False},
+    {"key": "assignee", "label": "Assignee", "type": "user", "required": False},
+    {"key": "reporter", "label": "Reporter", "type": "user", "required": False},
+    {"key": "labels", "label": "Labels", "type": "tags", "required": False},
+    {"key": "created", "label": "Created", "type": "datetime", "required": False},
+    {"key": "updated", "label": "Updated", "type": "datetime", "required": False},
+)
+DEFAULT_INTEGRATIONS: dict[str, dict[str, Any]] = {
+    "github": {
+        "label": "GitHub Issues",
+        "template": "github",
+        "fields": {
+            "title": "title",
+            "description": "body",
+            "status": "state",
+            "assignee": "assignees[0].login",
+            "reporter": "user.login",
+            "labels": "labels[*].name",
+            "created": "created_at",
+            "updated": "updated_at",
+        },
+    },
+    "gitlab": {
+        "label": "GitLab Issues",
+        "template": "gitlab",
+        "fields": {
+            "title": "title",
+            "description": "description",
+            "status": "state",
+            "assignee": "assignees[0].username",
+            "reporter": "author.username",
+            "labels": "labels",
+            "created": "created_at",
+            "updated": "updated_at",
+        },
+    },
+    "jira": {
+        "label": "Jira Cloud",
+        "template": "jira",
+        "fields": {
+            "title": "fields.summary",
+            "description": "fields.description",
+            "type": "fields.issuetype.name",
+            "status": "fields.status.name",
+            "priority": "fields.priority.name",
+            "assignee": "fields.assignee.displayName",
+            "reporter": "fields.reporter.displayName",
+            "labels": "fields.labels",
+            "created": "fields.created",
+            "updated": "fields.updated",
+        },
+    },
+}
 
 
 class BunkerDatabaseError(ValueError):
@@ -202,6 +264,13 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (SCHEMA_VERSION, _now()),
     )
+    bunker_row = connection.execute("SELECT id, mode FROM bunker LIMIT 1").fetchone()
+    if bunker_row is not None:
+        bunker_id = str(bunker_row["id"])
+        if str(bunker_row["mode"]) == "local":
+            _ensure_bunker_config(connection, bunker_id)
+            for project_row in connection.execute("SELECT id FROM projects").fetchall():
+                _copy_project_config(connection, bunker_id, str(project_row["id"]))
     connection.commit()
 
 
@@ -317,6 +386,78 @@ def _seed_config(connection: sqlite3.Connection, bunker_id: str) -> None:
         """,
         (bunker_id, json.dumps(defaults, sort_keys=True), now),
     )
+    connection.executemany(
+        """
+        INSERT INTO config_documents(
+            scope_type, scope_id, kind, revision, content_json, updated_at
+        ) VALUES ('bunker', ?, ?, 'local:1', ?, ?)
+        """,
+        (
+            (
+                bunker_id,
+                "ticket-fields",
+                json.dumps({"fields": list(DEFAULT_TICKET_FIELDS)}, sort_keys=True),
+                now,
+            ),
+            (
+                bunker_id,
+                "integrations",
+                json.dumps({"providers": DEFAULT_INTEGRATIONS}, sort_keys=True),
+                now,
+            ),
+        ),
+    )
+
+
+def _ensure_bunker_config(connection: sqlite3.Connection, bunker_id: str) -> None:
+    """Add standalone configuration documents to databases from preview builds."""
+    now = _now()
+    values = (
+        (
+            bunker_id,
+            "ticket-fields",
+            json.dumps({"fields": list(DEFAULT_TICKET_FIELDS)}, sort_keys=True),
+            now,
+        ),
+        (
+            bunker_id,
+            "integrations",
+            json.dumps({"providers": DEFAULT_INTEGRATIONS}, sort_keys=True),
+            now,
+        ),
+    )
+    connection.executemany(
+        """
+        INSERT OR IGNORE INTO config_documents(
+            scope_type, scope_id, kind, revision, content_json, updated_at
+        ) VALUES ('bunker', ?, ?, 'local:1', ?, ?)
+        """,
+        values,
+    )
+
+
+def _copy_project_config(
+    connection: sqlite3.Connection, bunker_id: str, project_id: str
+) -> None:
+    """Pin the current Bunker defaults for one newly created Project."""
+    now = _now()
+    rows = connection.execute(
+        """
+        SELECT kind, content_json FROM config_documents
+        WHERE scope_type = 'bunker' AND scope_id = ?
+          AND kind IN ('ticket-fields', 'integrations')
+        """,
+        (bunker_id,),
+    ).fetchall()
+    for row in rows:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO config_documents(
+                scope_type, scope_id, kind, revision, content_json, updated_at
+            ) VALUES ('project', ?, ?, 'local:1', ?, ?)
+            """,
+            (project_id, row["kind"], row["content_json"], now),
+        )
 
 
 def create_bunker(
@@ -350,6 +491,7 @@ def create_bunker(
                 (project_id, bunker_id, key, root_name, now, now),
             )
             _seed_config(connection, bunker_id)
+            _copy_project_config(connection, bunker_id, project_id)
         _register(bunker_id, bunker_name, path, mode="local")
     except Exception:
         connection.close()
@@ -484,6 +626,678 @@ def list_bunkers() -> list[dict[str, Any]]:
     return values
 
 
+def _config_scope(
+    connection: sqlite3.Connection,
+    bunker_id: str,
+    project_id: str | None,
+) -> tuple[str, str, dict[str, Any]]:
+    bunker_row = connection.execute(
+        "SELECT id, mode FROM bunker WHERE id = ?", (bunker_id,)
+    ).fetchone()
+    if bunker_row is None:
+        raise BunkerDatabaseError("That Bunker is not available on this device.")
+    if project_id:
+        selected = _id(project_id, "project")
+        if connection.execute(
+            "SELECT 1 FROM projects WHERE id = ? AND bunker_id = ?",
+            (selected, bunker_id),
+        ).fetchone() is None:
+            raise BunkerDatabaseError("Choose a project from this Bunker.")
+        return "project", selected, dict(bunker_row)
+    return "bunker", bunker_id, dict(bunker_row)
+
+
+def _config_permission(
+    connection: sqlite3.Connection, bunker: Mapping[str, Any]
+) -> dict[str, Any]:
+    if str(bunker.get("mode") or "local") == "local":
+        return {
+            "can_write": True,
+            "reason": "This local Bunker is controlled on this device.",
+            "capabilities": ["config:read", "config:write"],
+        }
+    row = connection.execute(
+        """
+        SELECT state, server_url, capabilities_json
+        FROM remote_connection WHERE singleton = 1
+        """
+    ).fetchone()
+    capabilities: list[str] = []
+    if row is not None:
+        try:
+            value = json.loads(str(row["capabilities_json"] or "[]"))
+            if isinstance(value, list):
+                capabilities = [str(item) for item in value if isinstance(item, str)]
+        except ValueError:
+            pass
+    server = str(row["server_url"] or "the remote service") if row else "the remote service"
+    # A remote snapshot is deliberately never a local authorization oracle.
+    # The future authenticated sync broker may publish a typed change, but this
+    # local database cannot promote itself even when its cached capability list
+    # includes config:write.
+    return {
+        "can_write": False,
+        "reason": f"Shared configuration is controlled by {server}; connect and synchronize there to publish changes.",
+        "capabilities": capabilities,
+    }
+
+
+def get_configuration(
+    bunker_id: str, *, project_id: str | None = None
+) -> dict[str, Any]:
+    """Return one pinned Bunker-default or Project configuration snapshot."""
+    bunker_id = _id(bunker_id, "Bunker")
+    with _database(bunker_id) as connection:
+        scope_type, scope_id, bunker = _config_scope(
+            connection, bunker_id, project_id
+        )
+        rows = connection.execute(
+            """
+            SELECT kind, revision, content_json, updated_at
+            FROM config_documents
+            WHERE scope_type = ? AND scope_id = ?
+              AND kind IN ('ticket-fields', 'integrations')
+            ORDER BY kind
+            """,
+            (scope_type, scope_id),
+        ).fetchall()
+        documents: dict[str, Any] = {}
+        for row in rows:
+            content = _payload_object(row["content_json"])
+            documents[str(row["kind"])] = {
+                "kind": str(row["kind"]),
+                "revision": str(row["revision"]),
+                "updated_at": str(row["updated_at"]),
+                "content": content,
+            }
+        permission = _config_permission(connection, bunker)
+    return {
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "documents": documents,
+        "permission": permission,
+        "composition": "pinned" if scope_type == "project" else "defaults-for-new-projects",
+    }
+
+
+_FIELD_TYPES = {
+    "string",
+    "text",
+    "number",
+    "boolean",
+    "date",
+    "datetime",
+    "user",
+    "enum",
+    "tags",
+    "url",
+}
+
+
+def _validated_ticket_fields(content: Mapping[str, Any]) -> dict[str, Any]:
+    raw = content.get("fields")
+    if not isinstance(raw, list):
+        raise BunkerDatabaseError("Ticket fields must be a list.")
+    fields: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in raw:
+        if not isinstance(value, Mapping):
+            raise BunkerDatabaseError("Each ticket field must be an object.")
+        key = str(value.get("key") or "").strip().lower()
+        label = str(value.get("label") or "").strip()
+        field_type = str(value.get("type") or "string").strip().lower()
+        if not FIELD_KEY_RE.fullmatch(key):
+            raise BunkerDatabaseError(
+                "Field keys start with a letter and use lowercase letters, numbers, dots, dashes, or underscores."
+            )
+        if key in seen:
+            raise BunkerDatabaseError(f"Ticket field {key!r} appears more than once.")
+        if not label or len(label) > 80:
+            raise BunkerDatabaseError("Each ticket field needs a label of 80 characters or fewer.")
+        if field_type not in _FIELD_TYPES:
+            raise BunkerDatabaseError(f"Ticket field {key!r} has an unsupported type.")
+        field: dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "type": field_type,
+            "required": bool(value.get("required", False)),
+        }
+        if field_type == "enum":
+            values = value.get("values")
+            if not isinstance(values, list):
+                raise BunkerDatabaseError(f"Enum field {key!r} needs a list of values.")
+            selected = [str(item).strip() for item in values if str(item).strip()]
+            if len(selected) != len(set(selected)):
+                raise BunkerDatabaseError(f"Enum field {key!r} contains duplicate values.")
+            field["values"] = selected
+        fields.append(field)
+        seen.add(key)
+    return {"fields": fields}
+
+
+def _validated_integrations(
+    content: Mapping[str, Any], available_fields: set[str]
+) -> dict[str, Any]:
+    raw = content.get("providers")
+    if not isinstance(raw, Mapping):
+        raise BunkerDatabaseError("Integrations must be an object keyed by provider.")
+    providers: dict[str, Any] = {}
+    for raw_id, value in raw.items():
+        provider = str(raw_id or "").strip().lower()
+        if not INTEGRATION_ID_RE.fullmatch(provider):
+            raise BunkerDatabaseError(
+                "Integration identifiers start with a letter and use lowercase letters, numbers, dots, dashes, or underscores."
+            )
+        if not isinstance(value, Mapping):
+            raise BunkerDatabaseError(f"Integration {provider!r} must be an object.")
+        label = str(value.get("label") or "").strip()
+        if not label or len(label) > 80:
+            raise BunkerDatabaseError(
+                f"Integration {provider!r} needs a label of 80 characters or fewer."
+            )
+        raw_fields = value.get("fields")
+        if not isinstance(raw_fields, Mapping):
+            raise BunkerDatabaseError(f"Integration {provider!r} needs a field matrix.")
+        fields: dict[str, str] = {}
+        for ours_value, theirs_value in raw_fields.items():
+            ours = str(ours_value or "").strip().lower()
+            theirs = str(theirs_value or "").strip()
+            if ours not in available_fields:
+                raise BunkerDatabaseError(
+                    f"Integration {provider!r} maps unknown TicketBunker field {ours!r}."
+                )
+            if not theirs or len(theirs) > 256 or "\n" in theirs or "\r" in theirs:
+                raise BunkerDatabaseError(
+                    f"Integration {provider!r} needs one valid external path for {ours!r}."
+                )
+            fields[ours] = theirs
+        providers[provider] = {
+            "label": label,
+            "template": str(value.get("template") or "custom")[:80],
+            "fields": fields,
+        }
+    return {"providers": providers}
+
+
+def replace_configuration(
+    bunker_id: str,
+    *,
+    project_id: str | None,
+    kind: str,
+    expected_revision: str,
+    content: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Replace one complete configuration document with optimistic locking."""
+    bunker_id = _id(bunker_id, "Bunker")
+    document_kind = str(kind or "").strip()
+    if document_kind not in {"ticket-fields", "integrations"}:
+        raise BunkerDatabaseError("Choose Ticket fields or Integrations to publish.")
+    if not isinstance(content, Mapping):
+        raise BunkerDatabaseError("Configuration content must be one object.")
+    with _database(bunker_id) as connection:
+        scope_type, scope_id, bunker = _config_scope(
+            connection, bunker_id, project_id
+        )
+        permission = _config_permission(connection, bunker)
+        if not permission["can_write"]:
+            raise BunkerDatabaseError(str(permission["reason"]))
+        current = connection.execute(
+            """
+            SELECT revision FROM config_documents
+            WHERE scope_type = ? AND scope_id = ? AND kind = ?
+            """,
+            (scope_type, scope_id, document_kind),
+        ).fetchone()
+        if current is None:
+            raise BunkerDatabaseError("That configuration document is missing. Reopen the editor.")
+        current_revision = str(current["revision"])
+        if not expected_revision or expected_revision != current_revision:
+            raise BunkerDatabaseError(
+                "Configuration changed after this editor opened. Reload it and review the latest revision."
+            )
+        if document_kind == "ticket-fields":
+            normalized = _validated_ticket_fields(content)
+            available = {str(value["key"]) for value in normalized["fields"]}
+            integration_row = connection.execute(
+                """
+                SELECT content_json FROM config_documents
+                WHERE scope_type = ? AND scope_id = ? AND kind = 'integrations'
+                """,
+                (scope_type, scope_id),
+            ).fetchone()
+            integration_content = (
+                _payload_object(integration_row["content_json"])
+                if integration_row is not None
+                else {}
+            )
+            providers = integration_content.get("providers")
+            used = sorted(
+                {
+                    str(field)
+                    for settings in (
+                        providers.values() if isinstance(providers, Mapping) else []
+                    )
+                    if isinstance(settings, Mapping)
+                    for field in (
+                        settings.get("fields", {}).keys()
+                        if isinstance(settings.get("fields"), Mapping)
+                        else []
+                    )
+                    if str(field) not in available
+                }
+            )
+            if used:
+                raise BunkerDatabaseError(
+                    "Remove integration mappings for these fields before deleting or renaming them: "
+                    + ", ".join(used)
+                    + "."
+                )
+        else:
+            field_row = connection.execute(
+                """
+                SELECT content_json FROM config_documents
+                WHERE scope_type = ? AND scope_id = ? AND kind = 'ticket-fields'
+                """,
+                (scope_type, scope_id),
+            ).fetchone()
+            fields = (
+                _payload_object(field_row["content_json"]).get("fields", [])
+                if field_row is not None
+                else []
+            )
+            available = {
+                str(value.get("key") or "")
+                for value in fields
+                if isinstance(value, Mapping)
+            }
+            normalized = _validated_integrations(content, available)
+        raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+        if len(raw.encode("utf-8")) > 1024 * 1024:
+            raise BunkerDatabaseError("That configuration document is too large.")
+        match = re.fullmatch(r"local:(\d+)", current_revision)
+        revision = f"local:{int(match.group(1)) + 1}" if match else f"local:{uuid.uuid4()}"
+        now = _now()
+        changed = connection.execute(
+            """
+            UPDATE config_documents
+            SET revision = ?, content_json = ?, updated_at = ?
+            WHERE scope_type = ? AND scope_id = ? AND kind = ? AND revision = ?
+            """,
+            (
+                revision,
+                raw,
+                now,
+                scope_type,
+                scope_id,
+                document_kind,
+                current_revision,
+            ),
+        ).rowcount
+        if changed != 1:
+            raise BunkerDatabaseError(
+                "Configuration changed while it was publishing. Reload it and retry."
+            )
+    return get_configuration(bunker_id, project_id=project_id)
+
+
+_CLOSED_STATUSES = {
+    "closed",
+    "complete",
+    "completed",
+    "done",
+    "resolved",
+    "cancelled",
+    "canceled",
+}
+
+
+def _payload_object(raw: Any) -> dict[str, Any]:
+    try:
+        value = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _person(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(
+            value.get("display_name")
+            or value.get("displayName")
+            or value.get("name")
+            or value.get("login")
+            or ""
+        )
+    return str(value or "")
+
+
+def _labels(payload: Mapping[str, Any]) -> list[str]:
+    raw = payload.get("labels", payload.get("tags", []))
+    if isinstance(raw, str):
+        return [raw] if raw.strip() else []
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
+    for item in raw:
+        label = _person(item).strip()
+        if label and label not in values:
+            values.append(label)
+    return values
+
+
+def _ticket_reference(row: Mapping[str, Any], project: Mapping[str, Any]) -> dict[str, Any]:
+    payload = _payload_object(row.get("payload_json"))
+    ticket_id = str(row.get("id") or payload.get("id") or "")
+    return {
+        "id": ticket_id,
+        "title": str(payload.get("title") or payload.get("summary") or ticket_id),
+        "status": str(payload.get("status") or payload.get("state") or "open"),
+        "type": str(payload.get("type") or payload.get("issue_type") or "Task"),
+        "priority": str(payload.get("priority") or ""),
+        "assignee": _person(payload.get("assignee")),
+        "reporter": _person(payload.get("reporter") or payload.get("author")),
+        "labels": _labels(payload),
+        "updated": str(
+            payload.get("updated") or payload.get("updated_at") or row.get("updated_at") or ""
+        ),
+        "project": {
+            "id": str(project.get("id") or ""),
+            "key": str(project.get("key") or ""),
+            "name": str(project.get("name") or ""),
+        },
+        "source_kind": str(row.get("source_kind") or "manual"),
+        "source_reference": str(row.get("source_reference") or ""),
+    }
+
+
+def _project_scope(
+    rows: list[dict[str, Any]], project_id: str | None
+) -> tuple[set[str], dict[str, dict[str, Any]]]:
+    by_id = {str(row["id"]): row for row in rows}
+    if not project_id:
+        return set(by_id), by_id
+    selected = _id(project_id, "project")
+    if selected not in by_id:
+        raise BunkerDatabaseError("Choose a project from this Bunker.")
+    allowed = {selected}
+    changed = True
+    while changed:
+        changed = False
+        for row in rows:
+            row_id = str(row["id"])
+            if row_id not in allowed and str(row.get("parent_id") or "") in allowed:
+                allowed.add(row_id)
+                changed = True
+    return allowed, by_id
+
+
+def list_tickets(
+    bunker_id: str,
+    *,
+    project_id: str | None = None,
+    search: str = "",
+    status: str = "active",
+    assignee: str = "",
+    reporter: str = "",
+    label: str = "",
+    page: int = 1,
+    page_size: int = 25,
+) -> dict[str, Any]:
+    """Return a bounded provider-neutral page of ticket references."""
+    bunker_id = _id(bunker_id, "Bunker")
+    page = max(1, int(page))
+    page_size = min(100, max(1, int(page_size)))
+    query = str(search or "").strip().casefold()
+    status_filter = str(status or "active").strip().casefold()
+    assignee_filter = str(assignee or "").strip().casefold()
+    reporter_filter = str(reporter or "").strip().casefold()
+    label_filter = str(label or "").strip().casefold()
+    with _database(bunker_id) as connection:
+        project_rows = _project_rows(connection)
+        allowed, projects = _project_scope(project_rows, project_id)
+        rows = connection.execute(
+            """
+            SELECT id, project_id, payload_json, source_kind,
+                   source_reference, updated_at
+            FROM tickets ORDER BY updated_at DESC, id COLLATE NOCASE
+            """
+        ).fetchall()
+    scoped = [
+        _ticket_reference(dict(row), projects[str(row["project_id"])])
+        for row in rows
+        if str(row["project_id"]) in allowed
+    ]
+    facets = {
+        "statuses": sorted({item["status"] for item in scoped if item["status"]}),
+        "assignees": sorted({item["assignee"] for item in scoped if item["assignee"]}),
+        "reporters": sorted({item["reporter"] for item in scoped if item["reporter"]}),
+        "labels": sorted({value for item in scoped for value in item["labels"]}),
+    }
+
+    def matches(item: Mapping[str, Any]) -> bool:
+        item_status = str(item.get("status") or "").casefold()
+        if status_filter == "active" and item_status in _CLOSED_STATUSES:
+            return False
+        if status_filter not in {"", "active", "all"} and item_status != status_filter:
+            return False
+        if assignee_filter and str(item.get("assignee") or "").casefold() != assignee_filter:
+            return False
+        if reporter_filter and str(item.get("reporter") or "").casefold() != reporter_filter:
+            return False
+        labels = [str(value).casefold() for value in item.get("labels") or []]
+        if label_filter and label_filter not in labels:
+            return False
+        if query:
+            project = item.get("project") if isinstance(item.get("project"), Mapping) else {}
+            haystack = " ".join(
+                [
+                    str(item.get("id") or ""),
+                    str(item.get("title") or ""),
+                    str(item.get("assignee") or ""),
+                    str(item.get("reporter") or ""),
+                    str(project.get("key") or ""),
+                    str(project.get("name") or ""),
+                    *[str(value) for value in item.get("labels") or []],
+                ]
+            ).casefold()
+            if query not in haystack:
+                return False
+        return True
+
+    selected = [item for item in scoped if matches(item)]
+    total = len(selected)
+    page_count = max(1, math.ceil(total / page_size))
+    page = min(page, page_count)
+    start = (page - 1) * page_size
+    return {
+        "tickets": selected[start : start + page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "page_count": page_count,
+        "facets": facets,
+    }
+
+
+def _repository_branches(repository: Mapping[str, Any], ticket_id: str) -> list[dict[str, Any]]:
+    raw_path = str(repository.get("local_path") or "")
+    if not raw_path:
+        return []
+    root = Path(raw_path)
+    current = _git_value(root, "branch", "--show-current")
+    raw = _git_value(root, "branch", "--all", "--format=%(refname:short)")
+    needle = ticket_id.casefold()
+    values: list[dict[str, Any]] = []
+    for name in sorted({line.strip() for line in raw.splitlines() if line.strip()}):
+        if name.endswith("/HEAD") or needle not in name.casefold():
+            continue
+        values.append(
+            {
+                "name": name,
+                "current": name == current,
+                "remote": name.startswith("remotes/") or name.startswith("origin/"),
+                "repository_id": str(repository.get("id") or ""),
+                "repository_name": str(repository.get("name") or root.name),
+            }
+        )
+    return values
+
+
+def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
+    """Refresh one imported ticket from its attached checkout without networking."""
+    with _database(bunker_id) as connection:
+        source = connection.execute(
+            """
+            SELECT t.source_kind, t.source_reference, p.key, lr.local_path
+            FROM tickets t
+            JOIN projects p ON p.id = t.project_id
+            JOIN repository_bindings rb ON rb.project_id = p.id
+            JOIN local_repositories lr ON lr.binding_id = rb.id
+            WHERE t.id = ? LIMIT 1
+            """,
+            (ticket_id,),
+        ).fetchone()
+    if source is None or str(source["source_kind"]) not in {
+        "legacy-companion",
+        "legacy-embedded",
+    }:
+        return
+    root = Path(str(source["local_path"]))
+    if str(source["source_kind"]) == "legacy-embedded":
+        candidates = [
+            path
+            for path in layout.bunkers_dir(root).iterdir()
+            if path.is_dir() and (path / "ticket.json").is_file()
+        ] if layout.bunkers_dir(root).is_dir() else []
+        ticket_root = next(
+            (
+                path
+                for path in candidates
+                if str(_payload_object((path / "ticket.json").read_text(encoding="utf-8")).get("id") or "")
+                == ticket_id
+            ),
+            layout.bunkers_dir(root) / f"{ticket_id}_bunker",
+        )
+    else:
+        ticket_root = companion.tickets_dir(root, str(source["key"])) / ticket_id
+    ticket_path = ticket_root / "ticket.json"
+    try:
+        payload = json.loads(ticket_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(payload, dict):
+        return
+    report_values: list[tuple[str, str]] = []
+    master_path = ticket_root / "reports" / "master.md"
+    if master_path.is_file():
+        try:
+            report_values.append(("combined", master_path.read_text(encoding="utf-8")))
+        except OSError:
+            pass
+    branch_root = ticket_root / "reports" / "branches"
+    if branch_root.is_dir():
+        for path in sorted(branch_root.glob("*.md")):
+            try:
+                report_values.append((f"branch:{path.stem}", path.read_text(encoding="utf-8")))
+            except OSError:
+                continue
+    now = _now()
+    with _database(bunker_id) as connection:
+        connection.execute(
+            "UPDATE tickets SET payload_json = ?, updated_at = ? WHERE id = ?",
+            (
+                json.dumps(payload, sort_keys=True),
+                str(payload.get("updated") or payload.get("updated_at") or now),
+                ticket_id,
+            ),
+        )
+        connection.execute("DELETE FROM reports WHERE ticket_id = ?", (ticket_id,))
+        connection.executemany(
+            "INSERT INTO reports(ticket_id, scope, content, updated_at) VALUES (?, ?, ?, ?)",
+            [(ticket_id, scope, content, now) for scope, content in report_values],
+        )
+
+
+def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
+    """Return one complete local ticket snapshot without network activity."""
+    bunker_id = _id(bunker_id, "Bunker")
+    ticket_id = _id(ticket_id, "ticket")
+    _refresh_legacy_ticket(bunker_id, ticket_id)
+    with _database(bunker_id) as connection:
+        row = connection.execute(
+            """
+            SELECT id, project_id, payload_json, source_kind,
+                   source_reference, updated_at
+            FROM tickets WHERE id = ?
+            """,
+            (ticket_id,),
+        ).fetchone()
+        if row is None:
+            raise BunkerDatabaseError("That ticket is not available in this Bunker.")
+        project_row = connection.execute(
+            """
+            SELECT id, parent_id, key, name, description, position,
+                   created_at, updated_at FROM projects WHERE id = ?
+            """,
+            (row["project_id"],),
+        ).fetchone()
+        if project_row is None:
+            raise BunkerDatabaseError("The ticket's project is missing.")
+        report_rows = connection.execute(
+            """
+            SELECT scope, content, updated_at FROM reports
+            WHERE ticket_id = ? ORDER BY CASE scope WHEN 'combined' THEN 0 ELSE 1 END, scope
+            """,
+            (ticket_id,),
+        ).fetchall()
+        repository_rows = connection.execute(
+            """
+            SELECT rb.id, rb.name, rb.canonical_remote, rb.default_branch,
+                   lr.local_path, lr.last_seen_at
+            FROM repository_bindings rb
+            LEFT JOIN local_repositories lr ON lr.binding_id = rb.id
+            WHERE rb.project_id = ? ORDER BY rb.name COLLATE NOCASE
+            """,
+            (row["project_id"],),
+        ).fetchall()
+    payload = _payload_object(row["payload_json"])
+    project = dict(project_row)
+    reference = _ticket_reference(dict(row), project)
+    reports = [dict(value) for value in report_rows]
+    repositories = [dict(value) for value in repository_rows]
+    branches: list[dict[str, Any]] = []
+    for repository in repositories:
+        branches.extend(_repository_branches(repository, ticket_id))
+    known = {str(value["name"]) for value in branches}
+    for report in reports:
+        scope = str(report.get("scope") or "")
+        if not scope.startswith("branch:"):
+            continue
+        name = scope.removeprefix("branch:")
+        if name not in known:
+            branches.append(
+                {
+                    "name": name,
+                    "current": False,
+                    "remote": False,
+                    "repository_id": "",
+                    "repository_name": "",
+                }
+            )
+            known.add(name)
+    return {
+        "ticket": {**payload, **reference},
+        "project": project,
+        "repositories": repositories,
+        "branches": branches,
+        "reports": reports,
+        "comments": payload.get("comments") if isinstance(payload.get("comments"), list) else [],
+        "activity": (
+            payload.get("activity") if isinstance(payload.get("activity"), list) else []
+        ),
+    }
+
+
 def imported_companion_sources() -> set[str]:
     """Return device-local legacy roots already copied into a Bunker."""
     sources: set[str] = set()
@@ -537,6 +1351,7 @@ def create_project(
                 """,
                 (project_id, bunker_id, parent, project_key, project_name, description, now, now),
             )
+            _copy_project_config(connection, bunker_id, project_id)
     except sqlite3.IntegrityError as exc:
         raise BunkerDatabaseError(
             f"Project key {project_key} already exists in this Bunker."
@@ -923,7 +1738,7 @@ def create_replica(
 
 
 def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, Any]:
-    """Copy a companion-Git project into a new local Bunker database.
+    """Copy a repository-era project into a new local Bunker database.
 
     The source repository and companion checkouts are read-only throughout the
     import.  Nothing is removed or reconfigured, so the user may verify the new
@@ -935,12 +1750,42 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
             "That companion project has already been imported on this device."
         )
     locator = companion.load_locator(root)
-    if locator is None:
+    embedded_roots = (
+        [
+            path
+            for path in sorted(layout.bunkers_dir(root).iterdir())
+            if path.is_dir() and (path / "ticket.json").is_file()
+        ]
+        if layout.bunkers_dir(root).is_dir()
+        else []
+    )
+    if locator is None and not embedded_roots:
         raise BunkerDatabaseError(
-            "No legacy TicketBunker locator was found in that Git project."
+            "No repository-era TicketBunker data was found in that Git project."
         )
-    key = _project_key(locator.get("project"))
-    project_doc_path = companion.project_config_dir(root, key) / "project.json"
+    if locator is not None:
+        key = _project_key(locator.get("project"))
+        project_doc_path = companion.project_config_dir(root, key) / "project.json"
+        ticket_roots = (
+            sorted(companion.tickets_dir(root, key).iterdir())
+            if companion.tickets_dir(root, key).is_dir()
+            else []
+        )
+        config_root = companion.project_config_dir(root, key)
+        source_kind = "legacy-companion"
+        default_branch = str(locator.get("base_branch") or "")
+    else:
+        first_payload = _payload_object(
+            (embedded_roots[0] / "ticket.json").read_text(encoding="utf-8")
+        )
+        first_id = str(first_payload.get("id") or "TB-1")
+        candidate_key = first_id.split("-", 1)[0].upper()
+        key = _project_key(candidate_key if PROJECT_KEY_RE.fullmatch(candidate_key) else "TB")
+        project_doc_path = layout.bunkers_dir(root) / "config" / "project.json"
+        ticket_roots = embedded_roots
+        config_root = layout.bunkers_dir(root) / "config"
+        source_kind = "legacy-embedded"
+        default_branch = _git_value(root, "branch", "--show-current")
     try:
         project_doc = json.loads(project_doc_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -959,18 +1804,16 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
         bunker_id,
         project_id=project_id,
         local_path=str(root),
-        default_branch=str(locator.get("base_branch") or ""),
+        default_branch=default_branch,
     )
-    ticket_root = companion.tickets_dir(root, key)
     imported_tickets: list[str] = []
     imported_reports = 0
     config_count = 0
     digest = hashlib.sha256(
-        json.dumps(locator, sort_keys=True).encode("utf-8")
+        json.dumps(locator or {"embedded": True}, sort_keys=True).encode("utf-8")
     )
     now = _now()
     with _database(bunker_id) as connection:
-        config_root = companion.project_config_dir(root, key)
         if config_root.is_dir():
             for path in sorted(config_root.rglob("*.json")):
                 try:
@@ -994,8 +1837,8 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
                     (project_id, f"legacy/{relative}", "legacy-import", raw, now),
                 )
                 config_count += 1
-        if ticket_root.is_dir():
-            for ticket_dir in sorted(ticket_root.iterdir()):
+        if ticket_roots:
+            for ticket_dir in ticket_roots:
                 ticket_path = ticket_dir / "ticket.json"
                 if not ticket_dir.is_dir() or not ticket_path.is_file():
                     continue
@@ -1014,13 +1857,14 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
                     INSERT OR REPLACE INTO tickets(
                         id, project_id, payload_json, source_kind,
                         source_reference, updated_at
-                    ) VALUES (?, ?, ?, 'legacy-companion', ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         ticket_id,
                         project_id,
                         raw,
-                        f"legacy-companion:{key}/{ticket_id}",
+                        source_kind,
+                        f"{source_kind}:{key}/{ticket_id}",
                         now,
                     ),
                 )
@@ -1098,8 +1942,12 @@ __all__ = [
     "data_root",
     "database_path",
     "get_bunker",
+    "get_configuration",
+    "get_ticket",
     "import_companion",
     "imported_companion_sources",
     "list_bunkers",
+    "list_tickets",
+    "replace_configuration",
     "registry_path",
 ]

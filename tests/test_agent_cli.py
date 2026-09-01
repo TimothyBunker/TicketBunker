@@ -198,7 +198,6 @@ class AgentCliTests(unittest.TestCase):
         self.assertIn("TicketBunker app", stdout)
         opened.assert_called_once_with(
             self.root,
-            port=8378,
             route="/source?path=ticketbunker%2Fviewer.py&line=42",
         )
         start_viewer.assert_not_called()
@@ -225,7 +224,7 @@ class AgentCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0, stderr)
         self.assertIn("opened TicketBunker", stdout)
-        opened.assert_called_once_with(self.root, port=18499)
+        opened.assert_called_once_with(self.root)
 
     def test_view_browser_flag_skips_the_desktop_app(self) -> None:
         server = mock.Mock()
@@ -233,7 +232,7 @@ class AgentCliTests(unittest.TestCase):
         server.serve_forever.side_effect = KeyboardInterrupt
         with mock.patch.object(cli.layout, "find_root", return_value=self.root):
             with mock.patch.object(cli.desktop, "open_project") as opened:
-                with mock.patch("ticketbunker.viewer.serve", return_value=server):
+                with mock.patch("ticketbunker.app_server.serve", return_value=server):
                     code, _stdout, stderr = self._run(
                         [
                             "view",

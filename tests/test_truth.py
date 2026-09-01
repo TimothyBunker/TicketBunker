@@ -138,7 +138,7 @@ class SharedTruthTests(unittest.TestCase):
         self.assertEqual(value["compact"], "Stopped")
         self.assertEqual(value["action"], "Retry synthesis")
         self.assertEqual(value["command"], "synthesize")
-        self.assertEqual(value["log_url"], "/truth/agent-log")
+        self.assertEqual(value["log"], str(autoagent.log_path(self.root)))
 
     def test_legacy_automatic_failure_is_an_unsynthesized_state_not_user_failure(self) -> None:
         with mock.patch.object(

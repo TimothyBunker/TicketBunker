@@ -46,7 +46,6 @@ class DesktopLauncherTests(unittest.TestCase):
             with mock.patch.object(subprocess, "Popen") as opened:
                 result = desktop.open_project(
                     self.root,
-                    port=18499,
                     route="/source?path=src%2Fmain.py&line=7",
                 )
 
@@ -57,8 +56,6 @@ class DesktopLauncherTests(unittest.TestCase):
                 str(executable),
                 "--repo",
                 str(self.root),
-                "--port",
-                "18499",
                 "--route",
                 "/source?path=src%2Fmain.py&line=7",
             ],

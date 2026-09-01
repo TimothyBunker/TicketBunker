@@ -774,6 +774,20 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
     return state(root, project_key, ticket_id, category=category, scope=scope)
 
 
+@commands.register("coworker.state")
+def command_state(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    root = Path(context.project_root).resolve()
+    project_key = str(payload.get("project") or "").strip()
+    ticket_id = str(payload.get("ticket") or "").strip()
+    category = str(payload.get("category") or "who").casefold()
+    scope = str(payload.get("scope") or "combined").strip()
+    if category not in CATEGORIES:
+        raise commands.CommandRejected(
+            "coworker_category_invalid", "Choose Who, What, Where, or Why."
+        )
+    return state(root, project_key, ticket_id, category=category, scope=scope)
+
+
 def _load_proposal(root: Path, project_key: str, ticket_id: str, proposal_id: str) -> dict[str, Any]:
     path = _proposal_path(root, project_key, ticket_id, proposal_id)
     try:
@@ -955,5 +969,6 @@ __all__ = [
     "command_accept",
     "command_chat",
     "command_dismiss",
+    "command_state",
     "state",
 ]

@@ -358,7 +358,7 @@ full trails use that same control, matching coworker chat. Drag across the path
 to quote it to the contextual coworker bubble; click it to open the file. The same
 guarded operation is available as `tb open '@[relative/path]:line'`; it rejects
 paths outside the checkout and opens the current branch's file in the included
-localhost editor. A clipboard control after every source link resolves and
+source editor. A clipboard control after every source link resolves and
 copies its absolute local path plus line through that same checkout guard. Save
 checks that the file has not changed since it opened and
 atomically writes only that file; it never stages or runs Git. Configure
@@ -369,17 +369,19 @@ line range, and bounded text to the same coworker; unsaved selections are
 labeled as drafts.
 
 `tb view` prefers the installed TicketBunker desktop app and releases the
-terminal immediately. The app owns its localhost core process and stops it when
-the project window closes. If the desktop shell is not installed, the command
-uses the same localhost browser viewer automatically. Use `--browser` to choose
-that fallback explicitly, `--no-open` when you only want its local service, or
+terminal immediately. The app loads the bundled interface and owns one private
+typed core session for its lifetime; no local web server sits between the native
+window and the Python core. If the desktop app is not installed, the command
+serves those same compiled assets on loopback automatically. Use `--browser` to choose
+that fallback explicitly, `--no-open` when you only want its loopback service, or
 `--foreground` when debugging the server itself. Starting the app/viewer or
 opening a source reference never publishes shared report data. If an optional
 external editor cannot open, the source link falls back to the included editor.
 After a TicketBunker update, browser mode detects an older detached worker and
 opens the current viewer instead of reconnecting to stale behavior.
 
-The desktop shell currently lives in `desktop/` and is built with Tauri 2. Its
+The desktop application lives in `desktop/` and is built with React, TypeScript,
+Vite, and Tauri 2. Its
 security and process-lifecycle contract is documented in
 [`desktop/README.md`](desktop/README.md). Opening the app itself lands on
 Bunkers. **Create Bunker** and **Join Bunker** are peer actions. Each Bunker row
@@ -390,10 +392,18 @@ The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
 are available directly in the app; the app never exposes Pi's terminal UI.
-The launcher keeps one private, bounded core session for its lifetime, so app
+The launcher keeps one private, bounded JSONL core session for its lifetime, so app
 actions do not start a new Python process per click. Every response is matched
 to its request and all behavior still passes through the shared typed action
 registry.
+
+**Configure** opens either Bunker defaults or the selected Project's pinned
+configuration. New Projects copy the current defaults; later default changes do
+not silently alter old Projects. Ticket fields and the complete GitHub, GitLab,
+Jira, or custom integration matrix publish as revision-checked documents. Local
+Bunkers are editable on the device. Remote replicas render their service-owned
+snapshot read-only until an authenticated service sync publishes the change, so
+a cached capability can never elevate itself.
 
 The compatibility ticket view is available to Python integrations without going
 through HTML or scraping CLI output:
@@ -414,7 +424,7 @@ for reference in page.tickets:
 
 This legacy query API is deliberately read-only while the Bunker-native read
 model is completed. Mutations use shared command
-envelopes—the CLI and localhost editor call the same handlers—so validation,
+envelopes—the CLI and included editor call the same handlers—so validation,
 Git publication, and the ledger cannot be bypassed. Optional
 `acceptance_criteria`, `metadata`, and provider-neutral `activity` entries
 preserve tracker-shaped and project-specific information in `ticket.json`.

@@ -108,6 +108,16 @@ typed payload. The service applies the accepted set transactionally and returns
 the new cursor and per-change results. Revision conflicts are explicit; the
 service never asks the client to merge database files.
 
+Configuration changes replace one complete `ticket-fields` or `integrations`
+document. They name `scope_type` (`bunker` or `project`), `scope_id`, `kind`,
+and `expected_revision`; the service requires an active membership plus its
+configured `config:write` capability before accepting the change. A Bunker
+document is the default copied into Projects created afterward. A Project
+document is a pinned composition and does not track later Bunker-default
+updates. The client never treats cached capabilities as authorization: a local
+remote replica stays read-only until the service accepts the typed change and
+returns the new revision.
+
 ## Stable failures
 
 - `401`: authentication is missing or expired;

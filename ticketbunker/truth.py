@@ -235,6 +235,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         and last.get("status") == "fail"
         and autoagent.was_user_requested(last)
     ):
+        log = str(automatic.get("log") or autoagent.log_path(root))
         return {
             "status": "stopped",
             "label": "Synthesis stopped",
@@ -242,7 +243,7 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
             "detail": str(last.get("detail") or "The last synthesis did not finish."),
             "action": "Retry synthesis",
             "command": "synthesize",
-            "log_url": "/truth/agent-log",
+            "log": log,
         }
     if selected is not None:
         current = autoagent.synthesis_input_state(root, ticket.bunker, branch)

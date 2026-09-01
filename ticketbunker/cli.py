@@ -1719,7 +1719,7 @@ def cmd_open_source(args: argparse.Namespace) -> int:
         query = urlencode({"path": result["path"], "line": result["line"]})
         route = f"/source?{query}"
         try:
-            if desktop.open_project(root, port=args.port, route=route):
+            if desktop.open_project(root, route=route):
                 print(f"opened {result['path']}:{result['line']} in the TicketBunker app")
                 return 0
         except desktop.DesktopLaunchError as exc:
@@ -1766,13 +1766,13 @@ def cmd_view(args: argparse.Namespace) -> int:
         return 1
     if args.open and not args.foreground and not getattr(args, "browser", False):
         try:
-            if desktop.open_project(root, port=args.port):
+            if desktop.open_project(root):
                 print(f"opened TicketBunker for {root}")
                 return 0
         except desktop.DesktopLaunchError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-    from . import viewer
+    from . import app_server, viewer
 
     port = args.port
     url = f"http://127.0.0.1:{port}/"
@@ -1783,7 +1783,7 @@ def cmd_view(args: argparse.Namespace) -> int:
     )
     if args.foreground:
         try:
-            server = viewer.serve(root, args.port)
+            server = app_server.serve(root, args.port)
         except OSError as exc:
             print(f"error: cannot listen on 127.0.0.1:{args.port} ({exc.strerror or exc}) — "
                   f"try another port: tb view --port {args.port + 1}", file=sys.stderr)
@@ -1821,7 +1821,10 @@ def cmd_view(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        if str(existing.get("version") or "") == __version__:
+        if (
+            str(existing.get("version") or "") == __version__
+            and existing.get("kind") == "standalone-app"
+        ):
             if args.open:
                 import webbrowser
 
@@ -1846,7 +1849,7 @@ def cmd_view(args: argparse.Namespace) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     argv = [
         *agent_runtime.cli_argv(),
-        "_viewer-worker",
+        "_app-browser-worker",
         "--repo",
         str(root),
         "--port",
@@ -1903,6 +1906,25 @@ def cmd_viewer_worker(args: argparse.Namespace) -> int:
         server = viewer.serve(root, args.port, launch_id=args.launch)
     except OSError as exc:
         print(f"cannot listen on 127.0.0.1:{args.port}: {exc.strerror or exc}", file=sys.stderr)
+        return 1
+    try:
+        server.serve_until_closed()
+    finally:
+        server.server_close()
+    return 0
+
+
+def cmd_application_browser_worker(args: argparse.Namespace) -> int:
+    from . import app_server
+
+    root = Path(args.repo).resolve()
+    try:
+        server = app_server.serve(root, args.port, launch_id=args.launch)
+    except OSError as exc:
+        print(
+            f"cannot listen on 127.0.0.1:{args.port}: {exc.strerror or exc}",
+            file=sys.stderr,
+        )
         return 1
     try:
         server.serve_until_closed()
@@ -2299,6 +2321,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, required=True)
     s.add_argument("--launch", required=True)
     s.set_defaults(fn=cmd_viewer_worker)
+
+    s = sub.add_parser("_app-browser-worker", help=argparse.SUPPRESS)
+    s.add_argument("--repo", required=True)
+    s.add_argument("--port", type=int, required=True)
+    s.add_argument("--launch", required=True)
+    s.set_defaults(fn=cmd_application_browser_worker)
 
     s = sub.add_parser("_app-command", help=argparse.SUPPRESS)
     s.add_argument("application_command")

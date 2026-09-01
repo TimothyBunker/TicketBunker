@@ -79,8 +79,8 @@ exercise unless a live boundary is explicitly called out.
   companion repository. The old and new stores are never concurrent writers.
 - The Bunker database and onboarding action tests live in
   `tests/test_bunkerdb.py` and `tests/test_application.py`. The legacy ticket
-  engine/viewer is still present during the handler-by-handler storage cutover;
-  do not misrepresent it as Bunker-native yet.
+  engine and renderer remain as import/compatibility paths, while the ordinary
+  standalone ticket catalog and detail reads now come from the Bunker database.
 
 ### Legacy companion database and configuration
 
@@ -247,7 +247,7 @@ new Bunkers.
   full trails, and coworker copy. The path remains selectable; a drag quotes
   it into the contextual coworker action without also opening it, while a
   path click or the adjacent Open button retains local-open behavior. The default is the
-  included localhost source editor. `editor.read` confines paths and bounded UTF-8 content to the current
+  included source editor. `editor.read` confines paths and bounded UTF-8 content to the current
   checkout; `editor.save` requires the opened digest and atomically writes one
   file without staging or Git. A small clipboard control follows every source
   link; `editor.resolve` applies the same checkout guard and copies the absolute
@@ -256,19 +256,19 @@ new Bunkers.
   source text can attach its guarded path, line range, text, and saved/draft
   state to the same ticket coworker. External editors remain an explicit option
   and fall back to the included editor when unavailable.
-- A Tauri 2 desktop shell now gives the existing interface a distinct app
-  window without creating a second frontend or backend. It starts the Python
-  core as an owned child, loads only that exact loopback origin, exposes no
-  native capabilities to ticket content, accepts guarded in-app routes such as
-  the included source editor, and stops the core when its window closes.
-- Native Bunker/onboarding actions no longer freeze and start Python once per
-  click. The app owns one bounded `_app-worker` JSONL session, correlates every
-  response by request ID, preserves typed user rejections, and never
-  automatically replays an action after an ambiguous transport break. The
-  compatibility ticket window still uses its separately owned loopback worker
-  until the shared bundled ticket surface replaces it.
+- The primary interface is one React/TypeScript application compiled into the
+  Python package. Tauri loads it directly without localhost; the explicit
+  browser fallback serves the exact same assets on loopback. Bunkers, Projects,
+  ticket search/detail, Ticket/Agent views, lifecycle and branch controls,
+  synthesis/trails, coworker chat, source links, and the included editor are
+  one UI, not a port of the old Python HTML renderer.
+- Native actions use one bounded `_app-worker` JSONL session, correlate every
+  response by request ID, preserve typed user rejections, and never replay an
+  action after an ambiguous transport break. Browser actions cross a per-launch
+  CSRF-protected `/api/action` transport into the same allowlist and handlers.
+  The legacy Python renderer remains compatibility code only.
 - `tb view` prefers that app when installed and returns immediately;
-  `tb view --browser` explicitly selects the prior detached browser viewer.
+  `tb view --browser` explicitly selects the detached shared-UI browser fallback.
   If no app is installed, browser mode remains the automatic fallback. Its
   health/version replacement, page-presence shutdown, `--foreground`, and
   `--no-open` behavior are unchanged.
@@ -280,9 +280,15 @@ new Bunkers.
   service actions. Repository inspection and attachment happen only after a
   native picker selection and never mutate the checkout. Linux sessions with a
   stale advertised D-Bus socket use GTK's in-memory settings backend,
-  preventing picker warning floods. The privileged local window and
-  unprivileged loopback ticket window are separate labels; only Bunkers receives
-  the directory-dialog capability.
+  preventing picker warning floods. The bundled local window alone receives
+  the directory-dialog and agent-setup capabilities; remote HTML is never
+  loaded into it.
+- **Configure** edits revision-checked Bunker defaults or a selected Project's
+  pinned field/integration documents. New Projects copy the current defaults;
+  existing Projects do not mutate when defaults change. GitHub, GitLab, Jira,
+  and custom mappings share one editable matrix. Local Bunkers can publish;
+  remote replicas remain read-only until their service authorizes a shared
+  change, so cached capabilities cannot self-elevate.
 - First-run and Local settings now provide the complete agent path without
   opening Pi's terminal UI. The Bunkers window starts verified Pi in
   constrained RPC mode with only TicketBunker's pinned auth bridge, renders
@@ -299,8 +305,10 @@ new Bunkers.
 
 ### Distribution
 
-- Version 0.3.1 keeps the six-platform core release pipeline while the new
-  native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
+- Version 0.4.0 packages the shared standalone interface in both the frozen
+  core and native app. The six-platform release matrix remains Linux, macOS,
+  and Windows on x64 and arm64. Linux is locally built and exercised; Windows
+  is a first-class CI/build target using the same UI, core, and platform boundary.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
   emits Debian/AppImage, app/DMG, or NSIS outputs. The app supplies its private
@@ -308,9 +316,10 @@ new Bunkers.
   Pi before use. Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with
-  adjacent SHA-256 files. The Linux Debian (67 MB) and AppImage (136 MB) were
-  built and launched live; the extracted Debian reported bundled Pi integrity
-  verified.
+  adjacent SHA-256 files. The final Linux Debian (88 MB) and AppImage (157 MB)
+  were built from the 0.4.0 frozen core; both checksums pass, the Debian payload
+  contains the core and complete Pi distribution, and the frozen core passed
+  the real browser interaction flow.
 - The CLI-first portable archives remain release assets with the same frozen
   core, Pi distribution, adapter, licenses, manifest, and install scripts.
 - The wheel/pipx package and stdlib zipapp remain small core-only options. They
@@ -351,7 +360,8 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 219 tests, plus 8 Rust shell tests.
+references. The current full suite is 244 Python tests, 8 Rust host tests, 2
+React component tests, and the real-browser standalone interaction flow.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,

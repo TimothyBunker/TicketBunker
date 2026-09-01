@@ -53,7 +53,7 @@ and report provenance easier to reach. It should disappear into the task.
 10. Make synthesis intentional. Ordinary checkout, commit, merge, and rebase events mark the affected ticket as changed without calling a model; the user starts synthesis from the ticket state hub when a new summary is useful.
 11. Make shared truth explicit. Render local ticket data immediately, synchronize remote Bunker state and Git refs independently, and name synthesis age, commits since, preserved state, and the next action whenever work stops.
 12. Keep the coworker in the ticket layer. One private per-user/per-ticket session may explain and propose gated child-report synthesis updates; it never edits source or Combined directly.
-13. Make it feel like one application. The desktop opens to Bunkers, then Projects, then attached repositories and tickets. Keep the Python API/action registry as the behavior boundary; CLI automation and browser fallback remain optional clients.
+13. Make it one application. One compiled interface opens to Bunkers, then Projects, then attached repositories and tickets; Tauri loads it directly and browser fallback serves the same files. Keep the Python API/action registry as the behavior boundary; CLI automation remains an optional client.
 14. Treat Project as a recursive work scope, not a repository synonym. A Project may contain subprojects and attach zero or more repositories.
 15. Keep discovery separate from authority. Cloning code never joins a Bunker; authenticated invitation or explicit local creation does.
 16. Keep operating systems outside the domain. Linux and Windows select thin

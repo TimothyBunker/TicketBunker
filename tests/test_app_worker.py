@@ -52,6 +52,13 @@ class ApplicationWorkerTests(unittest.TestCase):
         self.assertEqual(result["code"], "command_unavailable")
         dispatch.assert_not_called()
 
+    def test_ticket_and_coworker_actions_are_explicit_desktop_capabilities(self) -> None:
+        self.assertIn("application.ticket.get", app_worker.DESKTOP_ACTIONS)
+        self.assertIn("application.bunker.configuration.replace", app_worker.DESKTOP_ACTIONS)
+        self.assertIn("coworker.chat", app_worker.DESKTOP_ACTIONS)
+        self.assertIn("editor.save", app_worker.DESKTOP_ACTIONS)
+        self.assertNotIn("ticket.create", app_worker.DESKTOP_ACTIONS)
+
     def test_command_rejections_are_machine_readable(self) -> None:
         with mock.patch.object(
             commands,
@@ -118,6 +125,7 @@ class ApplicationWorkerTests(unittest.TestCase):
         self.assertEqual(result["code"], "internal_error")
         self.assertNotIn("private-payload-value", json.dumps(result))
         log = self.root / "app-data" / "diagnostics" / "app-worker.jsonl"
+        self.assertEqual(result["diagnostic_path"], str(log))
         diagnostic = json.loads(log.read_text(encoding="utf-8"))
         self.assertEqual(diagnostic["id"], result["diagnostic_id"])
         self.assertEqual(diagnostic["error_type"], "RuntimeError")

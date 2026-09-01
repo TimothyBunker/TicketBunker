@@ -5,6 +5,7 @@ from pathlib import Path
 
 root = Path(SPECPATH).parent
 datas = [
+    (str(root / "ticketbunker" / "app_assets"), "ticketbunker/app_assets"),
     (str(root / "ticketbunker" / "harness" / "pi" / "tb.ts"), "ticketbunker/harness/pi"),
     (str(root / "ticketbunker" / "harness" / "pi" / "tb_auth.ts"), "ticketbunker/harness/pi"),
     (str(root / "ticketbunker" / "runtime" / "pi-runtime.json"), "ticketbunker/runtime"),

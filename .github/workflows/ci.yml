@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm ci --prefix desktop
+      - run: npm run build --prefix desktop
+      - run: npm test --prefix desktop
+      - run: python -m unittest discover -s tests -v
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --prefix desktop
+      - run: npm run build --prefix desktop
+      - run: npx playwright install --with-deps chromium
+        working-directory: desktop
+      - name: Exercise the shared browser application
+        shell: bash
+        run: |
+          qa_root="$(mktemp -d)"
+          TB_DATA_HOME="$qa_root/data" TB_CONFIG="$qa_root/config.json" \
+            PYTHONPATH=. python -m ticketbunker.cli _app-browser-worker \
+            --repo "$GITHUB_WORKSPACE" --port 18777 --launch=ci &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18777/_viewer/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          npm run test:e2e --prefix desktop

@@ -1,14 +1,35 @@
 {
   "name": "ticketbunker-desktop",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:e2e": "node tests/standalone.e2e.mjs",
     "tauri": "tauri",
-    "check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run build && npm run test && cargo check --manifest-path src-tauri/Cargo.toml",
     "build:debug": "cargo build --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.4"
+    "@playwright/test": "^1.62.1",
+    "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

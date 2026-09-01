@@ -530,15 +530,16 @@ dots beside the title. Synthesis remains visible as its own dot plus `Updated
 exists. Hover, keyboard focus, and click reveal each full label, detail, and
 action, so touch and keyboard users do not depend on hover. The synthesis
 button remains the only application route that starts the model. While running, the
-state stays visibly busy. On failure, Retry synthesis and View log sit together
-inside the disclosure; the localhost-only log page escapes and bounds the
-output and names the exact local path. Every stopped state preserves the prior
+state stays visibly busy. On failure, Retry synthesis and a diagnostic
+disclosure sit together; the disclosure names and can copy the exact local log
+path without leaking raw output into the app. Every stopped state preserves the prior
 report and names the next action. `tb view` normally opens the installed
-TicketBunker desktop shell and returns the terminal immediately. The shell owns
-one localhost core child for the selected project and stops it when the window
-closes. If the desktop app is not installed, the command keeps the existing
-detached browser viewer as a compatibility fallback. `--browser` explicitly
-selects that fallback, `--foreground` retains its attached diagnostic mode,
+TicketBunker desktop application and returns the terminal immediately. The app
+loads its bundled interface and owns one private typed core worker for its
+lifetime; native use does not start a localhost server. If the desktop app is
+not installed, the command serves the same compiled interface as a detached
+loopback browser fallback. `--browser` explicitly selects that fallback,
+`--foreground` retains its attached diagnostic mode,
 and `--no-open` starts only its local service. Per-page presence and close
 signals keep the browser fallback alive across navigation and stop it shortly
 after the final tab closes; stale sessions expire.
@@ -560,8 +561,8 @@ local-open control in Combined, child synthesis, full trails, and chat. Its
 path text remains selectable: dragging across it suppresses file opening and
 feeds the ordinary synthesis-selection coworker action, while a click on the
 path or activation of its adjacent Open button opens it. The
-default target is TicketBunker's included browser editor, served by the same
-localhost viewer and requiring no system editor or terminal launcher. Its
+default target is TicketBunker's included source editor, rendered by the same
+application and requiring no system editor or terminal launcher. Its
 `editor.read` command resolves symlinks, rejects anything outside the current
 checkout or absent on the current branch, and admits only bounded UTF-8 text.
 Every rendered source reference ends with a small copy control. Its
@@ -1231,12 +1232,12 @@ terminal environment that ran init. Git events remain non-blocking: readiness
 is established during init/doctor, while any later provider outage is recorded
 by the existing background worker without failing Git.
 
-### 3.19 Desktop application shell
+### 3.19 Standalone desktop application
 
 The ordinary interactive surface is a distinct TicketBunker desktop
-application. It preserves the ticket viewer's restrained browser-quality UI;
-the app shell is a distribution and lifecycle boundary, not a competing UI or
-a second backend. The CLI remains fully supported for scripts, hooks, remote
+application. Its bundled UI is also the explicit browser fallback; the native
+host is a distribution, security, and lifecycle boundary, not a second backend.
+The CLI remains fully supported for scripts, hooks, remote
 terminals, and direct commands.
 
 The shared interface may render in the bundled system webview or, through the
@@ -1258,9 +1259,10 @@ The application has three layers:
 2. The frozen Python `tb` executable remains the application core. It owns Git,
    tracker adapters, typed commands, the read model, agent orchestration, and
    all durable TicketBunker state.
-3. The existing stdlib viewer renders the application UI at an ephemeral exact
-   loopback origin. CLI, desktop, and browser fallback therefore reach the same
-   Python command handlers and cannot drift into separate behavior.
+3. One React/TypeScript interface is compiled into `ticketbunker/app_assets`.
+   Tauri loads that bundle directly; the stdlib browser fallback serves the
+   exact same files at an ephemeral loopback origin. Both transports reach the
+   same Python command handlers and cannot drift into separate behavior.
 
 The packaged desktop executable and `tb` core are siblings. The shell starts
 one `tb _app-worker` when the first native action is requested, retains its
@@ -1272,23 +1274,24 @@ Unexpected failures receive an opaque ID and a credential-safe diagnostic in
 the native application data directory. Broken transport is never automatically
 replayed because a mutation may already have completed.
 
-For the compatibility ticket surface, the shell currently starts
-`tb _viewer-worker` with an explicit canonical project, port, and unguessable
-launch ID, waits for readiness, and kills that exact child when its project
-window is destroyed. `tb view` discovers the sibling or PATH desktop binary
-and passes structured arguments without a shell. `TB_DESKTOP_APP` and
-`TB_DESKTOP_CORE` are developer/managed-install overrides, never required user
-setup. Source links pass only a same-origin application route; they do not ask
-the shell to read or edit a path.
+`tb view` discovers the sibling or PATH desktop binary and passes only a
+canonical repository and guarded in-app route as structured arguments, without
+a shell or port. `TB_DESKTOP_APP` and `TB_DESKTOP_CORE` are developer or
+managed-install overrides, never required user setup. One Tauri window renders
+Bunkers, Projects, tickets, configuration, Agent work, coworker chat, and the
+included editor. It may invoke only the bounded `desktop_command` bridge, the
+directory picker, clipboard, and guarded HTTPS login opener. Rust forwards
+domain actions unchanged to `_app-worker`; it never reads files, runs Git,
+queries SQLite, or publishes reports itself. Remote HTML is never loaded into
+the native context.
 
-**Ticket content has no native bridge.** A project window loads only its exact
-`http://127.0.0.1:<owned-port>` origin, rejects navigation to every other
-origin, and receives no Tauri capability. File reads, saves, Git operations,
-and synthesis continue through the Python server's existing typed and
-checkout-confined commands. A later privileged local Projects/onboarding
-window must use a separate webview label and must never navigate to tracker,
-agent, or loopback ticket HTML. Remote HTML is never loaded into either native
-context.
+The browser fallback is a transport, not a second application. `app_server.py`
+serves the compiled bundle, injects one launch CSRF token, and exposes only the
+same desktop action allowlist at `/api/action`. It binds to loopback, bounds
+requests and responses, keeps page-presence heartbeats, and exits after the last
+tab closes. It contains no domain handlers. The legacy Python HTML renderer is
+retained only for compatibility tests and read-only integrations; ordinary
+desktop and browser use share the compiled application.
 
 First run is application-facing and starts with the storage boundary:
 
@@ -1312,13 +1315,13 @@ extension discovery disabled. It loads only TicketBunker's pinned
 calls Pi's own `ModelRuntime.login`; Pi remains the sole credential-store
 writer and the sole implementation of provider OAuth and API-key flows.
 
-Provider notifications and prompts cross a short-lived JSONL pipe into native
+Provider notifications and prompts cross a short-lived JSONL pipe into app
 forms. Secret input travels from the local webview through Rust directly to
 Pi's stdin; it never enters the Python command dispatcher, `~/.tbconfig`, a
 TicketBunker log, or shared project data. Login URLs are displayed before a
 user action and a label-guarded Rust command opens only valid HTTPS URLs in the
-system browser. The Bunkers window alone may listen for these setup events;
-the ticket webview still has no native IPC capability.
+system browser. Only the bundled local window may listen for these setup
+events. Browser mode cannot perform provider login and states that directly.
 
 The bridge is packaged with the frozen core and materialized into a stable,
 digest-addressed machine-local asset path before the one-file core exits. Its
@@ -1358,21 +1361,30 @@ connection string. A separate Migration section lists legacy companion-backed
 projects and offers **Import copy**. That operation is read-only with respect to
 both source and companion repositories and records its import digest.
 
+**Configure** edits Bunker defaults or the selected Project snapshot. Ticket
+fields and integration matrices are whole revisioned documents: a publish uses
+the revision loaded by the editor and replaces the complete draft atomically.
+GitHub, GitLab, and Jira are prefilled templates; custom integrations use the
+same matrix. Project creation copies and pins the current Bunker field and
+integration documents, so later default changes affect only later Projects.
+Local Bunkers allow device-local publication. Remote replicas are read-only in
+the local command handler even when a cached capability says `config:write`;
+only an authenticated remote service transaction may authorize and distribute
+shared configuration.
+
 On Linux, the shell respects an explicitly selected GSettings backend. When no
 backend was selected and the advertised session D-Bus socket is absent, as in
 some minimal desktop sessions, it uses GTK's in-memory settings backend before creating any
 window. The native folder picker therefore remains responsive and does not
 flood a launching terminal with unrelated `dconf` warnings.
 
-The bundled Bunkers window is the sole recipient of the native directory
-dialog and event-listen permissions. Its Tauri commands also check the caller's
-window label.
-The loopback ticket window has no capability and no allowed remote-origin IPC;
-Tauri 2.11.5 or newer is required because remote origins are always subject to
-that ACL boundary.
+The bundled local window is the sole recipient of native directory-dialog,
+clipboard, local-command, and agent-setup permissions. Its Tauri commands check
+the caller's window label. No remote origin is admitted to that ACL boundary;
+Tauri 2.11.5 or newer is required.
 
 There is no mandatory TicketBunker-hosted account or database implied by the
-desktop shell. Identity and membership are local or scoped to the remote
+desktop application. Identity and membership are local or scoped to the remote
 service selected by the Bunker. TicketBunker may provide adapters and setup
 guidance, but teams own their service, database, credentials, access rules, and
 remote deployment.

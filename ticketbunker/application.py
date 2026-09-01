@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import agent_runtime, bunkerdb, commands, config, platform_services, project, remote
+from . import agent_runtime, bunkerdb, commands, config, platform_services, project, remote, truth
 
 
 _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -214,6 +214,13 @@ def state() -> dict[str, Any]:
     agent = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
     return {
         "platform": platform_services.current().as_dict(),
+        "diagnostics": {
+            "application": str(
+                platform_services.current().data_home()
+                / "diagnostics"
+                / "app-worker.jsonl"
+            )
+        },
         "profile": _profile(settings),
         "bunkers": bunkerdb.list_bunkers(),
         # Companion-Git registrations remain visible only as migration input.
@@ -418,6 +425,110 @@ def command_bunker_project_create(
         description=str(payload.get("description") or ""),
     )
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.get")
+def command_bunker_get(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.get_bunker, str(payload.get("bunker_id") or "")
+    )
+    return {"bunker": bunker}
+
+
+@commands.register("application.bunker.configuration.get")
+def command_bunker_configuration_get(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    return _bunker_result(
+        bunkerdb.get_configuration,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or "") or None,
+    )
+
+
+@commands.register("application.bunker.configuration.replace")
+def command_bunker_configuration_replace(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    content = payload.get("content")
+    if not isinstance(content, dict):
+        raise commands.CommandRejected(
+            "configuration_content_invalid", "Configuration content must be one object."
+        )
+    return _bunker_result(
+        bunkerdb.replace_configuration,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or "") or None,
+        kind=str(payload.get("kind") or ""),
+        expected_revision=str(payload.get("expected_revision") or ""),
+        content=content,
+    )
+
+
+@commands.register("application.ticket.list")
+def command_ticket_list(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        page = int(payload.get("page") or 1)
+        page_size = int(payload.get("page_size") or 25)
+    except (TypeError, ValueError) as exc:
+        raise commands.CommandRejected(
+            "ticket_page_invalid", "Choose a valid ticket page."
+        ) from exc
+    result = _bunker_result(
+        bunkerdb.list_tickets,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or "") or None,
+        search=str(payload.get("search") or ""),
+        status=str(payload.get("status") or "active"),
+        assignee=str(payload.get("assignee") or ""),
+        reporter=str(payload.get("reporter") or ""),
+        label=str(payload.get("label") or ""),
+        page=page,
+        page_size=page_size,
+    )
+    return result
+
+
+@commands.register("application.ticket.get")
+def command_ticket_get(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    detail = _bunker_result(
+        bunkerdb.get_ticket,
+        str(payload.get("bunker_id") or ""),
+        str(payload.get("ticket_id") or ""),
+    )
+    repository = next(
+        (
+            value
+            for value in detail.get("repositories", [])
+            if str(value.get("local_path") or "")
+        ),
+        None,
+    )
+    if repository is not None and detail["ticket"].get("source_kind") in {
+        "legacy-companion",
+        "legacy-embedded",
+    }:
+        try:
+            detail["truth"] = truth.state(
+                Path(str(repository["local_path"])),
+                (
+                    str(detail["project"].get("key") or "")
+                    if detail["ticket"].get("source_kind") == "legacy-companion"
+                    else ""
+                ),
+                str(detail["ticket"].get("id") or ""),
+            )
+        except (OSError, ValueError):
+            detail["truth"] = {}
+    else:
+        detail["truth"] = {}
+    return detail
 
 
 @commands.register("application.repository.inspect")

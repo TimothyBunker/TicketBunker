@@ -1,71 +1,96 @@
-# TicketBunker desktop shell
+# TicketBunker desktop application
 
-This Tauri shell gives the existing TicketBunker interface its own application
-window. It starts the frozen `tb` core as a child, waits for the loopback viewer,
-loads only that exact origin, and stops the child when the window is destroyed.
-The webview receives no Tauri operating-system capabilities.
+`desktop/` is the primary TicketBunker interface: React and TypeScript compiled
+by Vite, hosted as a native Tauri 2 application. The same compiled files are
+packaged in the Python core and served by `tb view --browser`, so native and
+browser use cannot become separate products.
 
-Linux and Windows are the first tested desktop targets. They share the same
-frontend bundle and Python action registry; the core selects a narrow
-machine-local platform service for paths, executable names, command parsing,
-editor discovery, and process flags. WSL uses the Linux service and is not a
-separate application backend. macOS packaging remains experimental until it is
-verified on real hardware.
+The native application never starts a localhost ticket server. It owns one
+frozen `tb _app-worker` child and exchanges bounded, request-ID-correlated JSONL
+over private pipes. The worker accepts an explicit action allowlist and routes
+every request through the shared Python command registry. Broken responses are
+not replayed because a mutation may already have completed. Closing the app
+stops the worker.
 
-Launching the executable without `--repo` opens the bundled Bunkers window.
-Create Bunker makes one local SQLite database and a first Project without
-touching Git. Join Bunker inspects a bounded invitation, then requires remote
-authentication and enrollment before installing a local replica. Each Bunker
-renders its recursive Project tree; only an explicit Attach repository action
-opens the native directory picker, validates the checkout through the Python
-action registry, and records its device-local path. Existing companion-backed
-projects appear only in the read-only Migration section. A stale or missing
-Linux session D-Bus socket selects GTK's in-memory settings backend so the
-native picker remains quiet and responsive.
+The Tauri host owns only lifecycle and narrow machine services: its window, the
+directory picker, clipboard, guarded HTTPS login links, and the provider-login
+pipe. It does not read source, run Git, query SQLite, or publish reports. One
+bundled window renders Bunkers, recursive Projects, ticket search/detail,
+Ticket/Agent views, lifecycle and branch controls, WHO/WHAT/WHERE/WHY reports,
+the ticket coworker, configuration matrices, and the included source editor.
+Remote HTML is never loaded into this privileged context.
 
-Agent setup is also owned by the Bunkers window. It starts the verified Pi
-runtime in constrained RPC mode with only `tb_auth.ts`, renders provider login
-as native forms, and sends secret responses straight from Rust to Pi. The
-Python core never receives provider secrets. Closing the dialog kills that Pi
-child; choosing no model records an explicit machine-local opt-out.
+Linux and Windows are the first desktop targets. Both use the same UI, Python
+handlers, and `platform_services.py` boundary for paths, executable names,
+command parsing, process flags, and host diagnostics. Linux is built and
+exercised locally; Windows is continuously built and tested in CI. WSL is an
+ordinary Linux runtime location. If a Linux desktop advertises a stale D-Bus
+socket, the host selects GTK's in-memory settings backend before opening its
+directory picker, avoiding unrelated `dconf` warning floods. macOS remains in
+the release matrix but needs hardware verification.
 
-The Bunkers window talks to one app-owned `tb _app-worker` over private pipes.
-The JSONL protocol is bounded, request-ID correlated, and restricted to the
-desktop action allowlist; handlers remain in the shared Python registry. A
-broken response is not replayed automatically because the original mutation
-may already have completed. Closing the launcher stops the worker.
+Opening the app without `--repo` lands on Bunkers. Create makes a local SQLite
+Bunker and first Project without touching Git. Join validates an invitation and
+requires authenticated service enrollment before installing a replica. Attach
+repository is explicit and never writes discovery or authority state into the
+checkout. Legacy companion data appears only as a read-only import.
 
-`tb view` prefers an installed `ticketbunker-desktop` executable and falls back
-to the browser when it is absent. `tb view --browser` always uses the fallback.
-`tb open` passes a guarded same-origin `/source` route so the included editor
-opens directly in the app.
+Configure edits Bunker defaults or a selected Project's pinned snapshot. Fields
+and integration matrices are complete revision-checked documents; GitHub,
+GitLab, and Jira are prefilled alongside custom integrations. Local Bunkers can
+publish locally. Remote replicas remain read-only until their authenticated
+service publishes configuration, even if a cached snapshot names a write
+capability.
 
-During development, point the shell at the installed or source-tree `tb`:
+Agent setup starts the verified Pi runtime in constrained RPC mode with only
+`tb_auth.ts`. The app renders provider login and model selection itself; secret
+answers travel from Rust directly to Pi, and Pi alone writes provider
+credentials. The Python command dispatcher receives only the validated model
+selection. Choosing no model is an explicit machine-local mode.
+
+Browser fallback is implemented by `ticketbunker/app_server.py`. It binds to
+loopback, serves the same Vite output, injects one launch CSRF token, exposes the
+same action allowlist, and exits after the last tab closes. It contains no
+domain behavior. Native provider login and directory picking are clearly marked
+unavailable there; typed paths and non-agent work remain usable.
+
+## Development
+
+Install UI dependencies and run the native application against a source-tree or
+installed core:
 
 ```sh
 npm install
 TB_DESKTOP_CORE="$(command -v tb)" npm run tauri -- dev -- --repo /path/to/project
 ```
 
-The production bundle embeds `tb` as a Tauri sidecar and the verified Pi
-distribution as private application resources. `--core` and `TB_DESKTOP_CORE`
-are explicit development and managed-install overrides.
+Run the shared UI in a normal browser through the real Python transport:
 
-Linux builds require Tauri's WebKitGTK prerequisites. The release workflow will
-build each desktop target on its native runner rather than cross-compiling it.
+```sh
+npm run build
+PYTHONPATH=.. python -m ticketbunker.cli _app-browser-worker \
+  --repo /path/to/project --port 8377 --launch=development
+```
 
-After freezing `dist/tb`, build the platform-native artifacts with:
+The normal checks are:
+
+```sh
+npm run build
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+The production bundle embeds frozen `tb` as a Tauri sidecar and the verified Pi
+distribution as private resources. `--core` and `TB_DESKTOP_CORE` are explicit
+development or managed-install overrides.
+
+After freezing `dist/tb`, build native artifacts with:
 
 ```sh
 python tools/build_desktop.py --tb dist/tb
 ```
 
-The staging step checks the pinned Pi archive before Tauri sees it. Successful
-builds copy the installer and an adjacent SHA-256 file into `dist/releases/`.
-Use `--stage-only` to inspect the ignored `src-tauri/binaries/` and
-`src-tauri/resources/` inputs without running the native bundler.
-
-The desktop boundary and first-run target are authoritative in `DESIGN.md`
-section 3.19. In particular, the native Bunker launcher remains in a separate
-local webview and must never navigate that privileged window to ticket HTML.
-The same rule confines agent-setup events to that window.
+Tauri runs `npm run build` before packaging. The staging step verifies Pi before
+Tauri sees it, and successful installers plus SHA-256 files are copied to
+`dist/releases/`. Use `--stage-only` to inspect the ignored sidecar/resource
+inputs. The authoritative boundary is `DESIGN.md` section 3.19.

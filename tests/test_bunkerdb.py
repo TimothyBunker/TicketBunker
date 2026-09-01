@@ -42,6 +42,116 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual(Path(updated["database"]), bunkerdb.database_path(created["id"]))
         self.assertEqual(len(bunkerdb.list_bunkers()), 1)
 
+    def test_project_configuration_is_a_pinned_copy_of_current_defaults(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="SYS")
+        root_project = created["projects"][0]
+        root_config = bunkerdb.get_configuration(
+            created["id"], project_id=root_project["id"]
+        )
+        global_config = bunkerdb.get_configuration(created["id"])
+        fields_document = global_config["documents"]["ticket-fields"]
+        fields = list(fields_document["content"]["fields"])
+        fields.append(
+            {
+                "key": "charging",
+                "label": "Charging",
+                "type": "string",
+                "required": False,
+            }
+        )
+
+        published = bunkerdb.replace_configuration(
+            created["id"],
+            project_id=None,
+            kind="ticket-fields",
+            expected_revision=fields_document["revision"],
+            content={"fields": fields},
+        )
+        updated = bunkerdb.create_project(created["id"], key="ECS", name="ECS")
+        child_id = next(value["id"] for value in updated["projects"] if value["key"] == "ECS")
+        child_config = bunkerdb.get_configuration(
+            created["id"], project_id=child_id
+        )
+
+        self.assertEqual(published["documents"]["ticket-fields"]["revision"], "local:2")
+        self.assertNotIn(
+            "charging",
+            [value["key"] for value in root_config["documents"]["ticket-fields"]["content"]["fields"]],
+        )
+        self.assertIn(
+            "charging",
+            [value["key"] for value in child_config["documents"]["ticket-fields"]["content"]["fields"]],
+        )
+        self.assertEqual(child_config["composition"], "pinned")
+
+    def test_configuration_replacement_is_revision_checked_and_matrix_validated(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="SYS")
+        project_id = created["projects"][0]["id"]
+        state = bunkerdb.get_configuration(created["id"], project_id=project_id)
+        integrations = state["documents"]["integrations"]
+        content = json.loads(json.dumps(integrations["content"]))
+        content["providers"]["linear"] = {
+            "label": "Linear",
+            "template": "custom",
+            "fields": {"title": "title", "status": "state.name"},
+        }
+
+        updated = bunkerdb.replace_configuration(
+            created["id"],
+            project_id=project_id,
+            kind="integrations",
+            expected_revision=integrations["revision"],
+            content=content,
+        )
+
+        self.assertEqual(
+            updated["documents"]["integrations"]["content"]["providers"]["linear"]["fields"]["status"],
+            "state.name",
+        )
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "changed"):
+            bunkerdb.replace_configuration(
+                created["id"],
+                project_id=project_id,
+                kind="integrations",
+                expected_revision=integrations["revision"],
+                content=content,
+            )
+
+        field_document = updated["documents"]["ticket-fields"]
+        remaining = [
+            value
+            for value in field_document["content"]["fields"]
+            if value["key"] != "title"
+        ]
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "Remove integration mappings"):
+            bunkerdb.replace_configuration(
+                created["id"],
+                project_id=project_id,
+                kind="ticket-fields",
+                expected_revision=field_document["revision"],
+                content={"fields": remaining},
+            )
+
+    def test_remote_configuration_snapshot_cannot_authorize_its_own_write(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="SYS")
+        bunkerdb.configure_remote(
+            created["id"],
+            server_url="https://tickets.example.test",
+            remote_bunker_id="engineering",
+        )
+        state = bunkerdb.get_configuration(created["id"])
+
+        self.assertFalse(state["permission"]["can_write"])
+        document = state["documents"]["ticket-fields"]
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "controlled by"):
+            bunkerdb.replace_configuration(
+                created["id"],
+                project_id=None,
+                kind="ticket-fields",
+                expected_revision=document["revision"],
+                content=document["content"],
+            )
+
     def test_repository_attachment_keeps_the_local_path_out_of_git(self) -> None:
         source = self.root / "coal"
         subprocess.run(["git", "init", "-q", str(source)], check=True)
@@ -153,7 +263,25 @@ class BunkerDatabaseTests(unittest.TestCase):
                 {
                     "id": "ECS-4",
                     "project_id": "ecs",
-                    "payload": {"id": "ECS-4", "title": "Position System"},
+                    "payload": {
+                        "id": "ECS-4",
+                        "title": "Position System",
+                        "status": "Todo",
+                        "assignee": {"display_name": "Tim"},
+                        "reporter": "Ada",
+                        "labels": ["ECS", "C0"],
+                        "comments": [{"author": "Ada", "body": "Ready"}],
+                    },
+                },
+                {
+                    "id": "ECS-3",
+                    "project_id": "ecs",
+                    "payload": {
+                        "id": "ECS-3",
+                        "title": "Finished setup",
+                        "status": "Done",
+                        "assignee": "Ada",
+                    },
                 },
             ),
             reports=(
@@ -189,10 +317,27 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual(created["remote"]["config_revision"], "42")
         self.assertEqual(created["projects"][0]["children"][0]["key"], "ECS")
         self.assertEqual(created["repositories"][0]["local_path"], None)
-        self.assertEqual(created["ticket_count"], 1)
+        self.assertEqual(created["ticket_count"], 2)
         self.assertEqual(created["membership"]["display_name"], "Tim")
         self.assertEqual(created["remote"]["capabilities"], ["tickets:read"])
         self.assertNotIn("secret-value", json.dumps(created))
+
+        active = bunkerdb.list_tickets(created["id"], project_id="systems")
+        self.assertEqual([item["id"] for item in active["tickets"]], ["ECS-4"])
+        self.assertEqual(active["tickets"][0]["assignee"], "Tim")
+        self.assertEqual(active["facets"]["labels"], ["C0", "ECS"])
+        completed = bunkerdb.list_tickets(
+            created["id"], project_id="ecs", status="done", assignee="Ada"
+        )
+        self.assertEqual([item["id"] for item in completed["tickets"]], ["ECS-3"])
+        searched = bunkerdb.list_tickets(created["id"], search="position")
+        self.assertEqual(searched["total"], 1)
+
+        detail = bunkerdb.get_ticket(created["id"], "ECS-4")
+        self.assertEqual(detail["project"]["key"], "ECS")
+        self.assertEqual(detail["ticket"]["labels"], ["ECS", "C0"])
+        self.assertEqual(detail["comments"][0]["body"], "Ready")
+        self.assertEqual(detail["reports"][0]["scope"], "combined")
 
     def test_companion_import_is_read_only_and_copies_tickets_and_reports(self) -> None:
         source = self.root / "legacy"
@@ -230,8 +375,35 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual((source / ".ticketbunker.json").read_bytes(), before)
         self.assertTrue((ticket / "ticket.json").exists())
         self.assertIn(str(source.resolve()), bunkerdb.imported_companion_sources())
+        (ticket / "reports" / "master.md").write_text("# Combined\n\nUpdated\n")
+        refreshed = bunkerdb.get_ticket(result["bunker"]["id"], "ECS-4")
+        self.assertIn("Updated", refreshed["reports"][0]["content"])
         with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "already been imported"):
             bunkerdb.import_companion(str(source))
+
+    def test_embedded_repository_import_needs_no_companion_locator(self) -> None:
+        source = self.root / "embedded"
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        ticket = source / ".tb" / "TB-1_bunker"
+        (ticket / "reports").mkdir(parents=True)
+        (ticket / "ticket.json").write_text(
+            json.dumps(
+                {
+                    "id": "TB-1",
+                    "title": "Standalone migration",
+                    "status": "in-progress",
+                }
+            )
+        )
+        (ticket / "reports" / "master.md").write_text("# Combined\n")
+
+        result = bunkerdb.import_companion(str(source))
+        detail = bunkerdb.get_ticket(result["bunker"]["id"], "TB-1")
+
+        self.assertEqual(result["migration"]["tickets"], ["TB-1"])
+        self.assertEqual(detail["ticket"]["source_kind"], "legacy-embedded")
+        self.assertEqual(detail["project"]["key"], "TB")
+        self.assertEqual(detail["reports"][0]["content"], "# Combined\n")
 
 
 class RemoteContractTests(unittest.TestCase):

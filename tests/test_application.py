@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import agent_runtime, application, commands, config
+from ticketbunker import agent_runtime, application, bunkerdb, commands, config
 
 
 class ApplicationStateTests(unittest.TestCase):
@@ -45,6 +45,10 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertIn(value["platform"]["family"], {"linux", "windows", "macos"})
         self.assertEqual(
             value["platform"]["data_home"], str(self.root / "app-data")
+        )
+        self.assertEqual(
+            value["diagnostics"]["application"],
+            str(self.root / "app-data" / "diagnostics" / "app-worker.jsonl"),
         )
 
     def test_profile_update_is_machine_local_and_validated(self) -> None:
@@ -212,6 +216,47 @@ class ApplicationStateTests(unittest.TestCase):
 
         self.assertEqual(result["invitation"]["bunker_id"], "engineering")
         self.assertNotIn("secret", json.dumps(result))
+
+    def test_ticket_read_commands_share_the_desktop_registry(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="ENG")
+        with self.assertRaises(commands.CommandRejected) as rejected:
+            commands.dispatch(
+                "application.ticket.get",
+                {"bunker_id": created["id"], "ticket_id": "ENG-1"},
+                commands.CommandContext(self.root, transport="desktop"),
+            )
+
+        self.assertEqual(rejected.exception.code, "bunker_action_rejected")
+
+    def test_configuration_editor_uses_the_same_revision_checked_commands(self) -> None:
+        context = commands.CommandContext(self.root, transport="desktop")
+        bunker = commands.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "ENG"},
+            context,
+        )["bunker"]
+        project_id = bunker["projects"][0]["id"]
+        before = commands.dispatch(
+            "application.bunker.configuration.get",
+            {"bunker_id": bunker["id"], "project_id": project_id},
+            context,
+        )
+        document = before["documents"]["ticket-fields"]
+
+        after = commands.dispatch(
+            "application.bunker.configuration.replace",
+            {
+                "bunker_id": bunker["id"],
+                "project_id": project_id,
+                "kind": "ticket-fields",
+                "expected_revision": document["revision"],
+                "content": document["content"],
+            },
+            context,
+        )
+
+        self.assertEqual(after["scope_type"], "project")
+        self.assertEqual(after["documents"]["ticket-fields"]["revision"], "local:2")
 
     def test_desktop_payload_can_travel_over_stdin_instead_of_process_arguments(self) -> None:
         invitation = (

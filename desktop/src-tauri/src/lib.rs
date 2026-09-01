@@ -1,19 +1,15 @@
 use std::env;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
-
-const DEFAULT_PORT: u16 = 8377;
-const PORT_ATTEMPTS: u16 = 20;
 
 #[cfg(target_os = "linux")]
 fn missing_session_bus(address: Option<&str>) -> bool {
@@ -44,18 +40,17 @@ fn configure_settings_backend() {
 #[derive(Debug, PartialEq, Eq)]
 struct LaunchOptions {
     repo: Option<PathBuf>,
-    port: u16,
     core: Option<PathBuf>,
     route: String,
 }
 
 struct ApplicationState {
     core: PathBuf,
-    preferred_port: u16,
     bundle_root: Mutex<Option<PathBuf>>,
     command_worker: Mutex<Option<CoreWorker>>,
-    process: Mutex<Option<Child>>,
     agent_setup: Mutex<Option<AgentSetupProcess>>,
+    initial_repo: Option<PathBuf>,
+    initial_route: String,
 }
 
 struct CoreWorker {
@@ -82,7 +77,6 @@ where
 {
     let mut values = args.into_iter();
     let mut repo = None;
-    let mut port = DEFAULT_PORT;
     let mut core = None;
     let mut route = "/".to_string();
     while let Some(value) = values.next() {
@@ -96,18 +90,6 @@ where
                 repo = Some(raw.canonicalize().map_err(|error| {
                     format!("cannot open Git project {}: {error}", raw.display())
                 })?);
-            }
-            "--port" => {
-                let raw = values
-                    .next()
-                    .ok_or_else(|| "--port requires a number".to_string())?;
-                port = raw
-                    .to_string_lossy()
-                    .parse::<u16>()
-                    .map_err(|_| "--port must be between 1 and 65535".to_string())?;
-                if port == 0 {
-                    return Err("--port must be between 1 and 65535".to_string());
-                }
             }
             "--core" => {
                 core = Some(PathBuf::from(values.next().ok_or_else(|| {
@@ -125,12 +107,7 @@ where
             unknown => return Err(format!("unknown desktop option: {unknown}")),
         }
     }
-    Ok(LaunchOptions {
-        repo,
-        port,
-        core,
-        route,
-    })
+    Ok(LaunchOptions { repo, core, route })
 }
 
 fn validate_route(route: &str) -> Result<(), String> {
@@ -138,22 +115,6 @@ fn validate_route(route: &str) -> Result<(), String> {
         return Err("--route must begin with one '/'".to_string());
     }
     Ok(())
-}
-
-fn available_port(preferred: u16) -> Result<u16, String> {
-    for offset in 0..PORT_ATTEMPTS {
-        let Some(candidate) = preferred.checked_add(offset) else {
-            break;
-        };
-        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), candidate);
-        if TcpListener::bind(address).is_ok() {
-            return Ok(candidate);
-        }
-    }
-    Err(format!(
-        "no local TicketBunker port is available from {preferred} through {}",
-        preferred.saturating_add(PORT_ATTEMPTS - 1)
-    ))
 }
 
 fn sibling_core() -> Option<PathBuf> {
@@ -180,59 +141,6 @@ fn launch_id() -> String {
 
 fn bundle_root(state: &ApplicationState) -> Option<PathBuf> {
     state.bundle_root.lock().ok()?.clone()
-}
-
-fn start_core(state: &ApplicationState, repo: &Path, port: u16) -> Result<Child, String> {
-    let mut command = Command::new(&state.core);
-    command
-        .arg("_viewer-worker")
-        .arg("--repo")
-        .arg(repo)
-        .arg("--port")
-        .arg(port.to_string())
-        .arg(format!("--launch={}", launch_id()))
-        .current_dir(repo)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if let Some(root) = bundle_root(state) {
-        command.env("TB_BUNDLE_ROOT", root);
-    }
-    command.spawn().map_err(|error| {
-        format!(
-            "cannot start the TicketBunker core at {}: {error}",
-            state.core.display()
-        )
-    })
-}
-
-fn wait_until_ready(child: &mut Child, port: u16) -> Result<(), String> {
-    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    for _ in 0..100 {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("cannot inspect the TicketBunker core: {error}"))?
-        {
-            return Err(format!(
-                "the TicketBunker core stopped during startup ({status})"
-            ));
-        }
-        if TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_ok() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    Err("the TicketBunker core did not become ready within five seconds".to_string())
-}
-
-fn stop_core(state: &ApplicationState) {
-    let Ok(mut guarded) = state.process.lock() else {
-        return;
-    };
-    if let Some(mut child) = guarded.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
 }
 
 fn stop_agent_setup(state: &ApplicationState) {
@@ -326,14 +234,15 @@ fn worker_exchange(
     worker: &mut CoreWorker,
     name: &str,
     payload: &Value,
+    project_root: Option<&Path>,
 ) -> Result<Value, WorkerError> {
     let request_id = worker.next_id;
     worker.next_id = worker.next_id.saturating_add(1);
-    serde_json::to_writer(
-        &mut worker.input,
-        &json!({ "id": request_id, "action": name, "payload": payload }),
-    )
-    .map_err(|_| {
+    let mut request = json!({ "id": request_id, "action": name, "payload": payload });
+    if let Some(root) = project_root {
+        request["project_root"] = Value::String(root.to_string_lossy().into_owned());
+    }
+    serde_json::to_writer(&mut worker.input, &request).map_err(|_| {
         WorkerError::Transport("TicketBunker could not encode that local action.".to_string())
     })?;
     worker
@@ -382,6 +291,15 @@ fn parse_worker_response(request_id: u64, line: &str) -> Result<Value, WorkerErr
 }
 
 fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
+    core_command_in(state, name, payload, None)
+}
+
+fn core_command_in(
+    state: &ApplicationState,
+    name: &str,
+    payload: Value,
+    project_root: Option<&Path>,
+) -> Result<Value, String> {
     let mut guarded = state
         .command_worker
         .lock()
@@ -393,6 +311,7 @@ fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<
         guarded.as_mut().expect("worker was started"),
         name,
         &payload,
+        project_root,
     ) {
         Ok(response) => Ok(response),
         Err(WorkerError::Rejected(message)) => Err(message),
@@ -428,48 +347,17 @@ fn open_project_window(
     let repo = repo
         .canonicalize()
         .map_err(|error| format!("cannot open Git project {}: {error}", repo.display()))?;
-    if app.get_webview_window("project").is_some() {
-        return Err("Close the open project before opening another one.".to_string());
-    }
-    let port = available_port(state.preferred_port)?;
-    let mut core = start_core(state, &repo, port)?;
-    if let Err(message) = wait_until_ready(&mut core, port) {
-        let _ = core.kill();
-        let _ = core.wait();
-        return Err(message);
-    }
-    let url: tauri::Url = format!("http://127.0.0.1:{port}{route}")
-        .parse()
-        .map_err(|_| "TicketBunker could not build its local project URL.".to_string())?;
-    let window = WebviewWindowBuilder::new(app, "project", WebviewUrl::External(url))
-        .title(format!(
-            "TicketBunker · {}",
-            repo.file_name().unwrap_or_default().to_string_lossy()
-        ))
-        .inner_size(1280.0, 820.0)
-        .min_inner_size(760.0, 560.0)
-        .zoom_hotkeys_enabled(true)
-        .on_navigation(move |candidate| {
-            candidate.scheme() == "http"
-                && candidate.host_str() == Some("127.0.0.1")
-                && candidate.port() == Some(port)
-        })
-        .build()
-        .map_err(|error| {
-            let _ = core.kill();
-            let _ = core.wait();
-            format!("TicketBunker could not create its project window: {error}")
-        })?;
-    let mut guarded = state
-        .process
-        .lock()
-        .map_err(|_| "TicketBunker could not own its local core process.".to_string())?;
-    *guarded = Some(core);
-    drop(guarded);
-    if let Some(launcher) = app.get_webview_window("launcher") {
-        let _ = launcher.hide();
-    }
-    let _ = window.set_focus();
+    let launcher = app
+        .get_webview_window("launcher")
+        .ok_or_else(|| "TicketBunker's application window is not available.".to_string())?;
+    app.emit_to(
+        "launcher",
+        "open-project",
+        json!({ "path": repo, "route": route }),
+    )
+    .map_err(|_| "TicketBunker could not open that project in the app.".to_string())?;
+    let _ = launcher.show();
+    let _ = launcher.set_focus();
     Ok(())
 }
 
@@ -479,7 +367,39 @@ fn desktop_state(
     state: tauri::State<ApplicationState>,
 ) -> Result<Value, String> {
     require_launcher(&window)?;
-    core_command(&state, "application.state", json!({}))
+    if let Some(repository) = state.initial_repo.as_ref() {
+        core_command(
+            &state,
+            "application.project.add",
+            json!({ "path": repository }),
+        )?;
+    }
+    let mut response = core_command(&state, "application.state", json!({}))?;
+    response["launch"] = json!({
+        "repository": state.initial_repo.as_ref().map(|value| value.to_string_lossy()),
+        "route": state.initial_route,
+    });
+    Ok(response)
+}
+
+#[tauri::command]
+fn desktop_command(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    action: String,
+    payload: Value,
+    project_root: Option<String>,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    let root = match project_root {
+        Some(value) => Some(
+            PathBuf::from(value)
+                .canonicalize()
+                .map_err(|_| "The selected local project is no longer available.".to_string())?,
+        ),
+        None => None,
+    };
+    core_command_in(&state, &action, payload, root.as_deref())
 }
 
 #[tauri::command]
@@ -854,15 +774,13 @@ pub fn run() {
         eprintln!("TicketBunker could not open: {message}");
         std::process::exit(2);
     });
-    let initial_repo = options.repo.clone();
-    let initial_route = options.route.clone();
     let state = ApplicationState {
         core: core_executable(options.core),
-        preferred_port: options.port,
         bundle_root: Mutex::new(None),
         command_worker: Mutex::new(None),
-        process: Mutex::new(None),
         agent_setup: Mutex::new(None),
+        initial_repo: options.repo,
+        initial_route: options.route,
     };
 
     tauri::Builder::default()
@@ -871,6 +789,7 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             desktop_state,
+            desktop_command,
             update_profile,
             start_agent_setup,
             begin_agent_login,
@@ -891,37 +810,19 @@ pub fn run() {
             connect_git_project,
             open_git_project
         ])
-        .setup(move |app| {
+        .setup(|app| {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 if let Ok(mut root) = app.state::<ApplicationState>().bundle_root.lock() {
                     *root = Some(resource_dir);
                 }
             }
-            if let Some(repo) = initial_repo.as_deref() {
-                open_project_window(
-                    app.handle(),
-                    app.state::<ApplicationState>().inner(),
-                    repo,
-                    &initial_route,
-                )
-                .map_err(std::io::Error::other)?;
-            } else {
-                create_launcher(app.handle())?;
-            }
+            create_launcher(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "launcher" {
                 stop_agent_setup(window.state::<ApplicationState>().inner());
                 stop_command_worker(window.state::<ApplicationState>().inner());
-            }
-            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "project" {
-                stop_core(window.state::<ApplicationState>().inner());
-                if let Some(launcher) = window.app_handle().get_webview_window("launcher") {
-                    let _ = launcher.show();
-                    let _ = launcher.set_focus();
-                    let _ = launcher.eval("window.ticketBunkerReload?.()");
-                }
             }
         })
         .run(tauri::generate_context!())
@@ -938,8 +839,6 @@ mod tests {
         let options = parse_options([
             OsString::from("--repo"),
             root.clone().into_os_string(),
-            OsString::from("--port"),
-            OsString::from("18499"),
             OsString::from("--core"),
             OsString::from("/opt/ticketbunker/tb"),
             OsString::from("--route"),
@@ -948,7 +847,6 @@ mod tests {
         .expect("valid desktop options");
 
         assert_eq!(options.repo, Some(root.canonicalize().unwrap()));
-        assert_eq!(options.port, 18499);
         assert_eq!(options.core, Some(PathBuf::from("/opt/ticketbunker/tb")));
         assert_eq!(
             options.route,
@@ -970,24 +868,13 @@ mod tests {
     }
 
     #[test]
-    fn desktop_rejects_a_route_that_can_escape_the_loopback_origin() {
+    fn desktop_rejects_a_route_that_can_escape_the_bundled_application() {
         let error = parse_options([
             OsString::from("--route"),
             OsString::from("//example.com/not-ticketbunker"),
         ])
         .unwrap_err();
         assert_eq!(error, "--route must begin with one '/'");
-    }
-
-    #[test]
-    fn port_selection_moves_past_an_occupied_loopback_port() {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("temporary listener");
-        let occupied = listener.local_addr().unwrap().port();
-        if occupied == u16::MAX {
-            return;
-        }
-        let selected = available_port(occupied).expect("nearby port");
-        assert_ne!(selected, occupied);
     }
 
     #[test]

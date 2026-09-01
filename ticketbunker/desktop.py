@@ -50,7 +50,7 @@ def _route(value: str) -> str:
     return value
 
 
-def open_project(root: Path, *, port: int = 8377, route: str = "/") -> bool:
+def open_project(root: Path, *, route: str = "/") -> bool:
     """Open *root* in the desktop app, or return False when it is not installed."""
     executable = launcher()
     if executable is None:
@@ -60,8 +60,6 @@ def open_project(root: Path, *, port: int = 8377, route: str = "/") -> bool:
         str(executable),
         "--repo",
         str(root.resolve()),
-        "--port",
-        str(port),
         "--route",
         _route(route),
     ]
