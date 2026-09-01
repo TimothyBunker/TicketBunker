@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TicketBunker API-first architecture</title>
+  <!--
+    Assumptions for this proposed target:
+    - The desktop application is the primary user surface.
+    - Every user action enters the same typed TicketBunker API contract.
+    - Git, tracker providers, and the agent runtime are replaceable adapters.
+    - The team database is never accessed directly by the desktop client.
+    - This concept does not supersede DESIGN.md until the architecture is accepted.
+  -->
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #e8e3d8;
+      --surface: #f8f5ed;
+      --surface-strong: #fffdf7;
+      --ink: #1e292c;
+      --muted: #697477;
+      --line: #c7c1b5;
+      --blue: #537987;
+      --blue-soft: #dce8eb;
+      --amber: #a06e37;
+      --amber-soft: #f2e4c9;
+      --green: #65765f;
+      --green-soft: #e2e8dc;
+      --rust: #b75a3b;
+      --external: #756c5f;
+      --external-soft: #ebe5da;
+      --shadow: 0 18px 48px rgba(45, 39, 30, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; min-height: 100%; }
+
+    body {
+      background:
+        linear-gradient(rgba(72, 64, 51, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(72, 64, 51, 0.04) 1px, transparent 1px),
+        var(--paper);
+      background-size: 24px 24px;
+      color: var(--ink);
+      font-family: Candara, "Trebuchet MS", sans-serif;
+      line-height: 1.45;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1880px, calc(100% - 32px));
+      margin: 16px auto;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 32px;
+      padding: 22px 26px 18px;
+      background: var(--surface);
+      border: 1px solid rgba(72, 64, 51, 0.22);
+      border-bottom: 0;
+    }
+
+    .eyebrow,
+    .lane-label,
+    .detail-kicker,
+    .legend,
+    .version-note {
+      font-family: "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      margin: 0 0 5px;
+      color: var(--rust);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 880px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(28px, 3vw, 48px);
+      font-weight: 500;
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+      text-wrap: balance;
+    }
+
+    .masthead p:last-child {
+      max-width: 650px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      text-wrap: pretty;
+    }
+
+    .proposal-badge {
+      flex: 0 0 auto;
+      align-self: center;
+      padding: 8px 11px;
+      border: 1px solid var(--rust);
+      color: #793a25;
+      background: #f6e5dc;
+      font: 700 11px/1 "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      min-height: 760px;
+      background: var(--surface);
+      border: 1px solid rgba(72, 64, 51, 0.22);
+      box-shadow: var(--shadow);
+    }
+
+    .diagram-area {
+      min-width: 0;
+      border-right: 1px solid var(--line);
+    }
+
+    .toolbar {
+      min-height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 12px 8px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #f2eee4;
+    }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      color: #586164;
+      font-size: 10px;
+    }
+
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-line { width: 25px; height: 1px; background: var(--ink); }
+    .legend-line.dashed { background: repeating-linear-gradient(90deg, var(--green) 0 5px, transparent 5px 9px); }
+
+    .tools { display: flex; gap: 6px; }
+
+    .tool-button {
+      min-width: 40px;
+      min-height: 34px;
+      padding: 6px 10px;
+      border: 1px solid #aaa294;
+      background: var(--surface-strong);
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .tool-button:hover,
+    .tool-button:focus-visible {
+      border-color: var(--blue);
+      outline: 2px solid rgba(83, 121, 135, 0.22);
+      outline-offset: 1px;
+    }
+
+    .diagram-viewport {
+      height: clamp(680px, calc(100vh - 190px), 940px);
+      overflow: auto;
+      background: #f5f1e8;
+    }
+
+    .diagram-stage {
+      width: 100%;
+      min-width: 970px;
+      transform-origin: top left;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      font-family: Candara, "Trebuchet MS", sans-serif;
+    }
+
+    .boundary {
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .installation { fill: #e3ecee; stroke: #718c96; }
+    .external-zone { fill: #eee9df; stroke: #958b7c; }
+    .lane { fill: rgba(255, 253, 247, 0.72); stroke: rgba(72, 64, 51, 0.20); }
+
+    .boundary-title {
+      fill: var(--ink);
+      font: 700 13px "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .boundary-note {
+      fill: var(--muted);
+      font: 11px "Cascadia Mono", "Liberation Mono", monospace;
+    }
+
+    .node { cursor: pointer; outline: none; }
+
+    .node rect,
+    .node path.node-shape {
+      fill: var(--surface-strong);
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+      transition: fill 130ms ease, stroke 130ms ease, filter 130ms ease;
+    }
+
+    .node.ui rect { stroke: var(--blue); }
+    .node.core rect { stroke: var(--amber); }
+    .node.adapter rect { stroke: var(--green); }
+    .node.external rect { stroke: var(--external); }
+    .node.important rect { fill: #fff4df; stroke: var(--rust); stroke-width: 2; }
+
+    .node:hover rect,
+    .node:focus-visible rect,
+    .node.selected rect {
+      fill: #fffaf0;
+      stroke: var(--rust);
+      filter: drop-shadow(0 4px 4px rgba(45, 39, 30, 0.14));
+    }
+
+    .node-title {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .node-subtitle {
+      fill: var(--muted);
+      font: 10.5px "Cascadia Mono", "Liberation Mono", monospace;
+      pointer-events: none;
+    }
+
+    .mini-title { fill: var(--ink); font-size: 11px; font-weight: 700; pointer-events: none; }
+
+    .connector,
+    .event-connector {
+      fill: none;
+      stroke-linejoin: round;
+      stroke-linecap: square;
+      vector-effect: non-scaling-stroke;
+      pointer-events: none;
+    }
+
+    .connector { stroke: #3e4b4e; stroke-width: 1.35; marker-end: url(#arrow); }
+    .event-connector { stroke: var(--green); stroke-width: 1.25; stroke-dasharray: 5 5; marker-end: url(#event-arrow); }
+    .bus { fill: none; stroke: #3e4b4e; stroke-width: 1.35; vector-effect: non-scaling-stroke; }
+    .junction { fill: #3e4b4e; }
+
+    .edge-label {
+      fill: #5c6668;
+      font: 9.5px "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.03em;
+    }
+
+    .rule-note {
+      fill: #6e4c35;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 13px;
+      font-style: italic;
+    }
+
+    .details {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: var(--surface-strong);
+    }
+
+    .detail-content { padding: 26px 24px 18px; }
+
+    .detail-kicker {
+      margin: 0 0 10px;
+      color: var(--rust);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .details h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 28px;
+      font-weight: 500;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+
+    .detail-summary {
+      margin: 14px 0 22px;
+      color: #505b5e;
+      font-size: 15px;
+      text-wrap: pretty;
+    }
+
+    .detail-section {
+      padding: 16px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .detail-section h3 {
+      margin: 0 0 7px;
+      color: #6a716f;
+      font: 700 10px "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .detail-section p { margin: 0; font-size: 14px; text-wrap: pretty; }
+
+    .principles {
+      margin-top: auto;
+      padding: 19px 24px 22px;
+      background: #efe9dd;
+      border-top: 1px solid var(--line);
+    }
+
+    .principles h3 {
+      margin: 0 0 10px;
+      font: 700 10px "Cascadia Mono", "Liberation Mono", monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .principles ol { margin: 0; padding-left: 18px; }
+    .principles li { margin: 7px 0; padding-left: 3px; color: #4e5859; font-size: 13px; }
+
+    .footnote {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 12px 18px;
+      border: 1px solid rgba(72, 64, 51, 0.22);
+      border-top: 0;
+      color: #676e6e;
+      background: #eee9df;
+      font-size: 12px;
+    }
+
+    .version-note { font-size: 9.5px; }
+
+    @media (max-width: 1050px) {
+      .workspace { grid-template-columns: 1fr; }
+      .diagram-area { border-right: 0; border-bottom: 1px solid var(--line); }
+      .diagram-viewport { height: 620px; }
+      .details { display: grid; grid-template-columns: 1fr 300px; }
+      .principles { margin-top: 0; border-top: 0; border-left: 1px solid var(--line); }
+    }
+
+    @media (max-width: 680px) {
+      .page { width: 100%; margin: 0; }
+      .masthead { align-items: start; padding: 20px; }
+      .proposal-badge { display: none; }
+      .workspace, .masthead, .footnote { border-left: 0; border-right: 0; }
+      .toolbar { align-items: start; }
+      .legend { max-width: 190px; }
+      .details { display: block; }
+      .principles { border-left: 0; border-top: 1px solid var(--line); }
+      .footnote { display: block; }
+    }
+
+    @media print {
+      body { background: white; }
+      .page { width: 100%; margin: 0; }
+      .masthead, .workspace, .footnote { box-shadow: none; }
+      .workspace { display: block; }
+      .diagram-area { border-right: 0; }
+      .toolbar, .details, .footnote { display: none; }
+      .diagram-viewport { height: auto; overflow: visible; }
+      .diagram-stage { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">TicketBunker / architecture study 01</p>
+        <h1>One configurable API, with tools kept behind it</h1>
+        <p>The desktop app owns the experience. TicketBunker owns the contract and state transitions. Git, agile providers, databases, and the coworker model remain replaceable implementation boundaries.</p>
+      </div>
+      <div class="proposal-badge">Proposed target</div>
+    </header>
+
+    <section class="workspace" aria-label="Interactive TicketBunker architecture diagram">
+      <div class="diagram-area">
+        <div class="toolbar">
+          <div class="legend" aria-label="Connection legend">
+            <span class="legend-item"><span class="legend-line"></span> request / state</span>
+            <span class="legend-item"><span class="legend-line dashed"></span> events / progress</span>
+            <span>select a box to inspect</span>
+          </div>
+          <div class="tools" aria-label="Diagram controls">
+            <button class="tool-button" id="zoom-out" type="button" aria-label="Zoom out">−</button>
+            <button class="tool-button" id="zoom-fit" type="button">Fit</button>
+            <button class="tool-button" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+            <button class="tool-button" id="download-svg" type="button">SVG</button>
+          </div>
+        </div>
+
+        <div class="diagram-viewport" id="viewport">
+          <div class="diagram-stage" id="stage">
+            <svg id="architecture" viewBox="0 0 1680 920" role="img" aria-labelledby="diagram-title diagram-description">
+              <title id="diagram-title">Proposed API-first architecture for TicketBunker</title>
+              <desc id="diagram-description">A left-to-right architecture diagram. The user enters a desktop application. All views use a typed API client and runtime supervisor to call one TicketBunker API. The API dispatches shared actions to domain services, which reach databases, Git, tracker providers, and model providers only through adapters.</desc>
+              <defs>
+                <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#8d877b" stroke-opacity="0.085" stroke-width="1"/>
+                </pattern>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#3e4b4e"/>
+                </marker>
+                <marker id="event-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#65765f"/>
+                </marker>
+              </defs>
+
+              <rect x="0" y="0" width="1680" height="920" fill="#f5f1e8"/>
+              <rect x="0" y="0" width="1680" height="920" fill="url(#grid)"/>
+
+              <rect class="boundary installation" x="22" y="58" width="1240" height="830"/>
+              <text class="boundary-title" x="48" y="88">TicketBunker installation</text>
+              <text class="boundary-note" x="304" y="88">one packaged application · local control · no user shell required</text>
+
+              <rect class="boundary external-zone" x="1282" y="58" width="376" height="830"/>
+              <text class="boundary-title" x="1308" y="88">Network-owned systems</text>
+              <text class="boundary-note" x="1308" y="106">replaceable, separately authenticated</text>
+
+              <rect class="boundary lane" x="46" y="116" width="292" height="730"/>
+              <text class="boundary-title" x="68" y="145">Desktop experience</text>
+
+              <rect class="boundary lane" x="360" y="116" width="560" height="730"/>
+              <text class="boundary-title" x="382" y="145">Python core</text>
+
+              <rect class="boundary lane" x="942" y="116" width="296" height="730"/>
+              <text class="boundary-title" x="964" y="145">Boundaries + local state</text>
+
+              <!-- Desktop experience -->
+              <g class="node ui" data-key="user" tabindex="0" role="button" aria-label="User">
+                <rect x="100" y="170" width="184" height="50"/>
+                <text class="node-title" x="192" y="192" text-anchor="middle">User</text>
+                <text class="node-subtitle" x="192" y="208" text-anchor="middle">clicks, never shell glue</text>
+              </g>
+
+              <path class="connector" d="M192 220 V250"/>
+
+              <g class="node ui" data-key="app-shell" tabindex="0" role="button" aria-label="Desktop app shell">
+                <rect x="78" y="250" width="228" height="58"/>
+                <text class="node-title" x="192" y="275" text-anchor="middle">Desktop App Shell</text>
+                <text class="node-subtitle" x="192" y="294" text-anchor="middle">window · router · lifecycle</text>
+              </g>
+
+              <path class="connector" d="M192 308 V340"/>
+
+              <g class="node ui" data-key="projects-view" tabindex="0" role="button" aria-label="Projects view">
+                <rect x="68" y="340" width="116" height="50"/>
+                <text class="mini-title" x="126" y="370" text-anchor="middle">Projects</text>
+              </g>
+              <g class="node ui" data-key="tickets-view" tabindex="0" role="button" aria-label="Tickets view">
+                <rect x="200" y="340" width="116" height="50"/>
+                <text class="mini-title" x="258" y="370" text-anchor="middle">Tickets</text>
+              </g>
+              <g class="node ui" data-key="config-view" tabindex="0" role="button" aria-label="Configuration view">
+                <rect x="68" y="406" width="116" height="50"/>
+                <text class="mini-title" x="126" y="436" text-anchor="middle">Configuration</text>
+              </g>
+              <g class="node ui" data-key="agent-view" tabindex="0" role="button" aria-label="Agent view">
+                <rect x="200" y="406" width="116" height="50"/>
+                <text class="mini-title" x="258" y="436" text-anchor="middle">Coworker</text>
+              </g>
+
+              <path class="connector" d="M192 456 V492"/>
+
+              <g class="node ui" data-key="ui-state" tabindex="0" role="button" aria-label="UI state">
+                <rect x="78" y="492" width="228" height="58"/>
+                <text class="node-title" x="192" y="517" text-anchor="middle">UI State</text>
+                <text class="node-subtitle" x="192" y="536" text-anchor="middle">drafts · selection · progress</text>
+              </g>
+
+              <path class="connector" d="M192 550 V590"/>
+
+              <g class="node ui important" data-key="api-client" tabindex="0" role="button" aria-label="Typed API client">
+                <rect x="78" y="590" width="228" height="70"/>
+                <text class="node-title" x="192" y="619" text-anchor="middle">Typed API Client</text>
+                <text class="node-subtitle" x="192" y="640" text-anchor="middle">the UI's only backend door</text>
+              </g>
+
+              <text class="rule-note" x="192" y="707" text-anchor="middle">Views do not know Git, Pi,</text>
+              <text class="rule-note" x="192" y="725" text-anchor="middle">SQLite, or provider APIs.</text>
+
+              <!-- Core contract -->
+              <path class="connector" d="M306 625 H398"/>
+              <text class="edge-label" x="335" y="615">typed calls</text>
+
+              <g class="node core" data-key="runtime" tabindex="0" role="button" aria-label="Runtime supervisor">
+                <rect x="398" y="590" width="206" height="70"/>
+                <text class="node-title" x="501" y="619" text-anchor="middle">Runtime Supervisor</text>
+                <text class="node-subtitle" x="501" y="640" text-anchor="middle">start · stop · health · events</text>
+              </g>
+
+              <path class="connector" d="M501 590 V558"/>
+
+              <g class="node core important" data-key="api" tabindex="0" role="button" aria-label="TicketBunker API">
+                <rect x="398" y="488" width="206" height="70"/>
+                <text class="node-title" x="501" y="517" text-anchor="middle">TicketBunker API</text>
+                <text class="node-subtitle" x="501" y="538" text-anchor="middle">stable application contract</text>
+              </g>
+
+              <path class="connector" d="M501 488 V456"/>
+
+              <g class="node core important" data-key="actions" tabindex="0" role="button" aria-label="Action registry">
+                <rect x="398" y="386" width="206" height="70"/>
+                <text class="node-title" x="501" y="415" text-anchor="middle">Action Registry</text>
+                <text class="node-subtitle" x="501" y="436" text-anchor="middle">queries + validated mutations</text>
+              </g>
+
+              <g class="node core" data-key="schema" tabindex="0" role="button" aria-label="Schema registry">
+                <rect x="398" y="230" width="206" height="58"/>
+                <text class="node-title" x="501" y="255" text-anchor="middle">Schema Registry</text>
+                <text class="node-subtitle" x="501" y="274" text-anchor="middle">fields · mappings · extensions</text>
+              </g>
+
+              <g class="node core" data-key="policy" tabindex="0" role="button" aria-label="Capabilities and policy">
+                <rect x="398" y="308" width="206" height="58"/>
+                <text class="node-title" x="501" y="333" text-anchor="middle">Capabilities + Policy</text>
+                <text class="node-subtitle" x="501" y="352" text-anchor="middle">who may do what, where</text>
+              </g>
+
+              <path class="connector" d="M501 386 V366"/>
+              <path class="connector" d="M501 308 V288"/>
+
+              <g class="node core" data-key="events" tabindex="0" role="button" aria-label="Jobs and events">
+                <rect x="398" y="166" width="206" height="44"/>
+                <text class="node-title" x="501" y="193" text-anchor="middle">Jobs + Event Stream</text>
+              </g>
+
+              <!-- Service bus -->
+              <path class="bus" d="M604 421 H654 V703"/>
+              <circle class="junction" cx="654" cy="421" r="3.5"/>
+
+              <g class="node core" data-key="project-service" tabindex="0" role="button" aria-label="Project and ticket services">
+                <rect x="682" y="166" width="210" height="58"/>
+                <text class="node-title" x="787" y="191" text-anchor="middle">Project + Ticket</text>
+                <text class="node-subtitle" x="787" y="210" text-anchor="middle">identity · lifecycle · index</text>
+              </g>
+              <path class="connector" d="M654 195 H682"/>
+
+              <g class="node core" data-key="git-service" tabindex="0" role="button" aria-label="Git workflow service">
+                <rect x="682" y="254" width="210" height="58"/>
+                <text class="node-title" x="787" y="279" text-anchor="middle">Git Workflow</text>
+                <text class="node-subtitle" x="787" y="298" text-anchor="middle">refs · branches · safe plans</text>
+              </g>
+              <path class="connector" d="M654 283 H682"/>
+
+              <g class="node core" data-key="integration-service" tabindex="0" role="button" aria-label="Integration sync service">
+                <rect x="682" y="342" width="210" height="58"/>
+                <text class="node-title" x="787" y="367" text-anchor="middle">Integration Sync</text>
+                <text class="node-subtitle" x="787" y="386" text-anchor="middle">normalize · map · reconcile</text>
+              </g>
+              <path class="connector" d="M654 371 H682"/>
+
+              <g class="node core" data-key="coworker-service" tabindex="0" role="button" aria-label="Reports and coworker service">
+                <rect x="682" y="430" width="210" height="58"/>
+                <text class="node-title" x="787" y="455" text-anchor="middle">Reports + Coworker</text>
+                <text class="node-subtitle" x="787" y="474" text-anchor="middle">evidence · synthesis · chat</text>
+              </g>
+              <path class="connector" d="M654 459 H682"/>
+
+              <g class="node core" data-key="team-sync" tabindex="0" role="button" aria-label="Team synchronization service">
+                <rect x="682" y="518" width="210" height="58"/>
+                <text class="node-title" x="787" y="543" text-anchor="middle">Team Sync</text>
+                <text class="node-subtitle" x="787" y="562" text-anchor="middle">pull · push · conflict state</text>
+              </g>
+              <path class="connector" d="M654 547 H682"/>
+
+              <g class="node core" data-key="search-service" tabindex="0" role="button" aria-label="Search and indexing service">
+                <rect x="682" y="606" width="210" height="58"/>
+                <text class="node-title" x="787" y="631" text-anchor="middle">Search + Index</text>
+                <text class="node-subtitle" x="787" y="650" text-anchor="middle">local cache · remote references</text>
+              </g>
+              <path class="connector" d="M654 635 H682"/>
+
+              <path class="event-connector" d="M682 703 H628 V188 H604"/>
+              <text class="edge-label" x="633" y="726">long actions publish progress back to the app</text>
+
+              <!-- Adapters and local state -->
+              <g class="node adapter" data-key="persistence-adapter" tabindex="0" role="button" aria-label="Persistence adapter">
+                <rect x="964" y="166" width="120" height="58"/>
+                <text class="node-title" x="1024" y="191" text-anchor="middle">Persistence</text>
+                <text class="node-subtitle" x="1024" y="210" text-anchor="middle">adapter</text>
+              </g>
+              <path class="connector" d="M892 195 H964"/>
+              <g class="node adapter" data-key="local-db" tabindex="0" role="button" aria-label="Local database">
+                <rect x="1100" y="166" width="116" height="58"/>
+                <text class="node-title" x="1158" y="191" text-anchor="middle">Local DB</text>
+                <text class="node-subtitle" x="1158" y="210" text-anchor="middle">cache + local state</text>
+              </g>
+              <path class="connector" d="M1084 195 H1100"/>
+
+              <g class="node adapter" data-key="git-adapter" tabindex="0" role="button" aria-label="Git adapter">
+                <rect x="964" y="254" width="120" height="58"/>
+                <text class="node-title" x="1024" y="279" text-anchor="middle">Git</text>
+                <text class="node-subtitle" x="1024" y="298" text-anchor="middle">adapter</text>
+              </g>
+              <path class="connector" d="M892 283 H964"/>
+              <g class="node adapter" data-key="managed-git" tabindex="0" role="button" aria-label="Managed Git and workspaces">
+                <rect x="1100" y="254" width="116" height="58"/>
+                <text class="node-title" x="1158" y="279" text-anchor="middle">Managed Git</text>
+                <text class="node-subtitle" x="1158" y="298" text-anchor="middle">+ workspaces</text>
+              </g>
+              <path class="connector" d="M1084 283 H1100"/>
+
+              <g class="node adapter" data-key="tracker-adapter" tabindex="0" role="button" aria-label="Tracker adapter">
+                <rect x="964" y="342" width="120" height="58"/>
+                <text class="node-title" x="1024" y="367" text-anchor="middle">Tracker</text>
+                <text class="node-subtitle" x="1024" y="386" text-anchor="middle">adapter</text>
+              </g>
+              <path class="connector" d="M892 371 H964"/>
+
+              <g class="node adapter" data-key="agent-adapter" tabindex="0" role="button" aria-label="Coworker agent adapter">
+                <rect x="964" y="430" width="120" height="58"/>
+                <text class="node-title" x="1024" y="455" text-anchor="middle">Coworker</text>
+                <text class="node-subtitle" x="1024" y="474" text-anchor="middle">adapter</text>
+              </g>
+              <path class="connector" d="M892 459 H964"/>
+              <g class="node adapter" data-key="managed-pi" tabindex="0" role="button" aria-label="Managed Pi runtime">
+                <rect x="1100" y="430" width="116" height="58"/>
+                <text class="node-title" x="1158" y="455" text-anchor="middle">Managed Pi</text>
+                <text class="node-subtitle" x="1158" y="474" text-anchor="middle">runtime</text>
+              </g>
+              <path class="connector" d="M1084 459 H1100"/>
+
+              <g class="node adapter" data-key="remote-adapter" tabindex="0" role="button" aria-label="Remote storage adapter">
+                <rect x="964" y="518" width="120" height="58"/>
+                <text class="node-title" x="1024" y="543" text-anchor="middle">Remote</text>
+                <text class="node-subtitle" x="1024" y="562" text-anchor="middle">storage adapter</text>
+              </g>
+              <path class="connector" d="M892 547 H964"/>
+
+              <g class="node adapter" data-key="search-index" tabindex="0" role="button" aria-label="Local search index">
+                <rect x="964" y="606" width="252" height="58"/>
+                <text class="node-title" x="1090" y="631" text-anchor="middle">Local Search Index</text>
+                <text class="node-subtitle" x="1090" y="650" text-anchor="middle">rebuildable · never team truth</text>
+              </g>
+              <path class="connector" d="M892 635 H964"/>
+
+              <g class="node adapter" data-key="credential-vault" tabindex="0" role="button" aria-label="Operating system credential vault">
+                <rect x="964" y="742" width="252" height="58"/>
+                <text class="node-title" x="1090" y="767" text-anchor="middle">OS Credential Vault</text>
+                <text class="node-subtitle" x="1090" y="786" text-anchor="middle">tokens never enter project data</text>
+              </g>
+              <path class="event-connector" d="M1024 400 V718 H1090 V742"/>
+              <path class="event-connector" d="M1158 488 V718 H1090"/>
+
+              <!-- Network systems -->
+              <g class="node external" data-key="git-remote" tabindex="0" role="button" aria-label="Git remote">
+                <rect x="1310" y="246" width="320" height="74"/>
+                <text class="node-title" x="1470" y="276" text-anchor="middle">Git Remote</text>
+                <text class="node-subtitle" x="1470" y="298" text-anchor="middle">source history + access rules</text>
+              </g>
+              <path class="connector" d="M1216 283 H1310"/>
+
+              <g class="node external" data-key="agile-providers" tabindex="0" role="button" aria-label="Agile providers">
+                <rect x="1310" y="334" width="320" height="74"/>
+                <text class="node-title" x="1470" y="364" text-anchor="middle">Agile Providers</text>
+                <text class="node-subtitle" x="1470" y="386" text-anchor="middle">GitHub · GitLab · Jira · custom</text>
+              </g>
+              <path class="connector" d="M1084 371 H1310"/>
+
+              <g class="node external" data-key="model-providers" tabindex="0" role="button" aria-label="Model providers">
+                <rect x="1310" y="422" width="320" height="74"/>
+                <text class="node-title" x="1470" y="452" text-anchor="middle">Model Providers</text>
+                <text class="node-subtitle" x="1470" y="474" text-anchor="middle">user-selected authentication + model</text>
+              </g>
+              <path class="connector" d="M1216 459 H1310"/>
+
+              <g class="node external important" data-key="remote-api" tabindex="0" role="button" aria-label="Remote TicketBunker API">
+                <rect x="1310" y="510" width="320" height="74"/>
+                <text class="node-title" x="1470" y="540" text-anchor="middle">Remote TicketBunker API</text>
+                <text class="node-subtitle" x="1470" y="562" text-anchor="middle">auth · tenancy · team synchronization</text>
+              </g>
+              <path class="connector" d="M1084 547 H1310"/>
+
+              <path class="connector" d="M1470 584 V624"/>
+
+              <g class="node external" data-key="team-db" tabindex="0" role="button" aria-label="Team database">
+                <rect x="1310" y="624" width="320" height="86"/>
+                <text class="node-title" x="1470" y="657" text-anchor="middle">Team Database</text>
+                <text class="node-subtitle" x="1470" y="680" text-anchor="middle">tickets · config · membership · reports</text>
+                <text class="node-subtitle" x="1470" y="697" text-anchor="middle">implementation chosen by the host</text>
+              </g>
+
+              <text class="rule-note" x="1470" y="762" text-anchor="middle">The app never connects to</text>
+              <text class="rule-note" x="1470" y="780" text-anchor="middle">the team database directly.</text>
+
+              <text class="edge-label" x="48" y="875">PROPOSED TARGET · Does not supersede DESIGN.md until accepted</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <aside class="details" aria-live="polite" aria-label="Selected component details">
+        <div class="detail-content">
+          <p class="detail-kicker" id="detail-kicker">Architecture contract</p>
+          <h2 id="detail-title">One door into the core</h2>
+          <p class="detail-summary" id="detail-summary">Every interface calls the same typed API. The core decides what an action means; adapters decide how it reaches a tool or external service.</p>
+          <div class="detail-section">
+            <h3>Owns</h3>
+            <p id="detail-owns">Validation, orchestration, state transitions, and a stable vocabulary for the application.</p>
+          </div>
+          <div class="detail-section">
+            <h3>Does not own</h3>
+            <p id="detail-excludes">Provider-specific transport, user shell behavior, direct database access from views, or source-code changes by the coworker.</p>
+          </div>
+        </div>
+        <div class="principles">
+          <h3>Four non-negotiables</h3>
+          <ol>
+            <li>The app speaks only to TicketBunker.</li>
+            <li>CLI automation, if retained, calls the same actions.</li>
+            <li>Remote team state sits behind an authenticated service.</li>
+            <li>Git and the coworker are tools, not the product boundary.</li>
+          </ol>
+        </div>
+      </aside>
+    </section>
+
+    <footer class="footnote">
+      <span>Click or keyboard-focus a component to see its responsibility. Use <strong>SVG</strong> for a portable vector copy.</span>
+      <span class="version-note">Concept artifact · 31 Aug 2026</span>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const details = {
+        user: ["Entry point", "User", "The person works through explicit application actions instead of assembling TicketBunker workflows in a terminal.", "Intent, confirmation, and local choices.", "Backend sequencing or knowledge of tool-specific commands."],
+        "app-shell": ["Desktop experience", "Desktop App Shell", "Owns the native window, routing, project selection, and application lifecycle.", "Navigation, window state, and starting or stopping the local runtime.", "Ticket rules, Git operations, or persistence semantics."],
+        "projects-view": ["Desktop view", "Projects", "Adds or joins Git projects and exposes their TicketBunker connection state.", "Project discovery, membership entry points, and clear connection status.", "Remote authorization decisions or direct Git manipulation."],
+        "tickets-view": ["Desktop view", "Tickets", "Presents ticket lifecycle, branches, evidence, reports, and the persistent coworker surface.", "Readable ticket state and user intent.", "Tracker-specific fields or report publication rules."],
+        "config-view": ["Desktop view", "Configuration", "Edits global and project field composition, mappings, integrations, and local preferences.", "A clear editing experience and change previews.", "Permission enforcement or storage implementation."],
+        "agent-view": ["Desktop view", "Coworker", "Lets the user synthesize, inspect, correct, and discuss WHO, WHAT, WHERE, and WHY.", "Conversation context, scope selection, citations, and proposed report updates.", "Source-code changes or a second path for writing combined truth."],
+        "ui-state": ["Desktop state", "UI State", "Keeps drafts, selections, optimistic progress, and navigation responsive without redefining backend truth.", "Ephemeral interaction state and locally recoverable drafts.", "Canonical tickets, authorization, or durable team state."],
+        "api-client": ["Sole UI boundary", "Typed API Client", "Turns every view action into a typed request and every result into predictable application state.", "Request schemas, response decoding, cancellation, and event subscriptions.", "Business logic, subprocess commands, SQL, or provider SDK calls."],
+        runtime: ["Process boundary", "Runtime Supervisor", "Starts and monitors the Python core and provides one transport for requests, health, cancellation, and events.", "Local process lifecycle and crash recovery.", "Domain behavior or decisions about what an action is allowed to do."],
+        api: ["Stable contract", "TicketBunker API", "The single application contract used by the desktop UI and any optional automation client.", "Versioned commands, queries, results, errors, jobs, and event envelopes.", "Git output parsing in the UI or direct access to storage internals."],
+        actions: ["Behavior source of truth", "Action Registry", "Maps named API operations to shared handlers so every caller receives identical validation and behavior.", "Command/query routing, validation order, confirmation plans, and typed outcomes.", "Separate CLI behavior or provider-specific implementations."],
+        schema: ["Configurable model", "Schema Registry", "Composes global defaults, project fields, tags, and provider mappings into explicit ticket schemas.", "Field definitions, mapping contracts, extension validation, and schema versions.", "Ticket-specific ad hoc schema mutation."],
+        policy: ["Authority boundary", "Capabilities + Policy", "Answers which actions are available to the current user and project before the app offers them.", "Capabilities, roles, project policy, and confirmation requirements.", "Credentials, provider login flows, or UI-only hiding as security."],
+        events: ["Async contract", "Jobs + Event Stream", "Makes long-running Git, sync, and synthesis actions observable without blocking the app.", "Progress, cancellation, durable outcomes, and actionable failures.", "Vague loading states or raw subprocess logs as user-facing errors."],
+        "project-service": ["Domain service", "Project + Ticket", "Owns project identity, ticket lifecycle, relationships, branches, and normalized metadata.", "Canonical domain rules and ticket/project state transitions.", "SQL layouts or tracker-specific payload shapes."],
+        "git-service": ["Domain service", "Git Workflow", "Builds safe, reviewable plans for fetch, branch, checkout, pull, merge, rebase, and commit-related actions.", "Git invariants, dirty-worktree guards, naming rules, and confirmations.", "Calling a user's terminal or silently rewriting their worktree."],
+        "integration-service": ["Domain service", "Integration Sync", "Normalizes provider records through configurable field matrices and reconciles them with TicketBunker tickets.", "Mappings, source references, sync cursors, and conflict classification.", "Treating GitHub, GitLab, or Jira as TicketBunker's core model."],
+        "coworker-service": ["Domain service", "Reports + Coworker", "Maintains grounded branch reports and the ticket-wide coworker session while preserving report publication gates.", "Evidence, synthesis, chat context, proposals, linting, and anchor verification.", "Editing source code or bypassing branch-level report ownership."],
+        "team-sync": ["Domain service", "Team Sync", "Synchronizes team-owned TicketBunker state through a remote service and exposes explicit offline and conflict states.", "Sync intent, cursors, retries, conflict results, and local durability.", "Direct desktop-to-database access or invisible destructive resolution."],
+        "search-service": ["Domain service", "Search + Index", "Builds fast ticket and project discovery from local cached state plus remote references.", "Queries, filters, pagination, and rebuildable indexes.", "Becoming the authoritative store for tickets or configuration."],
+        "persistence-adapter": ["Replaceable boundary", "Persistence Adapter", "Translates domain records into the selected local storage engine.", "Transactions, migrations, and storage-specific queries.", "Business rules or remote team authorization."],
+        "local-db": ["Device-owned state", "Local Database", "Keeps offline data, drafts, job state, caches, and other device-local durable information.", "Fast local continuity and recoverable application state.", "Final team authority or an opaque second source of ticket truth."],
+        "git-adapter": ["Replaceable boundary", "Git Adapter", "Executes validated workflow plans through TicketBunker's managed Git environment.", "Command construction, porcelain parsing, and stable result envelopes.", "Policy decisions or uncontrolled user-shell inheritance."],
+        "managed-git": ["Packaged tool", "Managed Git + Workspaces", "Provides a tested Git runtime and explicit project working copies independent of the user's terminal setup.", "Known executable behavior and workspace discovery.", "Owning source history; the project's Git remote still does that."],
+        "tracker-adapter": ["Replaceable boundary", "Tracker Adapter", "Speaks provider protocols while returning one normalized TicketBunker integration contract.", "Pagination, rate limits, provider IDs, and source-specific field transport.", "Changing TicketBunker's domain model to match one provider."],
+        "agent-adapter": ["Replaceable boundary", "Coworker Adapter", "Feeds scoped context to the selected agent runtime and converts its result into a candidate report update.", "Session invocation, context packaging, tool exposure, and bounded output parsing.", "Publishing unverified claims or editing the user's source tree."],
+        "managed-pi": ["Packaged tool", "Managed Pi Runtime", "Provides TicketBunker's pinned coworker harness without requiring the user to install or open Pi directly.", "Harness execution and provider login handoff.", "TicketBunker's durable report contract or model credentials."],
+        "remote-adapter": ["Replaceable boundary", "Remote Storage Adapter", "Synchronizes with a self-hosted, company-hosted, or future compatible TicketBunker service.", "Protocol versioning, retry, offline queues, and conflict envelopes.", "Direct knowledge of the host's database technology."],
+        "search-index": ["Rebuildable state", "Local Search Index", "Accelerates project and ticket discovery while remaining disposable and derivable.", "Search documents, indexes, and cached remote references.", "Canonical tickets, configuration, or permissions."],
+        "credential-vault": ["Device trust", "OS Credential Vault", "Stores provider and TicketBunker credentials under operating-system controls.", "Secrets and scoped tokens.", "Project data, portable configuration, or plaintext repository files."],
+        "git-remote": ["External authority", "Git Remote", "Owns source history, collaboration rules, and branch protections for each connected project.", "Commits, refs, code review, and source access.", "TicketBunker tickets or coworker reports unless explicitly exported."],
+        "agile-providers": ["External integrations", "Agile Providers", "Supply issues, projects, comments, and provider-specific fields through configurable mappings.", "Their own records and authentication boundary.", "TicketBunker's universal schema or team database."],
+        "model-providers": ["External computation", "Model Providers", "Run the user-selected model for synthesis and ticket coworker conversations.", "Model inference and provider account controls.", "Published report truth, Git state, or TicketBunker authorization."],
+        "remote-api": ["Team boundary", "Remote TicketBunker API", "Provides authenticated team collaboration without exposing the database or tying the product to one host.", "Membership, tenancy, authorization, sync, and server-side transactions.", "The desktop UI, source Git operations, or direct model sessions."],
+        "team-db": ["Host-owned persistence", "Team Database", "Stores team tickets, configuration, membership, report state, and synchronization metadata behind the remote API.", "Transactional team truth and backups chosen by the operator.", "A public client contract or assumptions about a single database engine."]
+      };
+
+      const nodes = [...document.querySelectorAll(".node[data-key]")];
+      const fields = {
+        kicker: document.getElementById("detail-kicker"),
+        title: document.getElementById("detail-title"),
+        summary: document.getElementById("detail-summary"),
+        owns: document.getElementById("detail-owns"),
+        excludes: document.getElementById("detail-excludes")
+      };
+
+      function selectNode(node, updateHash = true) {
+        const value = details[node.dataset.key];
+        if (!value) return;
+        nodes.forEach((candidate) => candidate.classList.toggle("selected", candidate === node));
+        [fields.kicker.textContent, fields.title.textContent, fields.summary.textContent, fields.owns.textContent, fields.excludes.textContent] = value;
+        if (updateHash) history.replaceState(null, "", `#${encodeURIComponent(node.dataset.key)}`);
+      }
+
+      nodes.forEach((node) => {
+        node.addEventListener("click", () => selectNode(node));
+        node.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            selectNode(node);
+          }
+        });
+      });
+
+      const initialKey = decodeURIComponent(location.hash.slice(1));
+      const initialNode = nodes.find((node) => node.dataset.key === initialKey);
+      if (initialNode) selectNode(initialNode, false);
+
+      const stage = document.getElementById("stage");
+      const viewport = document.getElementById("viewport");
+      let zoom = 1;
+
+      function setZoom(next) {
+        zoom = Math.max(0.65, Math.min(1.8, next));
+        stage.style.width = `${zoom * 100}%`;
+      }
+
+      document.getElementById("zoom-in").addEventListener("click", () => setZoom(zoom + 0.15));
+      document.getElementById("zoom-out").addEventListener("click", () => setZoom(zoom - 0.15));
+      document.getElementById("zoom-fit").addEventListener("click", () => {
+        zoom = 1;
+        stage.style.width = "100%";
+        viewport.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      });
+
+      document.getElementById("download-svg").addEventListener("click", () => {
+        const clone = document.getElementById("architecture").cloneNode(true);
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+        style.textContent = [...document.styleSheets]
+          .flatMap((sheet) => [...sheet.cssRules])
+          .map((rule) => rule.cssText)
+          .join("\n");
+        clone.insertBefore(style, clone.firstChild);
+        const source = new XMLSerializer().serializeToString(clone);
+        const blob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "ticketbunker-api-architecture.svg";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 0);
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -30,6 +30,9 @@ inferences** (agent conclusions built on those facts). A reader should always be
 able to tell which is which.
 
 See [DESIGN.md](DESIGN.md) for the architecture.
+Open the self-contained [API-first target diagram](docs/ticketbunker-api-architecture.html)
+to inspect the proposed standalone-app direction; it is a design study and does
+not supersede `DESIGN.md` until accepted.
 The disposable [15-ticket, two-user product loop](docs/mock-product-loop.md)
 records the current end-to-end behavior and measurements.
 
