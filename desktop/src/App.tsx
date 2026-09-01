@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BunkerHub from "./BunkerHub";
 import TicketWorkspace from "./TicketWorkspace";
-import { bootstrap, command, isNative, listenNative, nativeInvoke } from "./transport";
+import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal } from "./transport";
 import type { AppState, SourceDraft, TicketReference } from "./types";
 
 type Notice = { message: string; error: boolean } | null;
@@ -250,6 +250,7 @@ function Settings({
 }) {
   const [tab, setTab] = useState(initialTab);
   const [message, setMessage] = useState("");
+  const [checkingRelease, setCheckingRelease] = useState(false);
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -270,6 +271,28 @@ function Settings({
       setMessage(String(reason));
     }
   }
+  async function checkRelease() {
+    setCheckingRelease(true);
+    setMessage("");
+    try {
+      const result = await command<{ release: NonNullable<AppState["release"]> }>("application.release.check");
+      onState({ ...state, release: result.release });
+      setMessage(result.release.available ? `TicketBunker ${result.release.latest} is ready.` : "TicketBunker is up to date.");
+    } catch (reason) {
+      setMessage(String(reason));
+    } finally {
+      setCheckingRelease(false);
+    }
+  }
+  async function downloadRelease() {
+    const url = state.release?.download_url || state.release?.release_url;
+    if (!url) return checkRelease();
+    try {
+      await openExternal(url);
+    } catch (reason) {
+      setMessage(String(reason));
+    }
+  }
   if (tab === "agent") return <aside className="settings-drawer"><AgentSetup state={state} onState={onState} required={!state.agent.decided} onClose={onClose} /></aside>;
   return (
     <aside className="settings-drawer">
@@ -279,7 +302,16 @@ function Settings({
         <form onSubmit={saveProfile}><h3>Identity</h3><label>Name<input name="name" defaultValue={state.profile.name} required /></label><label>Email<input name="email" type="email" defaultValue={state.profile.email} required /></label><label>Branch name<input name="branch_user" defaultValue={state.profile.branch_user} required /></label><button className="primary">Save identity</button></form>
         <form onSubmit={saveEditor}><h3>Included editor</h3><label>Indentation<select name="indent_style"><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></label><label>Tab size<input name="tab_size" type="number" min="1" max="16" defaultValue="4" /></label><label className="check"><input name="line_wrap" type="checkbox" defaultChecked />Wrap long lines</label><label className="check"><input name="trim_trailing_whitespace" type="checkbox" />Trim trailing whitespace on save</label><label className="check"><input name="ensure_final_newline" type="checkbox" defaultChecked />Ensure final newline</label><button className="primary">Save editor settings</button></form>
       </div>}
-      {tab === "system" && <dl className="system-info"><div><dt>Platform</dt><dd>{state.platform.family} · {state.platform.architecture}</dd></div><div><dt>Application data</dt><dd>{state.platform.data_home}</dd></div><div><dt>Diagnostics</dt><dd>{state.diagnostics?.application || `${state.platform.data_home}/diagnostics/app-worker.jsonl`}</dd></div><div><dt>Agent</dt><dd>{state.agent.enabled ? state.agent.configured ? `${state.agent.provider} / ${state.agent.model}` : "Needs setup" : "Off"}</dd></div></dl>}
+      {tab === "system" && <>
+        <dl className="system-info">
+          <div><dt>Version</dt><dd>{state.release?.current || "Unknown"}</dd></div>
+          <div><dt>Updates</dt><dd className="update-status"><span>{state.release?.available ? `${state.release.latest} available` : state.release?.checked_at ? "Up to date" : "Not checked"}</span><button className={state.release?.available ? "primary" : ""} disabled={checkingRelease} onClick={state.release?.available ? downloadRelease : checkRelease}>{checkingRelease ? "Checking…" : state.release?.available ? "Download update" : "Check now"}</button></dd></div>
+          <div><dt>Platform</dt><dd>{state.platform.family} · {state.platform.architecture}</dd></div>
+          <div><dt>Application data</dt><dd>{state.platform.data_home}</dd></div>
+          <div><dt>Diagnostics</dt><dd>{state.diagnostics?.application || `${state.platform.data_home}/diagnostics/app-worker.jsonl`}</dd></div>
+          <div><dt>Agent</dt><dd>{state.agent.enabled ? state.agent.configured ? `${state.agent.provider} / ${state.agent.model}` : "Needs setup" : "Off"}</dd></div>
+        </dl>
+      </>}
       {message && <p className="settings-message">{message}</p>}
     </aside>
   );
@@ -348,6 +380,18 @@ export default function App() {
   useEffect(() => {
     if (state?.profile.complete && !state.agent.decided) setSettings(true);
   }, [state?.profile.complete, state?.agent.decided]);
+  useEffect(() => {
+    if (!state?.profile.complete || !isNative()) return;
+    const attemptedAt = state.release?.attempted_at || state.release?.checked_at;
+    const checked = attemptedAt ? Date.parse(attemptedAt) : 0;
+    if (checked && Date.now() - checked < 24 * 60 * 60 * 1000) return;
+    const timer = window.setTimeout(() => {
+      command<{ release: NonNullable<AppState["release"]> }>("application.release.check")
+        .then((result) => setState((current) => current ? { ...current, release: result.release } : current))
+        .catch(() => undefined);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [state?.profile.complete, state?.release?.attempted_at, state?.release?.checked_at]);
 
   const selectedBunker = useMemo(() => state?.bunkers.find((value) => value.id === ticket?.bunkerId), [state, ticket]);
   if (failure) return <main className="boot-error"><h1>TicketBunker could not open</h1><p>{failure}</p><button onClick={() => window.location.reload()}>Retry</button></main>;

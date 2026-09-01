@@ -13,7 +13,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import agent_runtime, bunkerdb, commands, config, platform_services, project, remote, truth
+from . import (
+    agent_runtime,
+    bunkerdb,
+    commands,
+    config,
+    platform_services,
+    project,
+    release_updates,
+    remote,
+    truth,
+)
 
 
 _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -221,6 +231,7 @@ def state() -> dict[str, Any]:
                 / "app-worker.jsonl"
             )
         },
+        "release": release_updates.state(settings),
         "profile": _profile(settings),
         "bunkers": bunkerdb.list_bunkers(),
         # Companion-Git registrations remain visible only as migration input.
@@ -235,6 +246,16 @@ def state() -> dict[str, Any]:
             "decided": "agent" in settings,
         },
     }
+
+
+@commands.register("application.release.check")
+def command_release_check(
+    _context: commands.CommandContext, _payload: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        return {"release": release_updates.check()}
+    except release_updates.ReleaseCheckError as exc:
+        raise commands.CommandRejected("release_check_failed", str(exc)) from exc
 
 
 def inspect_repository(raw: str) -> dict[str, Any]:

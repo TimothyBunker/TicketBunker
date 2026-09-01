@@ -35,6 +35,12 @@ requires authenticated service enrollment before installing a replica. Attach
 repository is explicit and never writes discovery or authority state into the
 checkout. Legacy companion data appears only as a read-only import.
 
+Installed users launch **TicketBunker** from the Windows Start menu or Linux
+application launcher. The installer supplies that launcher; `Terminal=false`
+on Linux and NSIS uses a current-user Start-menu entry on Windows. No project
+path, environment variable, shell, Python installation, or Pi installation is
+required. Command-line launch flags below are development overrides only.
+
 Configure edits Bunker defaults or a selected Project's pinned snapshot. Fields
 and integration matrices are complete revision-checked documents; GitHub,
 GitLab, and Jira are prefilled alongside custom integrations. Local Bunkers can
@@ -53,6 +59,14 @@ loopback, serves the same Vite output, injects one launch CSRF token, exposes th
 same action allowlist, and exits after the last tab closes. It contains no
 domain behavior. Native provider login and directory picking are clearly marked
 unavailable there; typed paths and non-agent work remain usable.
+
+Settings → System reads cached release state immediately, checks no more than
+once per day in native use, and supports an explicit refresh. The core accepts
+only a bounded GitHub release document and exact official release URLs. The
+selected installer opens in the system browser and is never loaded or executed
+inside the privileged application. Tagged Windows releases require repository
+code-signing secrets and verify both the frozen core and NSIS installer before
+publication; see `docs/release-signing.md`.
 
 ## Development
 

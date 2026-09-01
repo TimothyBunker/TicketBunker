@@ -6,4 +6,4 @@ Stdlib only, by design: the core must be exceedingly simple and diagnosable,
 and deployable inside any security boundary.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

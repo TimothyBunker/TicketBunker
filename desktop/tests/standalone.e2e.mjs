@@ -27,6 +27,12 @@ try {
   }
   await page.getByRole("button", { name: "Bunkers", exact: true }).click();
   await page.getByRole("heading", { name: "Bunkers", exact: true }).waitFor();
+  await page.locator(".profile-control").click();
+  await page.getByRole("button", { name: "System", exact: true }).click();
+  await page.getByText("0.5.0", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Check now", exact: true }).waitFor();
+  await page.screenshot({ path: output.replace(/\.png$/, "-system.png"), fullPage: true });
+  await page.getByRole("button", { name: "Close settings" }).click();
   const importButton = page.getByRole("button", { name: "Import copy" });
   if (await importButton.isVisible().catch(() => false)) {
     await importButton.click();

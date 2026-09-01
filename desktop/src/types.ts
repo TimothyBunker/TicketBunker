@@ -58,6 +58,16 @@ export type AppState = {
     data_home: string;
   };
   diagnostics?: { application?: string };
+  release?: {
+    current: string;
+    latest: string;
+    available: boolean;
+    checked_at: string;
+    attempted_at: string;
+    release_url: string;
+    download_url: string;
+    asset: string;
+  };
   bunkers: Bunker[];
   legacy_projects?: Array<Record<string, unknown>>;
   launch?: { repository?: string | null; route?: string };

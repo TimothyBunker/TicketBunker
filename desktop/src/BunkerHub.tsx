@@ -377,7 +377,7 @@ export default function BunkerHub({
         </nav>
         <button className="profile-control" onClick={onSettings}>
           <span>{state.profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
-          <span><strong>{state.profile.name}</strong><small>Local settings</small></span>
+          <span><strong>{state.profile.name}</strong><small>{state.release?.available ? "Update available" : "Local settings"}</small></span>
         </button>
       </aside>
 

@@ -220,6 +220,27 @@ fn validated_auth_url(raw: &str) -> Result<tauri::Url, String> {
     Ok(parsed)
 }
 
+fn validated_release_url(raw: &str) -> Result<tauri::Url, String> {
+    let parsed: tauri::Url = raw
+        .parse()
+        .map_err(|_| "TicketBunker received an invalid release address.".to_string())?;
+    let path = parsed.path();
+    let official_path = path.starts_with("/TimothyBunker/TicketBunker/releases/tag/")
+        || path.starts_with("/TimothyBunker/TicketBunker/releases/download/");
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("github.com")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some_and(|port| port != 443)
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !official_path
+    {
+        return Err("TicketBunker only opens its official release downloads.".to_string());
+    }
+    Ok(parsed)
+}
+
 fn relay_agent_output(app: AppHandle, output: impl std::io::Read + Send + 'static) {
     thread::spawn(move || {
         for line in BufReader::new(output).lines().map_while(Result::ok) {
@@ -598,6 +619,15 @@ fn open_agent_auth_url(app: AppHandle, window: WebviewWindow, url: String) -> Re
 }
 
 #[tauri::command]
+fn open_release_url(app: AppHandle, window: WebviewWindow, url: String) -> Result<(), String> {
+    require_launcher(&window)?;
+    let parsed = validated_release_url(&url)?;
+    app.opener()
+        .open_url(parsed, None::<&str>)
+        .map_err(|_| "TicketBunker could not open the update in your browser.".to_string())
+}
+
+#[tauri::command]
 fn add_git_project(
     window: WebviewWindow,
     state: tauri::State<ApplicationState>,
@@ -766,6 +796,30 @@ fn create_launcher(app: &AppHandle) -> Result<(), tauri::Error> {
     Ok(())
 }
 
+#[cfg(desktop)]
+fn single_instance_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri_plugin_single_instance::init(|app, args, _cwd| {
+        let options = parse_options(args.into_iter().skip(1).map(OsString::from)).ok();
+        if let Some(window) = app.get_webview_window("launcher") {
+            if let Some(LaunchOptions {
+                repo: Some(repository),
+                route,
+                ..
+            }) = options
+            {
+                let _ = app.emit_to(
+                    "launcher",
+                    "open-project",
+                    json!({ "path": repository, "route": route }),
+                );
+            }
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -783,7 +837,20 @@ pub fn run() {
         initial_route: options.route,
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        builder = builder.plugin(single_instance_plugin());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let address = env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+        if !missing_session_bus(address.as_deref()) {
+            builder = builder.plugin(single_instance_plugin());
+        }
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(state)
@@ -797,6 +864,7 @@ pub fn run() {
             stop_agent_setup_command,
             configure_agent,
             open_agent_auth_url,
+            open_release_url,
             add_git_project,
             create_bunker,
             create_bunker_project,
@@ -889,6 +957,25 @@ mod tests {
         assert!(validated_auth_url("https://auth.openai.com/authorize").is_ok());
         assert!(validated_auth_url("http://auth.openai.com/authorize").is_err());
         assert!(validated_auth_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn release_download_opens_only_ticketbunkers_official_github_path() {
+        assert!(validated_release_url(
+            "https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.5.0"
+        )
+        .is_ok());
+        assert!(validated_release_url(
+            "https://github.com/TimothyBunker/TicketBunker/releases/download/v0.5.0/TicketBunker_0.5.0_x64-setup.exe"
+        )
+        .is_ok());
+        assert!(
+            validated_release_url("https://github.com/other/repo/releases/tag/v0.5.0").is_err()
+        );
+        assert!(validated_release_url(
+            "https://example.test/TimothyBunker/TicketBunker/releases/tag/v0.5.0"
+        )
+        .is_err());
     }
 
     #[test]

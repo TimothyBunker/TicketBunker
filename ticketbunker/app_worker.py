@@ -28,6 +28,7 @@ DESKTOP_ACTIONS = frozenset(
         "application.agent.state",
         "application.agent.prepare",
         "application.agent.configure",
+        "application.release.check",
         "application.project.add",
         "application.project.connect",
         "application.project.remove",

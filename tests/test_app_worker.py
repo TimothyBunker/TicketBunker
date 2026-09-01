@@ -55,6 +55,7 @@ class ApplicationWorkerTests(unittest.TestCase):
     def test_ticket_and_coworker_actions_are_explicit_desktop_capabilities(self) -> None:
         self.assertIn("application.ticket.get", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.configuration.replace", app_worker.DESKTOP_ACTIONS)
+        self.assertIn("application.release.check", app_worker.DESKTOP_ACTIONS)
         self.assertIn("coworker.chat", app_worker.DESKTOP_ACTIONS)
         self.assertIn("editor.save", app_worker.DESKTOP_ACTIONS)
         self.assertNotIn("ticket.create", app_worker.DESKTOP_ACTIONS)

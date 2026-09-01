@@ -50,6 +50,7 @@ class ApplicationStateTests(unittest.TestCase):
             value["diagnostics"]["application"],
             str(self.root / "app-data" / "diagnostics" / "app-worker.jsonl"),
         )
+        self.assertEqual(value["release"]["current"], application.release_updates.__version__)
 
     def test_profile_update_is_machine_local_and_validated(self) -> None:
         result = commands.dispatch(
@@ -61,6 +62,21 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertEqual(result["profile"]["branch_user"], "ada-dev")
         saved = json.loads(self.settings.read_text(encoding="utf-8"))
         self.assertEqual(saved["profile"]["email"], "ada@example.test")
+
+    def test_release_check_uses_the_shared_command_and_returns_typed_state(self) -> None:
+        with mock.patch.object(
+            application.release_updates,
+            "check",
+            return_value={"current": "0.5.0", "latest": "0.5.1", "available": True},
+        ) as checked:
+            result = commands.dispatch(
+                "application.release.check",
+                {},
+                commands.CommandContext(self.root, transport="desktop"),
+            )
+
+        self.assertTrue(result["release"]["available"])
+        checked.assert_called_once_with()
 
     def test_add_project_normalizes_the_git_root_and_deduplicates(self) -> None:
         nested = self.source / "src"

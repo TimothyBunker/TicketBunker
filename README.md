@@ -70,24 +70,31 @@ what TicketBunker owns.
 ## Installing
 
 The normal download is the native TicketBunker app for your platform. It
-contains the app, `tb`, and the pinned standalone Pi runtime, and needs neither
-Python, Node, nor a separate Pi install:
+contains the app, its private core, and the pinned standalone Pi runtime. Users
+need neither Python, Node, a separate Pi install, nor a terminal:
 
 1. Open [TicketBunker Releases](https://github.com/TimothyBunker/TicketBunker/releases).
-2. Download the TicketBunker AppImage or Debian package on Linux, or the setup
-   executable on Windows for your architecture. Its adjacent
-   `.sha256` file lets managed installs verify the download first.
-3. Install or open it, then choose **Create Bunker** or **Join Bunker**.
+2. Download the setup executable on Windows or the Debian package on Linux for
+   your architecture. The AppImage is the portable Linux alternative. Each
+   artifact's adjacent `.sha256` file lets managed installs verify the download.
+3. Double-click the installer. Open **TicketBunker** from the Windows Start menu
+   or Linux application launcher, then choose **Create Bunker** or **Join
+   Bunker**.
+
+The installed app starts without arguments and owns its core process. Projects
+are selected through the operating system folder picker. Settings → System
+checks for new versions and opens the correct official installer in the system
+browser; remote release pages never load inside TicketBunker.
 
 On first run, TicketBunker uses your Git identity when it is complete, then
 offers agent setup. Choose a provider, sign in through a normal app dialog, and
 select a model, or choose **Use without agent** to keep synthesis off on that
 computer. Pi owns provider credentials; TicketBunker saves only the selected
-provider and model. Change the choice later from your identity menu →
-**Configure** beside Agent, or with `tb agent model` in the CLI.
+provider and model. Change the choice later from your identity menu → **Agent**.
 
-The CLI-first portable archive remains beside the app for servers, air-gapped
-transfer, and managed installs. It contains the same frozen core and Pi runtime.
+The optional CLI-first portable archive remains beside the app for automation,
+servers, air-gapped transfer, and managed installs. It contains the same frozen
+core and Pi runtime.
 Download its adjacent `.sha256` file, verify it, then run its installer:
 
 ```sh
@@ -149,7 +156,7 @@ tools/build_release.py`. The native builder flattens each installer and its
 checksum into `dist/releases/`; tag builds produce both formats on all six
 targets.
 
-## Usage
+## Using the app
 
 The desktop launcher is the primary onboarding path:
 
@@ -169,10 +176,13 @@ Import is read-only with respect to both source and companion repositories and
 records its source digest and imported counts. The old store does not remain a
 second live writer.
 
+## Optional CLI automation and migration
+
 The commands below are the compatibility and automation surface for the
 existing ticket/report engine while its storage handlers are moved behind the
 new Bunker database. They remain supported during migration, but `tb init` is
-not how a new Bunker establishes membership:
+not how a new Bunker establishes membership. Ordinary desktop users do not need
+these commands:
 
 ```sh
 # First create an empty Git repository on any host you control. TicketBunker

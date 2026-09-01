@@ -20,6 +20,31 @@ SPEC.loader.exec_module(builder)
 
 
 class DesktopReleaseTests(unittest.TestCase):
+    def test_native_bundle_declares_a_no_terminal_os_launcher(self) -> None:
+        configuration = json.loads(
+            (ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(configuration["productName"], "TicketBunker")
+        self.assertEqual(configuration["bundle"]["category"], "DeveloperTool")
+        self.assertFalse(configuration["bundle"]["windows"]["allowDowngrades"])
+        self.assertEqual(
+            configuration["bundle"]["windows"]["nsis"]["installMode"],
+            "currentUser",
+        )
+
+    def test_tagged_windows_release_requires_and_verifies_authenticode(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Tagged Windows releases require", workflow)
+        self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", workflow)
+        self.assertIn("Get-AuthenticodeSignature", workflow)
+        self.assertIn('signature.Status -ne "Valid"', workflow)
+
     def test_stage_places_the_frozen_core_and_verified_runtime_for_tauri(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:
             root = Path(temporary_name)

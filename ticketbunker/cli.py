@@ -1909,6 +1909,8 @@ def cmd_viewer_worker(args: argparse.Namespace) -> int:
         return 1
     try:
         server.serve_until_closed()
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()
     return 0
@@ -1928,6 +1930,8 @@ def cmd_application_browser_worker(args: argparse.Namespace) -> int:
         return 1
     try:
         server.serve_until_closed()
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()
     return 0

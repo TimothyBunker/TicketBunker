@@ -305,10 +305,17 @@ new Bunkers.
 
 ### Distribution
 
-- Version 0.4.0 packages the shared standalone interface in both the frozen
-  core and native app. The six-platform release matrix remains Linux, macOS,
-  and Windows on x64 and arm64. Linux is locally built and exercised; Windows
-  is a first-class CI/build target using the same UI, core, and platform boundary.
+- Version 0.5.0 makes the installed native app the ordinary product boundary.
+  Debian installation registers a `TicketBunker` application-menu entry with
+  `Terminal=false`; NSIS installs per user and registers the Windows launcher.
+  Users open the app, select repositories with the native picker, complete
+  profile/model setup, and do ordinary ticket work without opening a shell.
+  A native single-instance gate focuses the existing window and forwards a
+  second repository launch when the host session supports it. The CLI remains
+  an optional automation and migration surface over the same typed handlers.
+- The six-platform release matrix remains Linux, macOS, and Windows on x64 and
+  arm64. Linux is locally built and exercised; Windows is a first-class
+  CI/build target using the same UI, core, and platform boundary.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
   emits Debian/AppImage, app/DMG, or NSIS outputs. The app supplies its private
@@ -316,10 +323,24 @@ new Bunkers.
   Pi before use. Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with
-  adjacent SHA-256 files. The final Linux Debian (88 MB) and AppImage (157 MB)
-  were built from the 0.4.0 frozen core; both checksums pass, the Debian payload
+  adjacent SHA-256 files. The final Linux Debian (89 MB) and AppImage (158 MB)
+  were built from the 0.5.0 frozen core; both checksums pass, the Debian payload
   contains the core and complete Pi distribution, and the frozen core passed
   the real browser interaction flow.
+- `application.release.check` performs a bounded GitHub release API read,
+  accepts only stable semantic versions and exact official TicketBunker GitHub
+  release/download paths, selects the current host's installer, and returns the
+  URL for the operating system browser. Cached URLs are revalidated on every
+  read. The privileged app never renders remote release HTML and never executes
+  a downloaded installer. Failed automatic checks are timestamped so they do
+  not repeat on every launch; manual **Check now** remains available in Settings
+  → System.
+- Tagged Windows releases now require the repository's Authenticode certificate
+  and password secrets. The workflow signs the frozen core before bundling,
+  supplies the certificate thumbprint to NSIS, and refuses to publish unless
+  every Windows executable verifies as valid. Manual workflow runs may still
+  produce explicitly unsigned test artifacts. Exact maintainer setup is in
+  `docs/release-signing.md`; no signing secret enters the repository or bundle.
 - The CLI-first portable archives remain release assets with the same frozen
   core, Pi distribution, adapter, licenses, manifest, and install scripts.
 - The wheel/pipx package and stdlib zipapp remain small core-only options. They
@@ -360,7 +381,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 244 Python tests, 8 Rust host tests, 2
+references. The current full suite is 254 Python tests, 9 Rust host tests, 2
 React component tests, and the real-browser standalone interaction flow.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
@@ -472,6 +493,7 @@ exercise intentionally does not run an agent report.
 | Report gates | `ticketbunker/processors/reportlint.py`, `anchorcheck.py` |
 | Harnesses | `ticketbunker/adapters/harness.py`, `ticketbunker/harness/pi/tb.ts` |
 | Host platform boundary | `ticketbunker/platform_services.py` |
+| Safe update discovery | `ticketbunker/release_updates.py`, `docs/release-signing.md` |
 | Pi runtime/readiness | `ticketbunker/agent_runtime.py`, `ticketbunker/runtime/pi-runtime.json` |
 | Releases | `tools/build_release.py`, `tools/ticketbunker.spec`, `.github/workflows/release.yml` |
 | Product exercise | `tools/mock_product_loop.py` |

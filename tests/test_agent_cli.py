@@ -247,6 +247,17 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         opened.assert_not_called()
 
+    def test_private_browser_worker_stops_cleanly_on_interrupt(self) -> None:
+        server = mock.Mock()
+        server.serve_until_closed.side_effect = KeyboardInterrupt
+        args = argparse.Namespace(repo=str(self.root), port=18499, launch="test")
+
+        with mock.patch("ticketbunker.app_server.serve", return_value=server):
+            result = cli.cmd_application_browser_worker(args)
+
+        self.assertEqual(result, 0)
+        server.server_close.assert_called_once_with()
+
     def test_background_viewer_passes_dash_prefixed_launch_id_as_one_argument(self) -> None:
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(

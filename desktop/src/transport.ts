@@ -100,6 +100,15 @@ export async function nativeInvoke<T>(
   return window.__TAURI__.core.invoke<T>(name, payload);
 }
 
+export async function openExternal(url: string): Promise<void> {
+  if (isNative()) {
+    await nativeInvoke("open_release_url", { url });
+    return;
+  }
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) throw new Error("Allow TicketBunker to open the download page, then retry.");
+}
+
 export async function listenNative<T>(
   name: string,
   callback: (payload: T) => void,

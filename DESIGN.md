@@ -1176,6 +1176,20 @@ private resource directory to the core as
 `TB_BUNDLE_ROOT`, so GUI launch never depends on a shell's PATH and runtime
 verification uses the same manifest as the CLI.
 
+Installation is an operating-system workflow, not a command-line workflow.
+Windows installs a current-user NSIS package with a Start-menu launcher; Linux
+installs a desktop entry whose `Terminal` value is false. Opening that launcher
+without arguments lands on Bunkers and selects repositories through the native
+folder picker. The AppImage is a portable Linux alternative, while CLI archives
+remain automation and server artifacts rather than onboarding.
+
+Tagged Windows releases are an Authenticode boundary. The release workflow
+must refuse to publish when its certificate secrets are absent, sign and
+timestamp both the frozen core and installer, then verify every emitted
+signature before upload. Manual workflow builds may remain unsigned for test
+purposes but cannot become a tagged product release. Certificate material
+exists only in the ephemeral release runner and the repository's secret store.
+
 TicketBunker pins one reviewed pi version. Release construction downloads the
 corresponding official platform archive and refuses to extract it unless its
 recorded SHA-256 digest matches; runtime discovery verifies every extracted Pi
@@ -1342,6 +1356,17 @@ reads a machine-local profile, registry, and Bunker summaries through typed
 profile may default from Git's global name and email for convenience, but that
 identity grants no Bunker capability and editing it never changes global Git
 configuration.
+
+Settings → System exposes the installed version and update state. The native
+app checks at most once per day after its local content is visible; an explicit
+Check action is always available. The core accepts only GitHub's bounded typed
+release response, validates the exact official TicketBunker release and
+download URL prefixes, and chooses an installer matching the platform boundary.
+The privileged webview never loads remote release HTML and TicketBunker never
+executes a downloaded file. **Download update** opens the validated installer
+URL in the operating system browser, leaving installation and signature checks
+to the OS. Browser fallback checks only on request and uses the same typed core
+action.
 
 **Create Bunker** asks only for a Bunker name and first Project key/name. It
 creates one local SQLite database without touching a repository. **Join
