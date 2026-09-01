@@ -56,6 +56,9 @@ and report provenance easier to reach. It should disappear into the task.
 13. Make it feel like one application. The desktop opens to Bunkers, then Projects, then attached repositories and tickets. Keep the Python API/action registry as the behavior boundary; CLI automation and browser fallback remain optional clients.
 14. Treat Project as a recursive work scope, not a repository synonym. A Project may contain subprojects and attach zero or more repositories.
 15. Keep discovery separate from authority. Cloning code never joins a Bunker; authenticated invitation or explicit local creation does.
+16. Keep operating systems outside the domain. Linux and Windows select thin
+    machine-service implementations for paths, processes, credentials, dialogs,
+    and packaging; WSL is a Linux runtime location, never a Bunker type.
 
 ## Accessibility & Inclusion
 

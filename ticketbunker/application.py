@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import agent_runtime, bunkerdb, commands, config, project, remote
+from . import agent_runtime, bunkerdb, commands, config, platform_services, project, remote
 
 
 _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -213,6 +213,7 @@ def state() -> dict[str, Any]:
     ]
     agent = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
     return {
+        "platform": platform_services.current().as_dict(),
         "profile": _profile(settings),
         "bunkers": bunkerdb.list_bunkers(),
         # Companion-Git registrations remain visible only as migration input.

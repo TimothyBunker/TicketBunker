@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
 import shutil
 import stat
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from . import commands, config
+from . import commands, config, platform_services
 
 
 _TERMINAL_EDITORS = {"vi", "vim", "nvim", "nano", "micro"}
@@ -37,30 +35,8 @@ def _windows_git_editor_paths(command: str, git_executable: str | None = None) -
     launched from the browser commonly sees only ``Git/cmd``. Keep this
     lookup explicit so terminal availability and viewer availability agree.
     """
-    name = Path(command).name.casefold().removesuffix(".exe")
-    if name != "vim":
-        return []
-    roots: list[Path] = []
-    git = git_executable or shutil.which("git")
-    if git:
-        git_path = Path(git).expanduser()
-        if git_path.parent.name.casefold() in {"cmd", "bin"}:
-            roots.append(git_path.parent.parent)
-    for variable, suffix in (
-        ("ProgramFiles", "Git"),
-        ("ProgramFiles(x86)", "Git"),
-        ("LOCALAPPDATA", "Programs/Git"),
-    ):
-        base = os.environ.get(variable)
-        if base:
-            roots.append(Path(base) / suffix)
-    paths: list[Path] = []
-    for root in roots:
-        for relative in ("usr/bin/vim.exe", "mingw64/bin/vim.exe"):
-            candidate = root / relative
-            if candidate not in paths:
-                paths.append(candidate)
-    return paths
+    windows = platform_services.PlatformServices.detect(system="win32")
+    return windows.editor_candidates(command, git_executable=git_executable)
 
 
 def _find_editor_executable(command: str) -> str | None:
@@ -70,7 +46,7 @@ def _find_editor_executable(command: str) -> str | None:
     found = shutil.which(command)
     if found:
         return found
-    if os.name == "nt":
+    if platform_services.current().is_windows:
         for candidate in _windows_git_editor_paths(command):
             if candidate.is_file():
                 return str(candidate)
@@ -148,7 +124,7 @@ def local_state(root: Path) -> dict[str, Any]:
 
 def _validate_editor(command: str) -> None:
     try:
-        argv = shlex.split(command, posix=os.name != "nt")
+        argv = platform_services.current().split_command(command)
     except ValueError as exc:
         raise commands.CommandRejected(
             "local_editor_invalid",
@@ -358,7 +334,7 @@ def _valid_digest(value: str) -> bool:
 
 def _editor_argv(editor: str, source: Path, line: int) -> tuple[list[str], bool]:
     try:
-        argv = shlex.split(editor, posix=os.name != "nt")
+        argv = platform_services.current().split_command(editor)
     except ValueError as exc:
         raise commands.CommandRejected(
             "source_editor_invalid",
@@ -404,23 +380,9 @@ def _editor_argv(editor: str, source: Path, line: int) -> tuple[list[str], bool]
 
 
 def _terminal_argv(argv: list[str]) -> list[str]:
-    if os.name == "nt":
-        return argv
-    if sys.platform == "darwin":
-        raise commands.CommandRejected(
-            "source_editor_terminal_required",
-            "The configured editor needs a terminal. Open 'tb config' and choose Local settings, then "
-            "select a graphical editor command such as "
-            "'code --goto {file}:{line}'.",
-        )
-    for terminal, separator in (
-        ("x-terminal-emulator", "-e"),
-        ("gnome-terminal", "--"),
-        ("konsole", "-e"),
-    ):
-        resolved = shutil.which(terminal)
-        if resolved:
-            return [resolved, separator, *argv]
+    resolved = platform_services.current().terminal_argv(argv, which=shutil.which)
+    if resolved is not None:
+        return resolved
     raise commands.CommandRejected(
         "source_editor_terminal_required",
         "The configured editor needs a terminal, but no supported terminal launcher was found. "
@@ -468,15 +430,14 @@ def open_source(root: Path, path: str, line: int) -> dict[str, Any]:
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        if terminal:
-            kwargs["creationflags"] |= subprocess.CREATE_NEW_CONSOLE
-            kwargs.pop("stdin", None)
-            kwargs.pop("stdout", None)
-            kwargs.pop("stderr", None)
-    else:
-        kwargs["start_new_session"] = True
+    host = platform_services.current()
+    kwargs.update(
+        host.background_process_options(detached=False, new_console=terminal)
+    )
+    if host.is_windows and terminal:
+        kwargs.pop("stdin", None)
+        kwargs.pop("stdout", None)
+        kwargs.pop("stderr", None)
     try:
         subprocess.Popen(argv, **kwargs)
     except OSError:

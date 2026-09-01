@@ -5,6 +5,13 @@ window. It starts the frozen `tb` core as a child, waits for the loopback viewer
 loads only that exact origin, and stops the child when the window is destroyed.
 The webview receives no Tauri operating-system capabilities.
 
+Linux and Windows are the first tested desktop targets. They share the same
+frontend bundle and Python action registry; the core selects a narrow
+machine-local platform service for paths, executable names, command parsing,
+editor discovery, and process flags. WSL uses the Linux service and is not a
+separate application backend. macOS packaging remains experimental until it is
+verified on real hardware.
+
 Launching the executable without `--repo` opens the bundled Bunkers window.
 Create Bunker makes one local SQLite database and a first Project without
 touching Git. Join Bunker inspects a bounded invitation, then requires remote

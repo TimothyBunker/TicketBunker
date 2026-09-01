@@ -152,7 +152,8 @@ class CompanionProjectTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "remote_dns_failed")
         self.assertIn("3 automatic attempts", str(caught.exception))
-        self.assertIn("wsl --shutdown", str(caught.exception))
+        self.assertIn("Restore this machine's DNS or network connection", str(caught.exception))
+        self.assertNotIn("WSL", str(caught.exception))
         self.assertIn("tb init", str(caught.exception))
         self.assertEqual(attempted.call_count, 3)
         self.assertFalse((self.source / project.LOCATOR_FILE).exists())

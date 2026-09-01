@@ -902,6 +902,15 @@ The repo separates cleanly by role, **per information type**:
   and the backend API next. Nothing outside adapters/ touches an external
   system.
 
+Machine-local operating-system behavior crosses one additional narrow boundary:
+`platform_services.py`. It detects the host per operation and supplies
+application-data locations, release/runtime keys, executable suffixes, command
+parsing, editor candidates, terminal launchers, and background-process flags.
+Domain services never branch on Linux, Windows, macOS, WSL, drive letters, or
+desktop-session details. WSL runs the ordinary Linux implementation; if a
+native shell communicates with a core in another environment, that connection
+is a launcher/transport concern rather than a new Bunker or repository type.
+
 **The Bunker is the instance boundary.** Its durable data is addressed through
 domain identifiers and typed services, not through client-visible filesystem
 paths. `bunkerdb.py` owns the SQLite schema and transactions; `application.py`
@@ -1158,9 +1167,11 @@ everything a person or agent reads whole — `tb.md`, `reports/`,
 The ordinary end-user artifact is a self-contained native desktop bundle: the
 Tauri app, a frozen `tb` sidecar, the official standalone pi executable,
 TicketBunker's thin pi adapter, the upstream license, and a per-file checksum
-manifest. Linux produces Debian and AppImage packages, macOS an app bundle and
-DMG, and Windows an NSIS installer; x64 and arm64 remain first-class release
-targets. The app passes its private resource directory to the core as
+manifest. Linux produces Debian and AppImage packages and Windows an NSIS
+installer as the first tested desktop targets. The macOS app/DMG build remains
+compile- and CI-covered but experimental until it is exercised on real
+hardware. x64 and arm64 remain release architectures. The app passes its
+private resource directory to the core as
 `TB_BUNDLE_ROOT`, so GUI launch never depends on a shell's PATH and runtime
 verification uses the same manifest as the CLI.
 
@@ -1227,6 +1238,17 @@ application. It preserves the ticket viewer's restrained browser-quality UI;
 the app shell is a distribution and lifecycle boundary, not a competing UI or
 a second backend. The CLI remains fully supported for scripts, hooks, remote
 terminals, and direct commands.
+
+The shared interface may render in the bundled system webview or, through the
+explicit browser fallback, in the system-selected standards-compliant browser.
+Rendering technology does not decide execution authority. Native app actions
+cross typed process envelopes into the same Python command registry; browser
+fallback actions cross the bounded localhost transport. Git, file, database,
+and agent work always runs in the selected local core environment. The Python
+backend changes hosts by selecting `platform_services.py`, not by changing
+domain handlers. Linux and Windows are the initial supported desktop
+environments; WSL is simply one Linux execution location and is never inferred
+from a repository path.
 
 The application has three layers:
 
@@ -1327,7 +1349,7 @@ both source and companion repositories and records its import digest.
 
 On Linux, the shell respects an explicitly selected GSettings backend. When no
 backend was selected and the advertised session D-Bus socket is absent, as in
-some WSL sessions, it uses GTK's in-memory settings backend before creating any
+some minimal desktop sessions, it uses GTK's in-memory settings backend before creating any
 window. The native folder picker therefore remains responsive and does not
 flood a launching terminal with unrelated `dconf` warnings.
 

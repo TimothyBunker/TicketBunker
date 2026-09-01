@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from . import agent_runtime, project as companion, remote
+from . import platform_services, project as companion, remote
 
 
 SCHEMA_VERSION = 1
@@ -36,7 +36,7 @@ def _now() -> str:
 
 
 def data_root() -> Path:
-    return agent_runtime.data_root() / "bunkers"
+    return platform_services.current().data_home() / "bunkers"
 
 
 def registry_path() -> Path:

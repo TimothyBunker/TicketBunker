@@ -193,7 +193,7 @@ def classify_remote_failure(remote: str, detail: str, *, retry: str = "tb init")
             "remote_dns_failed",
             f"TicketBunker could not resolve {host} after {REMOTE_ATTEMPTS} automatic attempts.",
             "Restore this machine's DNS or network connection, then run "
-            f"'{retry}' again. On WSL, run 'wsl --shutdown' in Windows PowerShell first.",
+            f"'{retry}' again.",
         )
     if "timed out" in lowered or "operation timed out" in lowered:
         return (

@@ -42,6 +42,10 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertEqual(value["profile"]["name"], "Ada Lovelace")
         self.assertEqual(value["profile"]["branch_user"], "Ada-Lovelace")
         self.assertTrue(value["profile"]["complete"])
+        self.assertIn(value["platform"]["family"], {"linux", "windows", "macos"})
+        self.assertEqual(
+            value["platform"]["data_home"], str(self.root / "app-data")
+        )
 
     def test_profile_update_is_machine_local_and_validated(self) -> None:
         result = commands.dispatch(

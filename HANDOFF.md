@@ -35,6 +35,22 @@ optional automation call the same stdlib-only Python action registry.
 Everything below is covered by the test suite and deterministic product
 exercise unless a live boundary is explicitly called out.
 
+### Host portability boundary
+
+- `ticketbunker/platform_services.py` is the only Python boundary that detects
+  the operating system and architecture. It supplies application-data paths,
+  Pi/release keys, executable suffixes, Windows-safe command parsing, editor
+  candidates, terminal launchers, and detached-process flags.
+- Bunker storage, runtime discovery, the desktop launcher, browser worker,
+  synthesis worker, and external editor consume that boundary. The domain has
+  no WSL branch; WSL runs the ordinary Linux implementation. DNS failures give
+  a host-neutral recovery action instead of prescribing `wsl --shutdown`.
+- `application.state` exposes the selected local platform shape so future
+  standalone transports can choose environment capabilities without deriving
+  them from repository paths. Linux and Windows are the initial tested desktop
+  targets. macOS remains build-compatible but experimental pending real-device
+  verification.
+
 ### Bunker database and application onboarding
 
 - `ticketbunker/bunkerdb.py` owns the new storage boundary: one SQLite database
@@ -258,7 +274,7 @@ new Bunkers.
   service actions. Repository inspection and attachment happen only after a
   native picker selection and never mutate the checkout. Linux sessions with a
   stale advertised D-Bus socket use GTK's in-memory settings backend,
-  preventing WSL picker warning floods. The privileged local window and
+  preventing picker warning floods. The privileged local window and
   unprivileged loopback ticket window are separate labels; only Bunkers receives
   the directory-dialog capability.
 - First-run and Local settings now provide the complete agent path without
@@ -277,7 +293,7 @@ new Bunkers.
 
 ### Distribution
 
-- Version 0.3.0 keeps the six-platform core release pipeline while the new
+- Version 0.3.1 keeps the six-platform core release pipeline while the new
   native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
@@ -439,6 +455,7 @@ exercise intentionally does not run an agent report.
 | Typed intake | `ticketbunker/handlers/` |
 | Report gates | `ticketbunker/processors/reportlint.py`, `anchorcheck.py` |
 | Harnesses | `ticketbunker/adapters/harness.py`, `ticketbunker/harness/pi/tb.ts` |
+| Host platform boundary | `ticketbunker/platform_services.py` |
 | Pi runtime/readiness | `ticketbunker/agent_runtime.py`, `ticketbunker/runtime/pi-runtime.json` |
 | Releases | `tools/build_release.py`, `tools/ticketbunker.spec`, `.github/workflows/release.yml` |
 | Product exercise | `tools/mock_product_loop.py` |

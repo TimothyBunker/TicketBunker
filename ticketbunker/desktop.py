@@ -13,13 +13,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import platform_services
+
 
 class DesktopLaunchError(RuntimeError):
     """The user explicitly configured a desktop app that cannot be started."""
 
 
 def _executable_name() -> str:
-    return "ticketbunker-desktop.exe" if os.name == "nt" else "ticketbunker-desktop"
+    return platform_services.current().executable_name("ticketbunker-desktop")
 
 
 def launcher() -> Path | None:
@@ -70,12 +72,9 @@ def open_project(root: Path, *, port: int = 8377, route: str = "/") -> bool:
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        )
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(
+        platform_services.current().background_process_options(detached=True)
+    )
     try:
         subprocess.Popen(argv, **kwargs)
     except OSError as exc:

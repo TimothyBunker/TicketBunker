@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, agent_runtime, autoagent, commands, config, desktop, doctor as doctor_mod, editor as editor_mod, handlers, layout, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
+from . import __version__, agent_runtime, autoagent, commands, config, desktop, doctor as doctor_mod, editor as editor_mod, handlers, layout, platform_services, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -1858,10 +1858,9 @@ def cmd_view(args: argparse.Namespace) -> int:
         "stdin": subprocess.DEVNULL,
         "close_fds": True,
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(
+        platform_services.current().background_process_options(detached=True)
+    )
     with log_path.open("ab") as log:
         kwargs["stdout"] = log
         kwargs["stderr"] = subprocess.STDOUT

@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
 import shutil
 import stat
 import subprocess
@@ -26,7 +25,7 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
-from . import config
+from . import config, platform_services
 
 
 MANIFEST_RESOURCE = ("runtime", "pi-runtime.json")
@@ -69,27 +68,11 @@ def pinned_pi_version() -> str:
 
 
 def platform_key() -> str | None:
-    systems = {"linux": "linux", "darwin": "darwin", "win32": "windows"}
-    machines = {
-        "x86_64": "x64",
-        "amd64": "x64",
-        "aarch64": "arm64",
-        "arm64": "arm64",
-    }
-    system = systems.get(sys.platform)
-    machine = machines.get(platform.machine().lower())
-    return f"{system}-{machine}" if system and machine else None
+    return platform_services.current().runtime_key
 
 
 def data_root() -> Path:
-    override = os.environ.get("TB_DATA_HOME")
-    if override:
-        return Path(override).expanduser().resolve()
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-        return base / "TicketBunker"
-    base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-    return base / "ticketbunker"
+    return platform_services.current().data_home()
 
 
 def cli_argv() -> list[str]:
@@ -127,7 +110,7 @@ def _bundle_roots() -> list[Path]:
 
 
 def _bundle_candidates() -> list[tuple[Path, str]]:
-    executable = "pi.exe" if sys.platform == "win32" else "pi"
+    executable = platform_services.current().executable_name("pi")
     candidates: list[tuple[Path, str]] = []
     for root in _bundle_roots():
         candidates.extend(
@@ -376,8 +359,10 @@ def ensure_runtime(reporter: Callable[[str], None] | None = None) -> Runtime:
     executable = destination / Path(str(entry["executable"])) if isinstance(entry, dict) else destination / "pi"
     if not platform_name or not isinstance(entry, dict):
         supported = ", ".join(sorted((runtime_manifest.get("platforms") or {}).keys()))
+        host = platform_services.current()
         raise RuntimeInstallError(
-            f"No automatic Pi runtime is published for {sys.platform}/{platform.machine()}.",
+            "No automatic Pi runtime is published for "
+            f"{host.artifact_system}/{host.architecture or 'unknown'}.",
             f"supported platforms: {supported}; provide TB_AGENT_PI_BIN or run tb init --core-only",
         )
     if reporter:

@@ -34,8 +34,8 @@ fn configure_settings_backend() {
     }
     let address = env::var("DBUS_SESSION_BUS_ADDRESS").ok();
     if missing_session_bus(address.as_deref()) {
-        // WSL and other minimal Linux desktops can advertise a stale D-Bus
-        // socket. GTK's in-memory backend keeps the native picker responsive
+        // Minimal Linux desktops can advertise a stale D-Bus socket. GTK's
+        // in-memory backend keeps the native picker responsive
         // without asking the user to repair an unrelated desktop service.
         env::set_var("GSETTINGS_BACKEND", "memory");
     }

@@ -74,8 +74,8 @@ contains the app, `tb`, and the pinned standalone Pi runtime, and needs neither
 Python, Node, nor a separate Pi install:
 
 1. Open [TicketBunker Releases](https://github.com/TimothyBunker/TicketBunker/releases).
-2. Download the TicketBunker AppImage or Debian package on Linux, DMG on macOS,
-   or setup executable on Windows for your architecture. Its adjacent
+2. Download the TicketBunker AppImage or Debian package on Linux, or the setup
+   executable on Windows for your architecture. Its adjacent
    `.sha256` file lets managed installs verify the download first.
 3. Install or open it, then choose **Create Bunker** or **Join Bunker**.
 
@@ -104,10 +104,25 @@ compare `Get-FileHash .\ticketbunker-<version>-windows-x64.zip -Algorithm SHA256
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
-Native and portable bundles cover Linux, macOS, and Windows on x64 and arm64.
+Linux and Windows are the first tested desktop targets on x64 and arm64. The
+macOS build remains experimental until it has been verified on real hardware;
+the portable core keeps the same platform-neutral command and data contracts.
 The build verifies the official Pi archive checksum before extraction; the
 installed `tb` verifies the bundled Pi distribution against its own release manifest.
 Provider logins, API keys, OAuth tokens, and model weights are never bundled.
+
+## Platform boundary
+
+TicketBunker's Bunker, Project, ticket, report, Git, integration, and remote
+service behavior is operating-system neutral. One machine-local platform
+service selects the application-data directory, executable names, command
+parsing, editor/terminal discovery, and detached-process flags. Linux and
+Windows therefore run the same Python domain handlers and SQLite schema.
+
+WSL is not a TicketBunker backend or repository type. When the core runs in
+WSL, it uses the normal Linux platform service. A native shell talking to a
+core in another local environment is a launcher/transport concern; WSL-specific
+paths and repair instructions do not enter shared Bunker state or domain errors.
 
 The stdlib-only core remains available for constrained or air-gapped setups.
 These forms initially install TicketBunker without the large pi runtime:

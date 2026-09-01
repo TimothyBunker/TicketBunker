@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import agent_runtime, config, layout
+from . import agent_runtime, config, layout, platform_services
 from .ledger import Ledger
 from .processors import anchorcheck
 
@@ -109,11 +109,12 @@ def _launcher() -> list[str]:
 
 def _hook_body(event: str, original: Path) -> str:
     # Hooks are shared by linked worktrees; resolve the active one at runtime.
-    shell_values = [value.replace("\\", "/") if os.name == "nt" else value for value in _launcher()]
+    windows = platform_services.current().is_windows
+    shell_values = [value.replace("\\", "/") if windows else value for value in _launcher()]
     launch = " ".join(shlex.quote(value) for value in shell_values)
     original_call = ""
     if original.exists():
-        original_value = str(original).replace("\\", "/") if os.name == "nt" else str(original)
+        original_value = str(original).replace("\\", "/") if windows else str(original)
         quoted = shlex.quote(original_value)
         original_call = (
             f"if [ -x {quoted} ]; then\n"
@@ -411,15 +412,20 @@ def _spawn_worker(repo: Path) -> None:
         value for value in (package_parent, env.get("PYTHONPATH", "")) if value
     )
     try:
+        kwargs: dict[str, Any] = {
+            "cwd": str(repo),
+            "stdin": subprocess.DEVNULL,
+            "stdout": log,
+            "stderr": subprocess.STDOUT,
+            "env": env,
+            "close_fds": True,
+        }
+        kwargs.update(
+            platform_services.current().background_process_options(detached=True)
+        )
         subprocess.Popen(
             [*_launcher(), "_agent-worker", "--repo", str(repo)],
-            cwd=str(repo),
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=env,
-            start_new_session=True,
-            close_fds=True,
+            **kwargs,
         )
     finally:
         log.close()
