@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, agent_runtime, autoagent, commands, config, desktop, doctor as doctor_mod, editor as editor_mod, handlers, layout, platform_services, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
+from . import __version__, agent_runtime, app_worker, autoagent, commands, config, desktop, doctor as doctor_mod, editor as editor_mod, handlers, layout, platform_services, project as project_mod, projectconfig as projectconfig_mod, ticketcommands, truth, types
 from .builders import compose as compose_mod
 from .builders import fragments, master, scaffold, ticketform
 from .handlers import IntakeRejected
@@ -1912,25 +1912,7 @@ def cmd_viewer_worker(args: argparse.Namespace) -> int:
 
 
 def cmd_application_command(args: argparse.Namespace) -> int:
-    allowed = {
-        "application.state",
-        "application.profile.update",
-        "application.agent.state",
-        "application.agent.prepare",
-        "application.agent.configure",
-        "application.project.add",
-        "application.project.connect",
-        "application.project.remove",
-        "application.bunker.create",
-        "application.bunker.project.create",
-        "application.repository.inspect",
-        "application.bunker.repository.attach",
-        "application.bunker.remote.configure",
-        "application.invitation.inspect",
-        "application.bunker.join",
-        "application.bunker.import.companion",
-    }
-    if args.application_command not in allowed:
+    if args.application_command not in app_worker.DESKTOP_ACTIONS:
         print("error: command is not available to the desktop shell", file=sys.stderr)
         return 1
     try:
@@ -1954,6 +1936,10 @@ def cmd_application_command(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps(result, ensure_ascii=False))
     return 0
+
+
+def cmd_application_worker(args: argparse.Namespace) -> int:
+    return app_worker.serve(default_root=Path.cwd())
 
 
 def cmd_checkout(args: argparse.Namespace) -> int:
@@ -2318,6 +2304,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("application_command")
     s.add_argument("--payload", default="{}")
     s.set_defaults(fn=cmd_application_command)
+
+    s = sub.add_parser("_app-worker", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_application_worker)
 
     s = sub.add_parser("checkout", help="refresh the ticket's canonical report components and compile the master")
     s.add_argument("bunker", help="bunker path or ticket ID (resolved via the project .tb/)")

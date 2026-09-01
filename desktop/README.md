@@ -29,6 +29,12 @@ as native forms, and sends secret responses straight from Rust to Pi. The
 Python core never receives provider secrets. Closing the dialog kills that Pi
 child; choosing no model records an explicit machine-local opt-out.
 
+The Bunkers window talks to one app-owned `tb _app-worker` over private pipes.
+The JSONL protocol is bounded, request-ID correlated, and restricted to the
+desktop action allowlist; handlers remain in the shared Python registry. A
+broken response is not replayed automatically because the original mutation
+may already have completed. Closing the launcher stops the worker.
+
 `tb view` prefers an installed `ticketbunker-desktop` executable and falls back
 to the browser when it is absent. `tb view --browser` always uses the fallback.
 `tb open` passes a guarded same-origin `/source` route so the included editor

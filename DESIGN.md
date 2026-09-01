@@ -1242,7 +1242,8 @@ terminals, and direct commands.
 The shared interface may render in the bundled system webview or, through the
 explicit browser fallback, in the system-selected standards-compliant browser.
 Rendering technology does not decide execution authority. Native app actions
-cross typed process envelopes into the same Python command registry; browser
+cross bounded, request-ID-correlated JSONL envelopes into one app-owned Python
+worker and the same command registry; browser
 fallback actions cross the bounded localhost transport. Git, file, database,
 and agent work always runs in the selected local core environment. The Python
 backend changes hosts by selecting `platform_services.py`, not by changing
@@ -1262,6 +1263,16 @@ The application has three layers:
    Python command handlers and cannot drift into separate behavior.
 
 The packaged desktop executable and `tb` core are siblings. The shell starts
+one `tb _app-worker` when the first native action is requested, retains its
+private stdin/stdout pipes for the application lifetime, and stops it with the
+launcher. The worker accepts only an explicit desktop action allowlist, bounds
+every JSON request, redirects accidental handler output away from the protocol,
+and returns stable command codes without exposing tracebacks or payloads.
+Unexpected failures receive an opaque ID and a credential-safe diagnostic in
+the native application data directory. Broken transport is never automatically
+replayed because a mutation may already have completed.
+
+For the compatibility ticket surface, the shell currently starts
 `tb _viewer-worker` with an explicit canonical project, port, and unguessable
 launch ID, waits for readiness, and kills that exact child when its project
 window is destroyed. `tb view` discovers the sibling or PATH desktop binary

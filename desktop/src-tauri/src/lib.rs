@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -53,8 +53,22 @@ struct ApplicationState {
     core: PathBuf,
     preferred_port: u16,
     bundle_root: Mutex<Option<PathBuf>>,
+    command_worker: Mutex<Option<CoreWorker>>,
     process: Mutex<Option<Child>>,
     agent_setup: Mutex<Option<AgentSetupProcess>>,
+}
+
+struct CoreWorker {
+    child: Child,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
+    next_id: u64,
+}
+
+#[derive(Debug)]
+enum WorkerError {
+    Rejected(String),
+    Transport(String),
 }
 
 struct AgentSetupProcess {
@@ -231,6 +245,45 @@ fn stop_agent_setup(state: &ApplicationState) {
     }
 }
 
+fn start_command_worker(state: &ApplicationState) -> Result<CoreWorker, String> {
+    let mut command = Command::new(&state.core);
+    command
+        .arg("_app-worker")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Some(root) = bundle_root(state) {
+        command.env("TB_BUNDLE_ROOT", root);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
+    let input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "TicketBunker could not connect to its local core input.".to_string())?;
+    let output = child
+        .stdout
+        .take()
+        .ok_or_else(|| "TicketBunker could not connect to its local core output.".to_string())?;
+    Ok(CoreWorker {
+        child,
+        input,
+        output: BufReader::new(output),
+        next_id: 1,
+    })
+}
+
+fn stop_command_worker(state: &ApplicationState) {
+    let Ok(mut guarded) = state.command_worker.lock() else {
+        return;
+    };
+    if let Some(mut worker) = guarded.take() {
+        let _ = worker.child.kill();
+        let _ = worker.child.wait();
+    }
+}
+
 fn send_agent_setup(process: &mut AgentSetupProcess, value: Value) -> Result<(), String> {
     serde_json::to_writer(&mut process.input, &value)
         .map_err(|_| "TicketBunker could not encode the agent setup response.".to_string())?;
@@ -269,48 +322,92 @@ fn relay_agent_output(app: AppHandle, output: impl std::io::Read + Send + 'stati
     });
 }
 
+fn worker_exchange(
+    worker: &mut CoreWorker,
+    name: &str,
+    payload: &Value,
+) -> Result<Value, WorkerError> {
+    let request_id = worker.next_id;
+    worker.next_id = worker.next_id.saturating_add(1);
+    serde_json::to_writer(
+        &mut worker.input,
+        &json!({ "id": request_id, "action": name, "payload": payload }),
+    )
+    .map_err(|_| {
+        WorkerError::Transport("TicketBunker could not encode that local action.".to_string())
+    })?;
+    worker
+        .input
+        .write_all(b"\n")
+        .and_then(|_| worker.input.flush())
+        .map_err(|_| {
+            WorkerError::Transport(
+                "TicketBunker's local core stopped before receiving that action.".to_string(),
+            )
+        })?;
+
+    let mut line = String::new();
+    worker.output.read_line(&mut line).map_err(|_| {
+        WorkerError::Transport("TicketBunker could not read its local core response.".to_string())
+    })?;
+    if line.is_empty() {
+        return Err(WorkerError::Transport(
+            "TicketBunker's local core stopped before responding.".to_string(),
+        ));
+    }
+    parse_worker_response(request_id, &line)
+}
+
+fn parse_worker_response(request_id: u64, line: &str) -> Result<Value, WorkerError> {
+    let response: Value = serde_json::from_str(line).map_err(|_| {
+        WorkerError::Transport(
+            "TicketBunker received an invalid response from its local core.".to_string(),
+        )
+    })?;
+    if response.get("id").and_then(Value::as_u64) != Some(request_id) {
+        return Err(WorkerError::Transport(
+            "TicketBunker received an out-of-order local core response.".to_string(),
+        ));
+    }
+    if response.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(WorkerError::Rejected(
+            response
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("TicketBunker could not complete that action.")
+                .to_string(),
+        ));
+    }
+    Ok(response)
+}
+
 fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
-    let encoded = payload.to_string();
-    let mut command = Command::new(&state.core);
-    command
-        .arg("_app-command")
-        .arg(name)
-        .arg("--payload")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(root) = bundle_root(state) {
-        command.env("TB_BUNDLE_ROOT", root);
+    let mut guarded = state
+        .command_worker
+        .lock()
+        .map_err(|_| "TicketBunker could not access its local core.".to_string())?;
+    if guarded.is_none() {
+        *guarded = Some(start_command_worker(state)?);
     }
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
-    let mut input = child
-        .stdin
-        .take()
-        .ok_or_else(|| "TicketBunker could not send that action to its core.".to_string())?;
-    input
-        .write_all(encoded.as_bytes())
-        .map_err(|_| "TicketBunker could not send that action to its core.".to_string())?;
-    drop(input);
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("TicketBunker could not finish its core action: {error}"))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .trim()
-            .trim_start_matches("error:")
-            .trim()
-            .to_string();
-        return Err(if detail.is_empty() {
-            "TicketBunker could not complete that action.".to_string()
-        } else {
-            detail
-        });
+    match worker_exchange(
+        guarded.as_mut().expect("worker was started"),
+        name,
+        &payload,
+    ) {
+        Ok(response) => Ok(response),
+        Err(WorkerError::Rejected(message)) => Err(message),
+        Err(WorkerError::Transport(message)) => {
+            // The action may have reached the core before the transport broke,
+            // so never replay a mutation automatically. The next user action
+            // starts a clean worker and the shared state makes the outcome
+            // visible without risking a duplicate side effect.
+            if let Some(mut failed) = guarded.take() {
+                let _ = failed.child.kill();
+                let _ = failed.child.wait();
+            }
+            Err(format!("{message} Retry the action."))
+        }
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|_| "TicketBunker received an invalid response from its core.".to_string())
 }
 
 fn require_launcher(window: &WebviewWindow) -> Result<(), String> {
@@ -763,6 +860,7 @@ pub fn run() {
         core: core_executable(options.core),
         preferred_port: options.port,
         bundle_root: Mutex::new(None),
+        command_worker: Mutex::new(None),
         process: Mutex::new(None),
         agent_setup: Mutex::new(None),
     };
@@ -815,6 +913,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "launcher" {
                 stop_agent_setup(window.state::<ApplicationState>().inner());
+                stop_command_worker(window.state::<ApplicationState>().inner());
             }
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "project" {
                 stop_core(window.state::<ApplicationState>().inner());
@@ -903,6 +1002,22 @@ mod tests {
         assert!(validated_auth_url("https://auth.openai.com/authorize").is_ok());
         assert!(validated_auth_url("http://auth.openai.com/authorize").is_err());
         assert!(validated_auth_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn command_worker_requires_matching_ids_and_preserves_rejections() {
+        let response =
+            parse_worker_response(3, r#"{"id":3,"ok":true,"value":7}"#).expect("matching response");
+        assert_eq!(response["value"], 7);
+
+        assert!(matches!(
+            parse_worker_response(3, r#"{"id":4,"ok":true}"#),
+            Err(WorkerError::Transport(_))
+        ));
+        match parse_worker_response(3, r#"{"id":3,"ok":false,"message":"Choose."}"#) {
+            Err(WorkerError::Rejected(message)) => assert_eq!(message, "Choose."),
+            _ => panic!("expected a typed command rejection"),
+        }
     }
 
     #[cfg(target_os = "linux")]

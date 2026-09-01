@@ -390,6 +390,10 @@ The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
 are available directly in the app; the app never exposes Pi's terminal UI.
+The launcher keeps one private, bounded core session for its lifetime, so app
+actions do not start a new Python process per click. Every response is matched
+to its request and all behavior still passes through the shared typed action
+registry.
 
 The compatibility ticket view is available to Python integrations without going
 through HTML or scraping CLI output:

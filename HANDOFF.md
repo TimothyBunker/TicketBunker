@@ -261,6 +261,12 @@ new Bunkers.
   core as an owned child, loads only that exact loopback origin, exposes no
   native capabilities to ticket content, accepts guarded in-app routes such as
   the included source editor, and stops the core when its window closes.
+- Native Bunker/onboarding actions no longer freeze and start Python once per
+  click. The app owns one bounded `_app-worker` JSONL session, correlates every
+  response by request ID, preserves typed user rejections, and never
+  automatically replays an action after an ambiguous transport break. The
+  compatibility ticket window still uses its separately owned loopback worker
+  until the shared bundled ticket surface replaces it.
 - `tb view` prefers that app when installed and returns immediately;
   `tb view --browser` explicitly selects the prior detached browser viewer.
   If no app is installed, browser mode remains the automatic fallback. Its
