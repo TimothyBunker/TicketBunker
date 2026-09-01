@@ -15,16 +15,19 @@ page.on("pageerror", (error) => errors.push(error.message));
 
 try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  if (await page.getByRole("heading", { name: "Your local identity" }).isVisible().catch(() => false)) {
-    await page.getByLabel("Name").fill("TicketBunker QA");
-    await page.getByLabel("Email").fill("qa@example.test");
-    await page.getByLabel("Branch name").fill("qa");
-    await page.getByRole("button", { name: "Continue" }).click();
-  }
+  const identity = page.getByRole("heading", { name: "Your local identity" });
   const withoutAgent = page.getByRole("button", { name: "Use without agent" });
-  await withoutAgent.waitFor({ state: "visible" });
-  await withoutAgent.click();
-  await page.getByRole("button", { name: "Bunkers", exact: true }).click();
+  const bunkersNavigation = page.getByRole("button", { name: "Bunkers", exact: true });
+  await identity.or(withoutAgent).or(bunkersNavigation).waitFor({ state: "visible" });
+  if (await identity.isVisible()) {
+    await page.getByLabel("Name", { exact: true }).fill("TicketBunker QA");
+    await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
+    await page.getByLabel("Branch name", { exact: true }).fill("qa");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await withoutAgent.waitFor({ state: "visible" });
+  }
+  if (await withoutAgent.isVisible()) await withoutAgent.click();
+  await bunkersNavigation.click();
   await page.getByRole("heading", { name: "Bunkers", exact: true }).waitFor();
   await page.locator(".profile-control").click();
   await page.getByRole("button", { name: "System", exact: true }).click();
@@ -66,6 +69,10 @@ try {
   await editorPage.screenshot({ path: output.replace(/\.png$/, "-editor.png") });
   await editorPage.close();
   if (errors.length) throw new Error(`browser errors:\n${errors.join("\n")}`);
+} catch (error) {
+  await page.screenshot({ path: output.replace(/\.png$/, "-failure.png"), fullPage: true });
+  console.error(`Visible page at failure:\n${await page.locator("body").innerText()}`);
+  throw error;
 } finally {
   await browser.close();
 }
