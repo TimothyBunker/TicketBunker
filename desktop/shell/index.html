@@ -22,7 +22,7 @@
     <main>
       <section class="loading-state" id="loading-state" aria-live="polite">
         <span class="loading-mark" aria-hidden="true"></span>
-        <p>Opening your projects</p>
+        <p>Opening your Bunkers</p>
       </section>
 
       <section class="onboarding" id="onboarding" hidden>
@@ -52,69 +52,150 @@
       <section class="projects-view" id="projects-view" hidden>
         <div class="page-heading">
           <div>
-            <p class="eyebrow">Workspace</p>
-            <h1>Projects</h1>
+            <p class="eyebrow">Your work</p>
+            <h1>Bunkers</h1>
           </div>
-          <button class="primary" id="add-project" type="button">
-            <span aria-hidden="true">+</span> Add Git project
-          </button>
+          <div class="page-actions">
+            <button id="join-bunker" type="button">Join Bunker</button>
+            <button class="primary" id="create-bunker" type="button">Create Bunker</button>
+          </div>
         </div>
+
+        <section class="action-panel" id="bunker-action" hidden>
+          <div class="action-heading">
+            <div>
+              <p class="eyebrow" id="action-eyebrow">New Bunker</p>
+              <h2 id="action-title">Create a local Bunker</h2>
+            </div>
+            <button id="cancel-bunker-action" type="button">Cancel</button>
+          </div>
+          <form id="create-bunker-form" class="profile-form">
+            <label>
+              <span>Bunker name</span>
+              <input name="name" placeholder="Engineering" autocomplete="off" required>
+            </label>
+            <div class="paired-fields">
+              <label>
+                <span>First project key</span>
+                <input name="project_key" placeholder="SYS" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+              </label>
+              <label>
+                <span>First project name</span>
+                <input name="project_name" placeholder="Systems" autocomplete="off" required>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="primary" type="submit">Create local Bunker</button>
+              <output class="form-status" aria-live="polite"></output>
+            </div>
+          </form>
+          <form id="join-bunker-form" class="profile-form" hidden>
+            <label>
+              <span>Invitation</span>
+              <input name="invitation" type="password" placeholder="ticketbunker://join…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+            </label>
+            <div class="join-review" id="join-review" hidden>
+              <dl>
+                <div><dt>Server</dt><dd id="join-server"></dd></div>
+                <div><dt>Bunker</dt><dd id="join-id"></dd></div>
+              </dl>
+              <p>Authentication and membership are decided by this server. The invitation does not grant access by itself.</p>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="review-invitation">Review invitation</button>
+              <button class="primary" type="button" id="confirm-join" hidden>Authenticate and join</button>
+              <output class="form-status" aria-live="polite"></output>
+            </div>
+          </form>
+        </section>
+
         <div class="project-list" id="project-list"></div>
         <div class="empty-state" id="empty-state" hidden>
-          <h2>Add your first Git project</h2>
-          <p>Choose a local checkout. TicketBunker will find its existing setup or help you connect one.</p>
-          <button class="primary" id="empty-add-project" type="button">Add Git project</button>
+          <h2>Create or join a Bunker</h2>
+          <p>A Bunker owns projects, configuration, tickets, and membership. Git repositories are attached afterward.</p>
+          <div class="empty-actions">
+            <button class="primary" id="empty-create-bunker" type="button">Create Bunker</button>
+            <button id="empty-join-bunker" type="button">Join Bunker</button>
+          </div>
         </div>
+
+        <section class="legacy-projects" id="legacy-projects" hidden>
+          <div>
+            <p class="eyebrow">Migration</p>
+            <h2>Previous companion projects</h2>
+          </div>
+          <p>Import a read-only copy into the new local database. Source repositories and companion checkouts remain unchanged.</p>
+          <div id="legacy-project-list"></div>
+        </section>
       </section>
     </main>
 
-    <dialog id="connect-dialog" class="dialog">
-      <form method="dialog" class="dialog-card" id="connect-form">
+    <dialog id="attach-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="attach-form">
         <div class="dialog-heading">
           <div>
-            <p class="eyebrow">Connect project</p>
-            <h2 id="connect-title">Git project</h2>
+            <p class="eyebrow">Repository attachment</p>
+            <h2 id="attach-title">Attach Git repository</h2>
           </div>
         </div>
-        <p class="dialog-copy" id="connect-copy"></p>
-        <div id="create-fields" class="connect-fields">
-          <label>
-            <span>Project key</span>
-            <input name="project" pattern="[A-Z][A-Z0-9]*" placeholder="ECS" autocomplete="off" autocapitalize="characters" spellcheck="false">
-          </label>
-          <fieldset class="storage-fields">
-            <legend>TicketBunker storage</legend>
-            <div class="storage-grid">
-              <label>
-                <span>Access</span>
-                <select name="storage_transport">
-                  <option value="ssh">SSH</option>
-                  <option value="https">HTTPS</option>
-                </select>
-              </label>
-              <label>
-                <span>Git host</span>
-                <input name="storage_host" placeholder="github.com" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-              </label>
-              <label>
-                <span>Owner or group</span>
-                <input name="storage_namespace" placeholder="team" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-              </label>
-              <label>
-                <span>Repository</span>
-                <input name="storage_repository" placeholder="project-ticketbunker" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
-              </label>
-            </div>
-            <output class="storage-preview" id="storage-preview"></output>
-          </fieldset>
-          <p class="field-note">Create this empty repository first. TicketBunker uses it for shared data and does not host it.</p>
+        <div class="repository-preview">
+          <strong id="attach-repository-name"></strong>
+          <span id="attach-repository-path"></span>
+          <span id="attach-repository-remote"></span>
         </div>
+        <label>
+          <span>Project</span>
+          <select name="project_id" required></select>
+        </label>
         <input name="path" type="hidden">
+        <input name="bunker_id" type="hidden">
         <div class="dialog-actions">
           <button value="cancel" type="submit">Cancel</button>
-          <button class="primary" id="connect-submit" value="default" type="submit">Connect</button>
+          <button class="primary" value="default" type="submit">Attach repository</button>
         </div>
-        <output class="form-status" id="connect-status" aria-live="polite"></output>
+        <output class="form-status" id="attach-status" aria-live="polite"></output>
+      </form>
+    </dialog>
+
+    <dialog id="project-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="project-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Project hierarchy</p>
+            <h2>Add project</h2>
+          </div>
+        </div>
+        <label><span>Parent</span><select name="parent_id"></select></label>
+        <div class="paired-fields">
+          <label><span>Project key</span><input name="key" placeholder="ECS" maxlength="32" autocapitalize="characters" spellcheck="false" required></label>
+          <label><span>Project name</span><input name="name" placeholder="Entity Component System" required></label>
+        </div>
+        <input name="bunker_id" type="hidden">
+        <div class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button class="primary" value="default" type="submit">Add project</button>
+        </div>
+        <output class="form-status" id="project-status" aria-live="polite"></output>
+      </form>
+    </dialog>
+
+    <dialog id="remote-dialog" class="dialog">
+      <form method="dialog" class="dialog-card" id="remote-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Optional team service</p>
+            <h2>Connect remote service</h2>
+          </div>
+        </div>
+        <p class="dialog-copy">TicketBunker connects to a service API, never directly to its database. Authentication is required before synchronization.</p>
+        <label><span>Server</span><input name="server_url" type="url" placeholder="https://tickets.example.com" autocomplete="off" required></label>
+        <label><span>Remote Bunker ID</span><input name="remote_bunker_id" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+        <input name="bunker_id" type="hidden">
+        <div class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button class="primary" value="default" type="submit">Save relationship</button>
+        </div>
+        <output class="form-status" id="remote-status" aria-live="polite"></output>
       </form>
     </dialog>
 

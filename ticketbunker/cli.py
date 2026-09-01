@@ -1922,12 +1922,26 @@ def cmd_application_command(args: argparse.Namespace) -> int:
         "application.project.add",
         "application.project.connect",
         "application.project.remove",
+        "application.bunker.create",
+        "application.bunker.project.create",
+        "application.repository.inspect",
+        "application.bunker.repository.attach",
+        "application.bunker.remote.configure",
+        "application.invitation.inspect",
+        "application.bunker.join",
+        "application.bunker.import.companion",
     }
     if args.application_command not in allowed:
         print("error: command is not available to the desktop shell", file=sys.stderr)
         return 1
     try:
-        payload = json.loads(args.payload)
+        if args.payload == "-":
+            raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise ValueError("payload is too large")
+            payload = json.loads(raw.decode("utf-8"))
+        else:
+            payload = json.loads(args.payload)
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         result = commands.dispatch(

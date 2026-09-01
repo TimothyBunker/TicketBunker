@@ -3,7 +3,8 @@ const chooseDirectory = window.__TAURI__.dialog.open;
 const listen = window.__TAURI__.event.listen;
 
 let applicationState = null;
-let pendingProject = null;
+let pendingRepository = null;
+let reviewedInvitation = "";
 let agentCatalog = [];
 let agentCurrent = null;
 let agentPromptRequest = null;
@@ -17,9 +18,15 @@ const projectsView = byId("projects-view");
 const identityButton = byId("identity-button");
 const projectList = byId("project-list");
 const emptyState = byId("empty-state");
-const connectDialog = byId("connect-dialog");
-const connectForm = byId("connect-form");
-const storagePreview = byId("storage-preview");
+const bunkerAction = byId("bunker-action");
+const createBunkerForm = byId("create-bunker-form");
+const joinBunkerForm = byId("join-bunker-form");
+const attachDialog = byId("attach-dialog");
+const attachForm = byId("attach-form");
+const projectDialog = byId("project-dialog");
+const projectForm = byId("project-form");
+const remoteDialog = byId("remote-dialog");
+const remoteForm = byId("remote-form");
 const settingsDialog = byId("settings-dialog");
 const settingsForm = byId("settings-form");
 const agentDialog = byId("agent-dialog");
@@ -77,57 +84,138 @@ function updateIdentity() {
   identityButton.hidden = !profile.complete;
 }
 
-function projectStatus(project) {
-  if (project.missing) return ["Folder unavailable", ""];
-  if (project.ready) return ["Ready", "ready"];
-  if (project.initialized) return ["Join locally", ""];
-  return ["Not connected", ""];
+function flattenProjects(projects, depth = 0) {
+  const values = [];
+  for (const project of projects || []) {
+    values.push({ project, depth });
+    values.push(...flattenProjects(project.children, depth + 1));
+  }
+  return values;
 }
 
-function renderProjects() {
-  projectList.replaceChildren();
-  const projects = applicationState.projects || [];
-  emptyState.hidden = projects.length !== 0;
-  projectList.hidden = projects.length === 0;
-  for (const project of projects) {
-    const row = document.createElement("article");
-    row.className = "project-row";
-    const info = document.createElement("div");
-    const title = document.createElement("div");
-    title.className = "project-name";
-    title.append(document.createTextNode(project.name));
-    if (project.project) {
-      const key = document.createElement("span");
-      key.className = "project-key";
-      key.textContent = project.project;
-      title.append(key);
-    }
-    const path = document.createElement("div");
-    path.className = "project-path";
-    path.textContent = project.path;
-    info.append(title, path);
+function actionButton(label, handler, className = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  if (className) button.className = className;
+  button.addEventListener("click", handler);
+  return button;
+}
 
+function remoteLabel(bunker) {
+  if (!bunker.remote) return "Local only";
+  try {
+    const host = new URL(bunker.remote.server_url).host;
+    return bunker.remote.state === "ready" ? `Connected to ${host}` : `${host} · authentication required`;
+  } catch (_error) {
+    return "Remote connection needs attention";
+  }
+}
+
+function projectTree(bunker, projects) {
+  const list = document.createElement("ul");
+  list.className = "project-tree";
+  for (const project of projects || []) {
+    const item = document.createElement("li");
+    const line = document.createElement("div");
+    line.className = "project-line";
+    const identity = document.createElement("div");
+    identity.className = "project-identity";
+    const key = document.createElement("span");
+    key.className = "project-key";
+    key.textContent = project.key;
+    const name = document.createElement("strong");
+    name.textContent = project.name;
+    identity.append(key, name);
+    const repositories = (bunker.repositories || []).filter((value) => value.project_id === project.id);
+    for (const repository of repositories) {
+      const repo = document.createElement("span");
+      repo.className = "repository-name";
+      repo.textContent = repository.name;
+      repo.title = repository.local_path || repository.canonical_remote || "Repository binding";
+      identity.append(repo);
+    }
     const actions = document.createElement("div");
-    actions.className = "project-actions";
-    const [label, className] = projectStatus(project);
+    actions.className = "project-inline-actions";
+    actions.append(
+      actionButton("Add subproject", () => showProjectForm(bunker, project.id)),
+      actionButton("Attach repository", () => chooseRepository(bunker, project.id)),
+    );
+    line.append(identity, actions);
+    item.append(line);
+    if (project.children?.length) item.append(projectTree(bunker, project.children));
+    list.append(item);
+  }
+  return list;
+}
+
+function renderLegacyProjects() {
+  const section = byId("legacy-projects");
+  const list = byId("legacy-project-list");
+  const projects = (applicationState.legacy_projects || []).filter((project) => project.initialized && !project.missing);
+  section.hidden = projects.length === 0;
+  list.replaceChildren();
+  for (const project of projects) {
+    const row = document.createElement("div");
+    row.className = "legacy-project-row";
+    const copy = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = project.project ? `${project.project} · ${project.name}` : project.name;
+    const path = document.createElement("span");
+    path.textContent = project.path;
+    copy.append(name, path);
+    const importButton = actionButton(
+      project.imported ? "Imported" : "Import copy",
+      (event) => importLegacyProject(project, event.currentTarget),
+    );
+    importButton.disabled = Boolean(project.imported);
+    row.append(copy, importButton);
+    list.append(row);
+  }
+}
+
+function renderBunkers() {
+  projectList.replaceChildren();
+  const bunkers = applicationState.bunkers || [];
+  emptyState.hidden = bunkers.length !== 0;
+  projectList.hidden = bunkers.length === 0;
+  for (const bunker of bunkers) {
+    const row = document.createElement("article");
+    row.className = "bunker-row";
+    const header = document.createElement("header");
+    const title = document.createElement("div");
+    const name = document.createElement("h2");
+    name.textContent = bunker.name;
     const state = document.createElement("span");
-    state.className = `project-state ${className}`;
-    state.textContent = label;
-    const open = document.createElement("button");
-    open.type = "button";
-    open.textContent = project.ready ? "Open" : project.initialized ? "Join" : "Connect";
-    open.disabled = Boolean(project.missing);
-    open.addEventListener("click", () => project.ready ? openProject(project, open) : showConnect(project));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "text-button";
-    remove.setAttribute("aria-label", `Remove ${project.name}`);
-    remove.textContent = "×";
-    remove.addEventListener("click", () => removeProject(project, remove));
-    actions.append(state, open, remove);
-    row.append(info, actions);
+    state.className = `bunker-state ${bunker.remote?.state === "ready" ? "ready" : ""}`;
+    state.textContent = remoteLabel(bunker);
+    title.append(name, state);
+    const actions = document.createElement("div");
+    actions.className = "bunker-actions";
+    actions.append(
+      actionButton("Add project", () => showProjectForm(bunker)),
+      actionButton(bunker.remote ? "Remote settings" : "Connect service", () => showRemoteForm(bunker)),
+    );
+    header.append(title, actions);
+    const summary = document.createElement("p");
+    summary.className = "bunker-summary";
+    summary.textContent = `${bunker.project_count} ${bunker.project_count === 1 ? "project" : "projects"} · ${bunker.repository_count} ${bunker.repository_count === 1 ? "repository" : "repositories"} · ${bunker.ticket_count} ${bunker.ticket_count === 1 ? "ticket" : "tickets"}`;
+    const details = document.createElement("details");
+    details.className = "bunker-storage";
+    const detailsLabel = document.createElement("summary");
+    detailsLabel.textContent = "Storage relationship";
+    const local = document.createElement("p");
+    local.textContent = `Local database: ${bunker.database}`;
+    details.append(detailsLabel, local);
+    if (bunker.remote) {
+      const remote = document.createElement("p");
+      remote.textContent = `Remote service: ${bunker.remote.server_url} / ${bunker.remote.remote_bunker_id}`;
+      details.append(remote);
+    }
+    row.append(header, summary, projectTree(bunker, bunker.projects), details);
     projectList.append(row);
   }
+  renderLegacyProjects();
 }
 
 function render() {
@@ -142,7 +230,7 @@ function render() {
   }
   onboarding.hidden = true;
   projectsView.hidden = false;
-  renderProjects();
+  renderBunkers();
 }
 
 async function loadState() {
@@ -488,128 +576,255 @@ settingsForm.addEventListener("submit", async (event) => {
   if (saved) settingsDialog.close();
 });
 
-async function chooseProject() {
-  try {
-    const selected = await chooseDirectory({ directory: true, multiple: false, title: "Add Git project" });
-    if (!selected) return;
-    const result = await invoke("add_git_project", { path: selected });
-    applicationState.projects = result.projects;
-    renderProjects();
-    const project = result.project;
-    if (project.ready) await openProject(project);
-    else showConnect(project);
-  } catch (error) {
-    message(String(error), true);
-  }
+function showBunkerAction(mode) {
+  const creating = mode === "create";
+  bunkerAction.hidden = false;
+  createBunkerForm.hidden = !creating;
+  joinBunkerForm.hidden = creating;
+  byId("action-eyebrow").textContent = creating ? "New Bunker" : "Existing Bunker";
+  byId("action-title").textContent = creating ? "Create a local Bunker" : "Join with an invitation";
+  reviewedInvitation = "";
+  byId("join-review").hidden = true;
+  byId("confirm-join").hidden = true;
+  byId("review-invitation").hidden = false;
+  const form = creating ? createBunkerForm : joinBunkerForm;
+  form.querySelector("output").textContent = "";
+  requestAnimationFrame(() => form.querySelector("input")?.focus());
 }
 
-byId("add-project").addEventListener("click", chooseProject);
-byId("empty-add-project").addEventListener("click", chooseProject);
-
-async function openProject(project, button = null) {
-  setBusy(button, true);
-  try {
-    await invoke("open_git_project", { path: project.path });
-  } catch (error) {
-    message(String(error), true);
-    setBusy(button, false);
-  }
+function hideBunkerAction() {
+  bunkerAction.hidden = true;
+  reviewedInvitation = "";
+  createBunkerForm.reset();
+  joinBunkerForm.reset();
 }
 
-async function removeProject(project, button) {
-  setBusy(button, true);
-  try {
-    const result = await invoke("remove_git_project", { path: project.path });
-    applicationState.projects = result.projects;
-    renderProjects();
-  } catch (error) {
-    message(String(error), true);
-    setBusy(button, false);
-  }
-}
+byId("create-bunker").addEventListener("click", () => showBunkerAction("create"));
+byId("empty-create-bunker").addEventListener("click", () => showBunkerAction("create"));
+byId("join-bunker").addEventListener("click", () => showBunkerAction("join"));
+byId("empty-join-bunker").addEventListener("click", () => showBunkerAction("join"));
+byId("cancel-bunker-action").addEventListener("click", hideBunkerAction);
 
-function storageRemote() {
-  const transport = connectForm.elements.storage_transport.value;
-  const host = connectForm.elements.storage_host.value.trim();
-  const namespace = connectForm.elements.storage_namespace.value.trim().replace(/^\/+|\/+$/g, "");
-  const repository = connectForm.elements.storage_repository.value.trim().replace(/\.git$/, "");
-  if (!host || !namespace || !repository) return "";
-  const path = `${namespace}/${repository}.git`;
-  return transport === "https" ? `https://${host}/${path}` : `git@${host}:${path}`;
-}
-
-let storagePreviewTimer = null;
-
-function updateStoragePreview() {
-  storagePreviewTimer = null;
-  const remote = storageRemote();
-  storagePreview.textContent = remote || "Complete the storage fields";
-  storagePreview.classList.toggle("placeholder", !remote);
-}
-
-function scheduleStoragePreview() {
-  window.clearTimeout(storagePreviewTimer);
-  storagePreviewTimer = window.setTimeout(updateStoragePreview, 80);
-}
-
-for (const name of ["storage_transport", "storage_host", "storage_namespace", "storage_repository"]) {
-  connectForm.elements[name].addEventListener("input", scheduleStoragePreview);
-  connectForm.elements[name].addEventListener("change", updateStoragePreview);
-}
-
-function showConnect(project) {
-  pendingProject = project;
-  connectForm.reset();
-  connectForm.elements.path.value = project.path;
-  byId("connect-title").textContent = project.name;
-  byId("connect-status").textContent = "";
-  const create = !project.initialized;
-  byId("create-fields").hidden = !create;
-  connectForm.elements.project.required = create;
-  const storage = project.storage || {};
-  connectForm.elements.storage_transport.value = storage.transport || "ssh";
-  connectForm.elements.storage_host.value = storage.host || "github.com";
-  connectForm.elements.storage_namespace.value = storage.namespace || "";
-  connectForm.elements.storage_repository.value = storage.repository || `${project.name}-ticketbunker`;
-  for (const name of ["storage_host", "storage_namespace", "storage_repository"]) {
-    connectForm.elements[name].required = create;
-  }
-  updateStoragePreview();
-  byId("connect-copy").textContent = create
-    ? "Connect the shared storage for this TicketBunker project."
-    : "Join the TicketBunker project declared by this checkout. This fetches its companion data without merging source work.";
-  byId("connect-submit").textContent = create ? "Create TicketBunker project" : "Join project";
-  connectDialog.showModal();
-  if (create) connectForm.elements.project.focus();
-}
-
-connectForm.addEventListener("submit", async (event) => {
-  if (event.submitter?.value !== "default") return;
+createBunkerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const submit = event.submitter;
-  const status = byId("connect-status");
+  const button = event.submitter;
+  const status = event.currentTarget.querySelector("output");
   status.textContent = "";
-  setBusy(submit, true);
-  const create = !pendingProject.initialized;
-  const payload = { path: pendingProject.path };
-  if (create) {
-    payload.project = connectForm.elements.project.value.toUpperCase();
-    payload.storage = {
-      backend: "git",
-      transport: connectForm.elements.storage_transport.value,
-      host: connectForm.elements.storage_host.value,
-      namespace: connectForm.elements.storage_namespace.value,
-      repository: connectForm.elements.storage_repository.value,
-    };
-  }
+  setBusy(button, true);
   try {
-    await invoke("connect_git_project", { payload });
-    connectDialog.close();
+    const result = await invoke("create_bunker", {
+      payload: {
+        name: event.currentTarget.elements.name.value,
+        project_key: event.currentTarget.elements.project_key.value.toUpperCase(),
+        project_name: event.currentTarget.elements.project_name.value,
+      },
+    });
+    applicationState.bunkers = result.bunkers;
+    hideBunkerAction();
+    renderBunkers();
+    message(`Created ${result.bunker.name}`);
   } catch (error) {
     status.textContent = String(error);
-    setBusy(submit, false);
+  } finally {
+    setBusy(button, false);
   }
 });
+
+joinBunkerForm.elements.invitation.addEventListener("input", () => {
+  reviewedInvitation = "";
+  byId("join-review").hidden = true;
+  byId("confirm-join").hidden = true;
+  byId("review-invitation").hidden = false;
+});
+
+joinBunkerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  const status = event.currentTarget.querySelector("output");
+  const invitation = event.currentTarget.elements.invitation.value.trim();
+  status.textContent = "";
+  setBusy(button, true);
+  try {
+    const result = await invoke("inspect_bunker_invitation", { invitation });
+    reviewedInvitation = invitation;
+    byId("join-server").textContent = result.invitation.server;
+    byId("join-id").textContent = result.invitation.bunker_id;
+    byId("join-review").hidden = false;
+    byId("confirm-join").hidden = false;
+    button.hidden = true;
+  } catch (error) {
+    status.textContent = String(error);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+byId("confirm-join").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const status = joinBunkerForm.querySelector("output");
+  status.textContent = "";
+  if (!reviewedInvitation) return;
+  setBusy(button, true);
+  try {
+    const result = await invoke("join_bunker", { payload: { invitation: reviewedInvitation } });
+    applicationState.bunkers = result.bunkers;
+    hideBunkerAction();
+    renderBunkers();
+    message(`Joined ${result.bunker.name}`);
+  } catch (error) {
+    status.textContent = String(error);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+function projectOptions(select, bunker, selected = "", includeTopLevel = false) {
+  select.replaceChildren();
+  if (includeTopLevel) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Top level";
+    select.append(option);
+  }
+  for (const { project, depth } of flattenProjects(bunker.projects)) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${"\u00a0\u00a0".repeat(depth)}${project.key} · ${project.name}`;
+    select.append(option);
+  }
+  if (selected) select.value = selected;
+}
+
+async function chooseRepository(bunker, projectId) {
+  try {
+    const selected = await chooseDirectory({ directory: true, multiple: false, title: "Attach Git repository" });
+    if (!selected) return;
+    const result = await invoke("inspect_git_repository", { path: selected });
+    pendingRepository = result.repository;
+    attachForm.reset();
+    attachForm.elements.bunker_id.value = bunker.id;
+    attachForm.elements.path.value = result.repository.path;
+    projectOptions(attachForm.elements.project_id, bunker, projectId);
+    byId("attach-repository-name").textContent = result.repository.name;
+    byId("attach-repository-path").textContent = result.repository.path;
+    byId("attach-repository-remote").textContent = result.repository.canonical_remote || "No shared Git remote detected";
+    byId("attach-status").textContent = "";
+    attachDialog.showModal();
+  } catch (error) {
+    message(String(error), true);
+  }
+}
+
+attachForm.addEventListener("submit", async (event) => {
+  if (event.submitter?.value !== "default") return;
+  event.preventDefault();
+  const button = event.submitter;
+  const status = byId("attach-status");
+  status.textContent = "";
+  setBusy(button, true);
+  try {
+    const result = await invoke("attach_git_repository", {
+      payload: {
+        bunker_id: event.currentTarget.elements.bunker_id.value,
+        project_id: event.currentTarget.elements.project_id.value,
+        path: event.currentTarget.elements.path.value,
+        name: pendingRepository?.name || "",
+      },
+    });
+    applicationState.bunkers = result.bunkers;
+    attachDialog.close();
+    renderBunkers();
+    message(`Attached ${pendingRepository?.name || "repository"}`);
+  } catch (error) {
+    status.textContent = String(error);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+function showProjectForm(bunker, parentId = "") {
+  projectForm.reset();
+  projectForm.elements.bunker_id.value = bunker.id;
+  projectOptions(projectForm.elements.parent_id, bunker, parentId, true);
+  byId("project-status").textContent = "";
+  projectDialog.showModal();
+  projectForm.elements.key.focus();
+}
+
+projectForm.addEventListener("submit", async (event) => {
+  if (event.submitter?.value !== "default") return;
+  event.preventDefault();
+  const button = event.submitter;
+  const status = byId("project-status");
+  status.textContent = "";
+  setBusy(button, true);
+  try {
+    const result = await invoke("create_bunker_project", {
+      payload: {
+        bunker_id: event.currentTarget.elements.bunker_id.value,
+        parent_id: event.currentTarget.elements.parent_id.value,
+        key: event.currentTarget.elements.key.value.toUpperCase(),
+        name: event.currentTarget.elements.name.value,
+      },
+    });
+    applicationState.bunkers = result.bunkers;
+    projectDialog.close();
+    renderBunkers();
+  } catch (error) {
+    status.textContent = String(error);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+function showRemoteForm(bunker) {
+  remoteForm.reset();
+  remoteForm.elements.bunker_id.value = bunker.id;
+  remoteForm.elements.server_url.value = bunker.remote?.server_url || "";
+  remoteForm.elements.remote_bunker_id.value = bunker.remote?.remote_bunker_id || "";
+  byId("remote-status").textContent = "";
+  remoteDialog.showModal();
+  remoteForm.elements.server_url.focus();
+}
+
+remoteForm.addEventListener("submit", async (event) => {
+  if (event.submitter?.value !== "default") return;
+  event.preventDefault();
+  const button = event.submitter;
+  const status = byId("remote-status");
+  status.textContent = "";
+  setBusy(button, true);
+  try {
+    const result = await invoke("configure_bunker_remote", {
+      payload: {
+        bunker_id: event.currentTarget.elements.bunker_id.value,
+        server_url: event.currentTarget.elements.server_url.value,
+        remote_bunker_id: event.currentTarget.elements.remote_bunker_id.value,
+      },
+    });
+    applicationState.bunkers = result.bunkers;
+    remoteDialog.close();
+    renderBunkers();
+    message("Remote relationship saved. Authenticate before synchronization.");
+  } catch (error) {
+    status.textContent = String(error);
+  } finally {
+    setBusy(button, false);
+  }
+});
+
+async function importLegacyProject(project, button) {
+  setBusy(button, true);
+  try {
+    const result = await invoke("import_companion_project", { payload: { path: project.path } });
+    applicationState.bunkers = result.bunkers;
+    renderBunkers();
+    message(`Imported ${result.migration.tickets.length} tickets. The companion data was not changed.`);
+  } catch (error) {
+    message(String(error), true);
+    setBusy(button, false);
+  }
+}
 
 window.ticketBunkerReload = loadState;
 loadState();

@@ -391,11 +391,11 @@
   <main class="page">
     <header class="masthead">
       <div>
-        <p class="eyebrow">TicketBunker / architecture study 01</p>
-        <h1>One configurable API, with tools kept behind it</h1>
-        <p>The desktop app owns the experience. TicketBunker owns the contract and state transitions. Git, agile providers, databases, and the coworker model remain replaceable implementation boundaries.</p>
+        <p class="eyebrow">TicketBunker / Bunker architecture</p>
+        <h1>One Bunker, one local database, optional team service</h1>
+        <p>The desktop app owns the experience. A Bunker owns configuration, membership, Projects, and tickets. Git, agile providers, persistence engines, and the coworker remain replaceable tools behind one API.</p>
       </div>
-      <div class="proposal-badge">Proposed target</div>
+      <div class="proposal-badge">Current direction</div>
     </header>
 
     <section class="workspace" aria-label="Interactive TicketBunker architecture diagram">
@@ -417,8 +417,8 @@
         <div class="diagram-viewport" id="viewport">
           <div class="diagram-stage" id="stage">
             <svg id="architecture" viewBox="0 0 1680 920" role="img" aria-labelledby="diagram-title diagram-description">
-              <title id="diagram-title">Proposed API-first architecture for TicketBunker</title>
-              <desc id="diagram-description">A left-to-right architecture diagram. The user enters a desktop application. All views use a typed API client and runtime supervisor to call one TicketBunker API. The API dispatches shared actions to domain services, which reach databases, Git, tracker providers, and model providers only through adapters.</desc>
+              <title id="diagram-title">Bunker-first API architecture for TicketBunker</title>
+              <desc id="diagram-description">A left-to-right architecture diagram. The user creates or joins a Bunker in the desktop application. All views use a typed API client and runtime supervisor to call one TicketBunker API. The API dispatches shared actions to domain services, which reach one local database per Bunker, attached Git repositories, tracker providers, model providers, and an optional remote Bunker service only through adapters.</desc>
               <defs>
                 <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
                   <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#8d877b" stroke-opacity="0.085" stroke-width="1"/>
@@ -468,9 +468,9 @@
 
               <path class="connector" d="M192 308 V340"/>
 
-              <g class="node ui" data-key="projects-view" tabindex="0" role="button" aria-label="Projects view">
+              <g class="node ui" data-key="projects-view" tabindex="0" role="button" aria-label="Bunkers view">
                 <rect x="68" y="340" width="116" height="50"/>
-                <text class="mini-title" x="126" y="370" text-anchor="middle">Projects</text>
+                <text class="mini-title" x="126" y="370" text-anchor="middle">Bunkers</text>
               </g>
               <g class="node ui" data-key="tickets-view" tabindex="0" role="button" aria-label="Tickets view">
                 <rect x="200" y="340" width="116" height="50"/>
@@ -554,10 +554,10 @@
               <path class="bus" d="M604 421 H654 V703"/>
               <circle class="junction" cx="654" cy="421" r="3.5"/>
 
-              <g class="node core" data-key="project-service" tabindex="0" role="button" aria-label="Project and ticket services">
+              <g class="node core" data-key="project-service" tabindex="0" role="button" aria-label="Bunker and project services">
                 <rect x="682" y="166" width="210" height="58"/>
-                <text class="node-title" x="787" y="191" text-anchor="middle">Project + Ticket</text>
-                <text class="node-subtitle" x="787" y="210" text-anchor="middle">identity · lifecycle · index</text>
+                <text class="node-title" x="787" y="191" text-anchor="middle">Bunker + Project Tree</text>
+                <text class="node-subtitle" x="787" y="210" text-anchor="middle">identity · scope · tickets</text>
               </g>
               <path class="connector" d="M654 195 H682"/>
 
@@ -608,8 +608,8 @@
               <path class="connector" d="M892 195 H964"/>
               <g class="node adapter" data-key="local-db" tabindex="0" role="button" aria-label="Local database">
                 <rect x="1100" y="166" width="116" height="58"/>
-                <text class="node-title" x="1158" y="191" text-anchor="middle">Local DB</text>
-                <text class="node-subtitle" x="1158" y="210" text-anchor="middle">cache + local state</text>
+                <text class="node-title" x="1158" y="191" text-anchor="middle">Local Bunker DB</text>
+                <text class="node-subtitle" x="1158" y="210" text-anchor="middle">SQLite per Bunker</text>
               </g>
               <path class="connector" d="M1084 195 H1100"/>
 
@@ -621,8 +621,8 @@
               <path class="connector" d="M892 283 H964"/>
               <g class="node adapter" data-key="managed-git" tabindex="0" role="button" aria-label="Managed Git and workspaces">
                 <rect x="1100" y="254" width="116" height="58"/>
-                <text class="node-title" x="1158" y="279" text-anchor="middle">Managed Git</text>
-                <text class="node-subtitle" x="1158" y="298" text-anchor="middle">+ workspaces</text>
+                <text class="node-title" x="1158" y="279" text-anchor="middle">Attached Git</text>
+                <text class="node-subtitle" x="1158" y="298" text-anchor="middle">source + workflow only</text>
               </g>
               <path class="connector" d="M1084 283 H1100"/>
 
@@ -649,7 +649,7 @@
               <g class="node adapter" data-key="remote-adapter" tabindex="0" role="button" aria-label="Remote storage adapter">
                 <rect x="964" y="518" width="120" height="58"/>
                 <text class="node-title" x="1024" y="543" text-anchor="middle">Remote</text>
-                <text class="node-subtitle" x="1024" y="562" text-anchor="middle">storage adapter</text>
+                <text class="node-subtitle" x="1024" y="562" text-anchor="middle">service adapter</text>
               </g>
               <path class="connector" d="M892 547 H964"/>
 
@@ -690,10 +690,10 @@
               </g>
               <path class="connector" d="M1216 459 H1310"/>
 
-              <g class="node external important" data-key="remote-api" tabindex="0" role="button" aria-label="Remote TicketBunker API">
+              <g class="node external important" data-key="remote-api" tabindex="0" role="button" aria-label="Remote Bunker service">
                 <rect x="1310" y="510" width="320" height="74"/>
-                <text class="node-title" x="1470" y="540" text-anchor="middle">Remote TicketBunker API</text>
-                <text class="node-subtitle" x="1470" y="562" text-anchor="middle">auth · tenancy · team synchronization</text>
+                <text class="node-title" x="1470" y="540" text-anchor="middle">Remote Bunker Service</text>
+                <text class="node-subtitle" x="1470" y="562" text-anchor="middle">auth · membership · synchronization</text>
               </g>
               <path class="connector" d="M1084 547 H1310"/>
 
@@ -701,7 +701,7 @@
 
               <g class="node external" data-key="team-db" tabindex="0" role="button" aria-label="Team database">
                 <rect x="1310" y="624" width="320" height="86"/>
-                <text class="node-title" x="1470" y="657" text-anchor="middle">Team Database</text>
+                <text class="node-title" x="1470" y="657" text-anchor="middle">Host-owned Database</text>
                 <text class="node-subtitle" x="1470" y="680" text-anchor="middle">tickets · config · membership · reports</text>
                 <text class="node-subtitle" x="1470" y="697" text-anchor="middle">implementation chosen by the host</text>
               </g>
@@ -709,7 +709,7 @@
               <text class="rule-note" x="1470" y="762" text-anchor="middle">The app never connects to</text>
               <text class="rule-note" x="1470" y="780" text-anchor="middle">the team database directly.</text>
 
-              <text class="edge-label" x="48" y="875">PROPOSED TARGET · Does not supersede DESIGN.md until accepted</text>
+              <text class="edge-label" x="48" y="875">CURRENT DESIGN · See DESIGN.md for the complete contract</text>
             </svg>
           </div>
         </div>
@@ -753,8 +753,8 @@
 
       const details = {
         user: ["Entry point", "User", "The person works through explicit application actions instead of assembling TicketBunker workflows in a terminal.", "Intent, confirmation, and local choices.", "Backend sequencing or knowledge of tool-specific commands."],
-        "app-shell": ["Desktop experience", "Desktop App Shell", "Owns the native window, routing, project selection, and application lifecycle.", "Navigation, window state, and starting or stopping the local runtime.", "Ticket rules, Git operations, or persistence semantics."],
-        "projects-view": ["Desktop view", "Projects", "Adds or joins Git projects and exposes their TicketBunker connection state.", "Project discovery, membership entry points, and clear connection status.", "Remote authorization decisions or direct Git manipulation."],
+        "app-shell": ["Desktop experience", "Desktop App Shell", "Owns the native window, routing, Bunker selection, and application lifecycle.", "Navigation, window state, and starting or stopping the local runtime.", "Ticket rules, Git operations, or persistence semantics."],
+        "projects-view": ["Desktop view", "Bunkers", "Creates local Bunkers or joins remote ones before Projects and repositories enter the flow.", "Bunker discovery, explicit membership entry points, recursive Project navigation, and clear storage state.", "Inferring membership from Git or making remote authorization decisions."],
         "tickets-view": ["Desktop view", "Tickets", "Presents ticket lifecycle, branches, evidence, reports, and the persistent coworker surface.", "Readable ticket state and user intent.", "Tracker-specific fields or report publication rules."],
         "config-view": ["Desktop view", "Configuration", "Edits global and project field composition, mappings, integrations, and local preferences.", "A clear editing experience and change previews.", "Permission enforcement or storage implementation."],
         "agent-view": ["Desktop view", "Coworker", "Lets the user synthesize, inspect, correct, and discuss WHO, WHAT, WHERE, and WHY.", "Conversation context, scope selection, citations, and proposed report updates.", "Source-code changes or a second path for writing combined truth."],
@@ -764,29 +764,29 @@
         api: ["Stable contract", "TicketBunker API", "The single application contract used by the desktop UI and any optional automation client.", "Versioned commands, queries, results, errors, jobs, and event envelopes.", "Git output parsing in the UI or direct access to storage internals."],
         actions: ["Behavior source of truth", "Action Registry", "Maps named API operations to shared handlers so every caller receives identical validation and behavior.", "Command/query routing, validation order, confirmation plans, and typed outcomes.", "Separate CLI behavior or provider-specific implementations."],
         schema: ["Configurable model", "Schema Registry", "Composes global defaults, project fields, tags, and provider mappings into explicit ticket schemas.", "Field definitions, mapping contracts, extension validation, and schema versions.", "Ticket-specific ad hoc schema mutation."],
-        policy: ["Authority boundary", "Capabilities + Policy", "Answers which actions are available to the current user and project before the app offers them.", "Capabilities, roles, project policy, and confirmation requirements.", "Credentials, provider login flows, or UI-only hiding as security."],
+        policy: ["Authority boundary", "Capabilities + Policy", "Answers which actions are available to the current user and Bunker before the app offers them.", "Capabilities, roles, Bunker policy, and confirmation requirements.", "Credentials, provider login flows, or UI-only hiding as security."],
         events: ["Async contract", "Jobs + Event Stream", "Makes long-running Git, sync, and synthesis actions observable without blocking the app.", "Progress, cancellation, durable outcomes, and actionable failures.", "Vague loading states or raw subprocess logs as user-facing errors."],
-        "project-service": ["Domain service", "Project + Ticket", "Owns project identity, ticket lifecycle, relationships, branches, and normalized metadata.", "Canonical domain rules and ticket/project state transitions.", "SQL layouts or tracker-specific payload shapes."],
+        "project-service": ["Domain service", "Bunker + Project Tree", "Owns Bunker identity, recursive Project scope, repository bindings, ticket lifecycle, branches, and normalized metadata.", "Canonical Bunker, Project, repository-binding, and ticket transitions.", "SQL layouts or tracker-specific payload shapes."],
         "git-service": ["Domain service", "Git Workflow", "Builds safe, reviewable plans for fetch, branch, checkout, pull, merge, rebase, and commit-related actions.", "Git invariants, dirty-worktree guards, naming rules, and confirmations.", "Calling a user's terminal or silently rewriting their worktree."],
         "integration-service": ["Domain service", "Integration Sync", "Normalizes provider records through configurable field matrices and reconciles them with TicketBunker tickets.", "Mappings, source references, sync cursors, and conflict classification.", "Treating GitHub, GitLab, or Jira as TicketBunker's core model."],
         "coworker-service": ["Domain service", "Reports + Coworker", "Maintains grounded branch reports and the ticket-wide coworker session while preserving report publication gates.", "Evidence, synthesis, chat context, proposals, linting, and anchor verification.", "Editing source code or bypassing branch-level report ownership."],
         "team-sync": ["Domain service", "Team Sync", "Synchronizes team-owned TicketBunker state through a remote service and exposes explicit offline and conflict states.", "Sync intent, cursors, retries, conflict results, and local durability.", "Direct desktop-to-database access or invisible destructive resolution."],
-        "search-service": ["Domain service", "Search + Index", "Builds fast ticket and project discovery from local cached state plus remote references.", "Queries, filters, pagination, and rebuildable indexes.", "Becoming the authoritative store for tickets or configuration."],
+        "search-service": ["Domain service", "Search + Index", "Builds fast ticket and Project discovery from each local Bunker replica.", "Queries, filters, pagination, and rebuildable indexes.", "Becoming a parallel authority for tickets or configuration."],
         "persistence-adapter": ["Replaceable boundary", "Persistence Adapter", "Translates domain records into the selected local storage engine.", "Transactions, migrations, and storage-specific queries.", "Business rules or remote team authorization."],
-        "local-db": ["Device-owned state", "Local Database", "Keeps offline data, drafts, job state, caches, and other device-local durable information.", "Fast local continuity and recoverable application state.", "Final team authority or an opaque second source of ticket truth."],
+        "local-db": ["Device-owned replica", "Local Bunker Database", "Each Bunker gets one isolated SQLite file containing its Project tree, bindings, configuration, tickets, reports, and local replica state.", "Transactional local continuity, offline work, and explicit remote revision state.", "Another Bunker's records or direct access to the host-owned database."],
         "git-adapter": ["Replaceable boundary", "Git Adapter", "Executes validated workflow plans through TicketBunker's managed Git environment.", "Command construction, porcelain parsing, and stable result envelopes.", "Policy decisions or uncontrolled user-shell inheritance."],
-        "managed-git": ["Packaged tool", "Managed Git + Workspaces", "Provides a tested Git runtime and explicit project working copies independent of the user's terminal setup.", "Known executable behavior and workspace discovery.", "Owning source history; the project's Git remote still does that."],
+        "managed-git": ["Attached source tool", "Attached Git + Workspaces", "Provides tested Git behavior for repositories a user explicitly attaches to a Project.", "Known executable behavior, source observations, and guarded workflow actions.", "Bunker membership, configuration authority, database discovery, or ticket synchronization."],
         "tracker-adapter": ["Replaceable boundary", "Tracker Adapter", "Speaks provider protocols while returning one normalized TicketBunker integration contract.", "Pagination, rate limits, provider IDs, and source-specific field transport.", "Changing TicketBunker's domain model to match one provider."],
         "agent-adapter": ["Replaceable boundary", "Coworker Adapter", "Feeds scoped context to the selected agent runtime and converts its result into a candidate report update.", "Session invocation, context packaging, tool exposure, and bounded output parsing.", "Publishing unverified claims or editing the user's source tree."],
         "managed-pi": ["Packaged tool", "Managed Pi Runtime", "Provides TicketBunker's pinned coworker harness without requiring the user to install or open Pi directly.", "Harness execution and provider login handoff.", "TicketBunker's durable report contract or model credentials."],
-        "remote-adapter": ["Replaceable boundary", "Remote Storage Adapter", "Synchronizes with a self-hosted, company-hosted, or future compatible TicketBunker service.", "Protocol versioning, retry, offline queues, and conflict envelopes.", "Direct knowledge of the host's database technology."],
+        "remote-adapter": ["Replaceable boundary", "Remote Service Adapter", "Synchronizes with a self-hosted, company-hosted, or future compatible TicketBunker service.", "Protocol versioning, enrollment, retry, offline queues, and conflict envelopes.", "Direct knowledge of the host's database technology."],
         "search-index": ["Rebuildable state", "Local Search Index", "Accelerates project and ticket discovery while remaining disposable and derivable.", "Search documents, indexes, and cached remote references.", "Canonical tickets, configuration, or permissions."],
         "credential-vault": ["Device trust", "OS Credential Vault", "Stores provider and TicketBunker credentials under operating-system controls.", "Secrets and scoped tokens.", "Project data, portable configuration, or plaintext repository files."],
-        "git-remote": ["External authority", "Git Remote", "Owns source history, collaboration rules, and branch protections for each connected project.", "Commits, refs, code review, and source access.", "TicketBunker tickets or coworker reports unless explicitly exported."],
+        "git-remote": ["External source authority", "Git Remote", "Owns source history, collaboration rules, and branch protections for each attached repository.", "Commits, refs, code review, and source access.", "Bunker membership, configuration, tickets, or coworker reports unless explicitly exported."],
         "agile-providers": ["External integrations", "Agile Providers", "Supply issues, projects, comments, and provider-specific fields through configurable mappings.", "Their own records and authentication boundary.", "TicketBunker's universal schema or team database."],
         "model-providers": ["External computation", "Model Providers", "Run the user-selected model for synthesis and ticket coworker conversations.", "Model inference and provider account controls.", "Published report truth, Git state, or TicketBunker authorization."],
-        "remote-api": ["Team boundary", "Remote TicketBunker API", "Provides authenticated team collaboration without exposing the database or tying the product to one host.", "Membership, tenancy, authorization, sync, and server-side transactions.", "The desktop UI, source Git operations, or direct model sessions."],
-        "team-db": ["Host-owned persistence", "Team Database", "Stores team tickets, configuration, membership, report state, and synchronization metadata behind the remote API.", "Transactional team truth and backups chosen by the operator.", "A public client contract or assumptions about a single database engine."]
+        "remote-api": ["Team boundary", "Remote Bunker Service", "Authenticates users and enrolls replicas before providing team collaboration, without exposing the database or tying the product to one host.", "Membership, capabilities, authorization, snapshots, changes, and server-side transactions.", "The desktop UI, source Git operations, or direct model sessions."],
+        "team-db": ["Host-owned persistence", "Host-owned Database", "Stores team tickets, configuration, membership, report state, and synchronization metadata behind the remote service.", "Transactional team truth and backups chosen by the operator.", "A public client contract or assumptions about a single database engine."]
       };
 
       const nodes = [...document.querySelectorAll(".node[data-key]")];

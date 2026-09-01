@@ -6,15 +6,16 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Product in one paragraph
 
-TicketBunker is a Git-owned context layer between agile trackers and source
-work. Its default companion repository has protected configuration and shared
-ticket data on separate branches; each source repository commits only a small
-locator and ignores its local companion checkouts. Tickets preserve normalized
-tracker facts, provider extensions, activity, local branch relationships,
-deterministic Git observations, composed agent context, and gated agent reports.
-The ticket viewer presents tracker ground truth separately from Agent work. The
-stdlib-only Python package exposes the same commands to the CLI, localhost UI,
-and programmatic integrations.
+TicketBunker is a Bunker-owned context layer between agile trackers and source
+work. A Bunker is the configuration, membership, authorization, and sync
+boundary; it contains recursive Projects, and Projects explicitly attach Git
+repositories as source/workflow tools. Every Bunker has one device-local SQLite
+database and may optionally replicate through an authenticated, team-selected
+TicketBunker service whose physical database never becomes a client contract.
+Cloning source does not join a Bunker. Tickets preserve normalized tracker
+facts, provider extensions, activity, branch relationships, deterministic Git
+observations, composed agent context, and gated agent reports. Desktop and
+optional automation call the same stdlib-only Python action registry.
 
 ## Trust rules
 
@@ -34,7 +35,42 @@ and programmatic integrations.
 Everything below is covered by the test suite and deterministic product
 exercise unless a live boundary is explicitly called out.
 
-### Companion database and configuration
+### Bunker database and application onboarding
+
+- `ticketbunker/bunkerdb.py` owns the new storage boundary: one SQLite database
+  per Bunker plus a machine registry. The schema includes recursive Projects,
+  shared repository identities, device-local checkout paths, versioned config
+  documents, tickets, reports, remote relationships, and migration receipts.
+- Creating a Bunker needs only its name and first Project. Adding child Projects
+  and attaching repositories are separate typed actions. Repository attachment
+  validates the Git checkout and records its canonical remote identity without
+  writing `.ticketbunker.json`, `.tb/`, `.gitignore`, hooks, credentials, or a
+  database file into source.
+- `ticketbunker/remote.py` defines the versioned service boundary. HTTPS is
+  required except for localhost development. Join invitations are inspected
+  locally, bearer material is omitted from returned application state, and the
+  remote must authenticate/enroll the user before `create_replica` creates a
+  local database. Clients receive service/snapshot/change contracts, never a
+  remote database connection string. `docs/remote-service-contract.md` records
+  the endpoint, enrollment, capability, conflict, and error contracts.
+- The desktop launcher now lands on **Bunkers** with peer **Create Bunker** and
+  **Join Bunker** actions. Bunker rows show their Project tree, local database,
+  remote relationship, repository/ticket counts, and explicit Add project,
+  Attach repository, and Connect service actions.
+- Existing companion-backed projects appear in a separate Migration section.
+  **Import copy** reads legacy locator/config/ticket/report material into a new
+  local Bunker, records its digest and counts, and does not modify the source or
+  companion repository. The old and new stores are never concurrent writers.
+- The Bunker database and onboarding action tests live in
+  `tests/test_bunkerdb.py` and `tests/test_application.py`. The legacy ticket
+  engine/viewer is still present during the handler-by-handler storage cutover;
+  do not misrepresent it as Bunker-native yet.
+
+### Legacy companion database and configuration
+
+The behaviors below remain compatibility and import coverage for installations
+created before the Bunker database cutover. They are not the authority model for
+new Bunkers.
 
 - `tb init` is the one public connection command. Without a locator it connects
   an owner-created repository, publishes `ticketbunker/config` and
@@ -214,20 +250,19 @@ exercise unless a live boundary is explicitly called out.
   If no app is installed, browser mode remains the automatic fallback. Its
   health/version replacement, page-presence shutdown, `--foreground`, and
   `--no-open` behavior are unchanged.
-- Opening the app without CLI arguments now lands on its bundled Projects
-  window. A native picker registers normalized Git roots through typed
-  `application.*` commands; machine-local identity defaults from Git, and
-  remembered projects show Ready, Join, or Connect. Join/Create visibly calls
-  the existing `project.connect` backend. Create derives and prefills SSH/HTTPS,
-  Git host, owner/group, and a suggested `<source>-ticketbunker` repository from
-  the source `origin`; the Python boundary validates and assembles the remote.
-  Linux sessions with a stale advertised D-Bus socket use GTK's in-memory
-  settings backend, preventing WSL picker warning floods. The privileged local
-  window and unprivileged
-  loopback ticket window are separate labels; only Projects receives the
-  directory-dialog capability.
+- Opening the app without CLI arguments now lands on its bundled Bunkers
+  window. Create makes a local Bunker plus first Project before Git is involved;
+  Join reviews a bounded invitation and calls the remote enrollment contract
+  before creating a replica. Each Bunker shows its recursive Project tree,
+  local/remote storage relationship, counts, and explicit Project/repository/
+  service actions. Repository inspection and attachment happen only after a
+  native picker selection and never mutate the checkout. Linux sessions with a
+  stale advertised D-Bus socket use GTK's in-memory settings backend,
+  preventing WSL picker warning floods. The privileged local window and
+  unprivileged loopback ticket window are separate labels; only Bunkers receives
+  the directory-dialog capability.
 - First-run and Local settings now provide the complete agent path without
-  opening Pi's terminal UI. The Projects window starts verified Pi in
+  opening Pi's terminal UI. The Bunkers window starts verified Pi in
   constrained RPC mode with only TicketBunker's pinned auth bridge, renders
   OAuth, device-code, select, and secret prompts itself, and sends replies
   directly from Rust to Pi. Pi alone writes credentials; Python receives only
@@ -242,7 +277,7 @@ exercise unless a live boundary is explicitly called out.
 
 ### Distribution
 
-- Version 0.2.24 keeps the six-platform core release pipeline while the new
+- Version 0.3.0 keeps the six-platform core release pipeline while the new
   native app bundle is integrated: Linux, macOS, and Windows on x64 and arm64.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
@@ -294,7 +329,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 204 tests, plus 8 Rust shell tests.
+references. The current full suite is 219 tests, plus 8 Rust shell tests.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
 the persistent rail, compact shared-truth indicators, coworker launcher/panel,
@@ -307,7 +342,7 @@ mobile widths; a real textarea selection opens the drawer with its source
 reference, survives reload, collapses, and reopens without horizontal overflow.
 This does not replace the HTTP/CSRF tests.
 
-## Existing agent pipeline
+## Existing legacy agent pipeline
 
 The established agent loop remains green: ticket → branch → Git event marks
 staleness → user presses Synthesize → queued bootstrap → compose → scaffold →
@@ -350,17 +385,27 @@ exercise intentionally does not run an agent report.
 
 ## Remaining product work
 
-1. Exercise GitHub API pagination and rate-limit failure copy with a larger
-   disposable Project. The four-ticket live sync and hosted Git publication
-   path are verified.
-2. Warn when composed `tb.md` exceeds a documented token budget.
-3. Add age-based archival policy for closed tickets without deleting data.
+1. Move the ticket, report, observation, ledger, configuration, search, and
+   coworker handlers from legacy companion paths to the per-Bunker database,
+   preserving their typed gates and viewer behavior.
+2. Implement a compatible reference remote service (or deploy against the
+   selected team service) for login, invitation issuance/redemption, capability
+   checks, snapshots, idempotent changes, and conflict testing. The client
+   protocol is present; there is intentionally no direct database fallback.
+3. Replace pending-auth manual service setup with the complete native login and
+   OS-vault credential-reference flow.
+4. Add signed/versioned JSON and markdown export/import for local-only and
+   air-gapped Bunkers, then verify round trips from SQLite and a remote replica.
+5. Remove legacy companion publication only after parity and verified imports;
+   keep its reader available for a documented deprecation window.
 
 ## Non-negotiable implementation rules
 
 - Stdlib-only core; no package dependency additions.
 - Update `DESIGN.md` in the same commit as meaningful behavior changes.
-- Resolve every bunker path through `ticketbunker/layout.py`.
+- Resolve legacy companion/runtime paths through `ticketbunker/layout.py`.
+  New durable Bunker data must go through `ticketbunker/bunkerdb.py`; callers do
+  not construct SQLite paths or issue SQL outside that module.
 - Never weaken typed intake, structural ledgering, report lint, anchor checking,
   or provenance separation to make a test pass.
 - User failures must say what happened and what to do next; a raw traceback is
@@ -377,7 +422,10 @@ exercise intentionally does not run an agent report.
 | Concern | Path |
 |---|---|
 | Design authority | `DESIGN.md` |
-| Layout | `ticketbunker/layout.py` |
+| Bunker SQLite domain | `ticketbunker/bunkerdb.py` |
+| Remote service protocol | `ticketbunker/remote.py` |
+| Desktop/API action registry | `ticketbunker/application.py` |
+| Legacy layout | `ticketbunker/layout.py` |
 | Shared commands | `ticketbunker/commands.py`, `ticketcommands.py` |
 | Companion storage | `ticketbunker/project.py` |
 | Committed references | `ticketbunker/ticketindex.py` |

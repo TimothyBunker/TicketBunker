@@ -29,36 +29,43 @@ produced by the deterministic pipeline); **inferences are clearly labeled as
 inferences** (agent conclusions built on those facts). A reader should always be
 able to tell which is which.
 
-See [DESIGN.md](DESIGN.md) for the architecture.
-Open the self-contained [API-first target diagram](docs/ticketbunker-api-architecture.html)
-to inspect the proposed standalone-app direction; it is a design study and does
-not supersede `DESIGN.md` until accepted.
+See [DESIGN.md](DESIGN.md) for the architecture and the
+[remote service contract](docs/remote-service-contract.md) for the host-neutral
+collaboration boundary.
+Open the self-contained [Bunker-first architecture diagram](docs/ticketbunker-api-architecture.html)
+for the interactive system view.
 The disposable [15-ticket, two-user product loop](docs/mock-product-loop.md)
 records the current end-to-end behavior and measurements.
 
-## Layout of a bunker
+## Bunkers, Projects, and repositories
 
-The source repo commits a locator and ignores two local companion checkouts.
-One bunker per ticket lives on the companion data branch:
+A **Bunker** is the configuration, membership, security, and synchronization
+boundary. It contains a recursive tree of **Projects**. A Project is a work
+scope, not a Git repository; repositories are attached explicitly after the
+Bunker and Project exist.
+
+Every Bunker gets one device-local SQLite database outside all source
+repositories:
 
 ```
-.ticketbunker.json
-.tb/
-├── config/         # local checkout of ticketbunker/config
-└── data/projects/<PROJECT>/tickets/
-    ├── index.json       # bounded committed references; enough for search/listing
-    └── <TICKET-ID>/     # hydrated only when this ticket is opened or changed
-        ├── tb.md        # composed session context — exactly what a session is fed
-        ├── context/     # the fragments tb.md is composed from (modular, auditable)
-        ├── observations/# atomic git facts from the bootstrap pipeline (JSON)
-        ├── ledger.jsonl # every command + stage marker, logged structurally
-        └── reports/
-            ├── master.md # mechanically regenerated from children, digest-pinned
-            └── branches/ # one agent-written component per branch
+<TicketBunker data home>/
+└── bunkers/
+    ├── registry.sqlite3
+    └── <LOCAL-BUNKER-ID>/bunker.sqlite3
 ```
 
-The harness (pi) persists its own session data separately; the bunker holds
-only what TicketBunker owns.
+The database stores the Project tree, shared repository identities, device-local
+checkout mappings, configuration revisions, tickets, reports, migration
+records, and remote replica state. Attaching a repository writes no locator,
+database, ignore entry, or authorization hint into that repository.
+
+A Bunker may remain local. Team collaboration adds an authenticated relationship
+to a compatible TicketBunker service backed by infrastructure the team owns.
+The app never connects directly to that remote database. Cloning a source
+repository never joins a Bunker.
+
+The harness (Pi) persists its own session data separately; the Bunker holds only
+what TicketBunker owns.
 
 ## Installing
 
@@ -70,7 +77,7 @@ Python, Node, nor a separate Pi install:
 2. Download the TicketBunker AppImage or Debian package on Linux, DMG on macOS,
    or setup executable on Windows for your architecture. Its adjacent
    `.sha256` file lets managed installs verify the download first.
-3. Install or open it, then choose **Add Git project**.
+3. Install or open it, then choose **Create Bunker** or **Join Bunker**.
 
 On first run, TicketBunker uses your Git identity when it is complete, then
 offers agent setup. Choose a provider, sign in through a normal app dialog, and
@@ -129,6 +136,29 @@ targets.
 
 ## Usage
 
+The desktop launcher is the primary onboarding path:
+
+1. **Create Bunker** makes a local Bunker and its first Project without asking
+   for a repository.
+2. **Join Bunker** first shows the service and Bunker identity from the
+   invitation, then authenticates and enrolls the user before creating a local
+   replica.
+3. Inside a Bunker, **Add project** builds the recursive work hierarchy.
+4. **Attach repository** selects a local Git checkout, previews its canonical
+   identity, and records the device path only after confirmation.
+5. **Connect service** records an optional remote-service relationship; it
+   never accepts a database connection string.
+
+Existing companion-Git projects appear under **Migration** with **Import copy**.
+Import is read-only with respect to both source and companion repositories and
+records its source digest and imported counts. The old store does not remain a
+second live writer.
+
+The commands below are the compatibility and automation surface for the
+existing ticket/report engine while its storage handlers are moved behind the
+new Bunker database. They remain supported during migration, but `tb init` is
+not how a new Bunker establishes membership:
+
 ```sh
 # First create an empty Git repository on any host you control. TicketBunker
 # connects to that URL; it never creates the hosting repository.
@@ -176,23 +206,17 @@ tb lint form.md && tb publish TB-1267 --branch Tim/TB-1267-fourier-alg-impl --fi
 tb survey . && tb status TB-1267
 ```
 
-`.ticketbunker.json` is committed with the source. `.tb/` is an ignored local
-checkout/cache; canonical configuration and data live on separate branches of
-the companion repository. A standalone database (`tb ticket --root`, `tb
-sync`) and embedded legacy bunkers remain supported. On every later clone,
-`tb init` reads the locator and connects automatically. A fresh connection checks
-out only committed ticket indexes; opening or changing a ticket fetches that
-one bunker without copying every ticket and report.
+`.ticketbunker.json`, `.tb/`, companion branches, and `tb init` belong to the
+legacy storage adapter. They remain readable so existing users can verify and
+import their data, but they are not the membership, authorization, discovery,
+or synchronization contract for new Bunkers.
 
-Opening a ticket renders cached companion data and local or already-fetched
-Git refs immediately. After the response, TicketBunker refreshes the companion
-checkout and runs a safe `git fetch --prune origin` in the source repository in
-the background. It then rebuilds Branches from matching local branches,
-remote-tracking branches, and explicit assignments. Fetch does not touch the
-worktree, so uncommitted files are preserved and no pull, rebase, switch,
-merge, reset, or stash occurs. Offline opens keep the ticket on screen with
-local and cached refs plus a direct retry action. This background refresh never
-calls the synthesis agent.
+The legacy ticket viewer renders its imported/cached ticket data and local or
+already-fetched Git refs immediately. Its safe source fetch does not touch the
+worktree, so uncommitted files are preserved and no pull, rebase, switch, merge,
+reset, or stash occurs. The Bunker-native ticket read model will retain these
+invariants while replacing companion refresh with remote-service sync. Neither
+path calls the synthesis agent merely because a ticket was opened.
 
 `tb init` performs its own remote probe. It retries transient DNS resolution,
 uses bounded non-interactive Git operations, and distinguishes DNS, timeout,
@@ -201,18 +225,19 @@ authentication, repository access, and local fast-forward failures. The old
 predates the locator, `tb init` finds the single locator-bearing remote branch
 and switches a clean worktree to it. Dirty or conflicting choices are refused.
 
-## The backend is a git repo
+## Storage and collaboration
 
-The team's bunker database lives in a companion git repository — no service to
-stand up. `ticketbunker/config` holds field sets and project/provider mapping;
-`ticketbunker/data` holds tickets, observations, ledgers, and reports. Each
-successful data mutation commits, reconciles, and pushes through ordinary Git.
-The repository itself must already exist and be accessible when `tb init`
-connects it; an empty repository is valid. TicketBunker creates only its owned
-branches, never a GitHub, GitLab, Jira, or other hosting repository.
-JSONL ledgers are union-merged; generated masters are regenerated from their
-children. Remote and branch permissions are the authority, including who may
-publish configuration.
+The backend contract is TicketBunker's typed API and domain services. Local
+mutations use the Bunker's SQLite transaction boundary. A shared Bunker syncs
+revisioned, idempotent changes through an authenticated TicketBunker service;
+the service owns membership and capability checks. The host may use SQLite,
+PostgreSQL, or another transactional engine without exposing that choice to the
+desktop app.
+
+Git owns source commits, refs, branch protection, and code review. It does not
+own TicketBunker membership, configuration, tickets, reports, or database
+transport. Git bundles and JSON/markdown packages remain useful explicit
+export/import formats, especially across air gaps, but they are not live state.
 
 The Ticket fields page has separate project and Global defaults views. Global
 changes create a new immutable field-set version for projects initialized in
@@ -222,7 +247,7 @@ mapping atomically. GitHub Issues, GitLab Issues, and Jira Cloud start with
 editable templates; custom integrations use the exact same mapping and local
 token surfaces.
 
-The Local settings page stays outside the companion repository. TicketBunker's
+The Local settings page stays outside synchronized Bunker configuration. TicketBunker's
 included browser editor is the default and needs no terminal or system editor.
 That page controls spaces or tabs, tab width, line wrapping, trailing-whitespace
 cleanup, and final-newline cleanup. Settings are saved only in `~/.tbconfig`.
@@ -230,13 +255,15 @@ An external command remains optional; `TB_EDITOR`, `VISUAL`/`EDITOR`, Git's
 `core.editor`, automatic Vim/Nano detection, and Git for Windows' bundled Vim
 are retained for that mode.
 
-To move an old embedded database safely:
+The older direct migration command remains available for companion-to-companion
+moves. For the Bunker database cutover, prefer the desktop's read-only **Import
+copy** action. The legacy command is:
 
 ```sh
 tb migrate --project TB --bunker-repo git@host:team/project-ticketbunker.git
 ```
 
-Migration backs up the complete old `.tb/` below `.git/ticketbunker-backups/`,
+That legacy migration backs up the complete old `.tb/` below `.git/ticketbunker-backups/`,
 publishes both companion branches, and only then removes the tracked legacy
 paths for the source commit.
 
@@ -250,14 +277,17 @@ the door, and the rejection is ledgered.
 
 ```
 ticketbunker/
-├── layout.py      # the bunker layout, defined once — navigable like .git
-├── api.py         # public read model: ticket + branches + reports, no cache
+├── bunkerdb.py    # per-Bunker SQLite schema, transactions, hierarchy, imports
+├── remote.py      # authenticated service protocol; no direct remote DB access
+├── application.py # shared desktop/automation action registry
+├── layout.py      # legacy companion layout and runtime artifact authority
+├── api.py         # legacy ticket read model during storage-handler migration
 ├── types/         # information type registry + validation rules
 ├── handlers/      # typed intake: validate → write → ledger (the only write paths)
 ├── integrations/  # thin stdlib tracker transports; all writes dispatch typed commands
 ├── builders/      # artifact construction: tb.md, report form, master, fragments
 ├── processors/    # derivation: bootstrap stages, lint gates
-├── adapters/      # external boundaries: git (harness + backend next)
+├── adapters/      # external boundaries such as Git and the agent harness
 ├── contracts.py   # stage contracts and the marker-bracketing runner
 ├── ledger.py      # append-only execution ledger
 └── cli.py         # thin orchestration over the above
@@ -297,8 +327,8 @@ no shell, edit, write, or Git tool. Raw chat stays below
 lint, and real anchors before changing that child and regenerating Combined.
 Rejected proposals show only a concise outcome in the conversation; exact
 validator findings remain in the private local coworker diagnostics.
-If companion publication stops, the accepted local report remains visible as
-**Companion publish pending** with its next action.
+If remote synchronization stops, the accepted local report remains visible
+with a clear sync-pending state and next action.
 
 The category actions and persistent launcher are compact chat bubbles.
 Highlighting part of a synthesis or its full trail reveals a contextual bubble;
@@ -329,7 +359,7 @@ the project window closes. If the desktop shell is not installed, the command
 uses the same localhost browser viewer automatically. Use `--browser` to choose
 that fallback explicitly, `--no-open` when you only want its local service, or
 `--foreground` when debugging the server itself. Starting the app/viewer or
-opening a source reference never publishes companion data. If an optional
+opening a source reference never publishes shared report data. If an optional
 external editor cannot open, the source link falls back to the included editor.
 After a TicketBunker update, browser mode detects an older detached worker and
 opens the current viewer instead of reconnecting to stale behavior.
@@ -337,18 +367,17 @@ opens the current viewer instead of reconnecting to stale behavior.
 The desktop shell currently lives in `desktop/` and is built with Tauri 2. Its
 security and process-lifecycle contract is documented in
 [`desktop/README.md`](desktop/README.md). Opening the app itself lands on
-Projects. **Add Git project** chooses a local checkout; an existing locator can
-be joined. For a new project, TicketBunker prefills the shared Git storage's
-access method, host, owner/group, and repository name from the checkout's
-`origin`; edit any part and confirm the assembled address. TicketBunker never
-creates or hosts that repository.
+Bunkers. **Create Bunker** and **Join Bunker** are peer actions. Each Bunker row
+shows its recursive Projects, local database, optional remote-service state,
+repository attachments, and ticket counts. Source repositories enter only
+through **Attach repository** inside an existing Project.
 The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
 are available directly in the app; the app never exposes Pi's terminal UI.
 
-The same repository-owned view is available to Python integrations without
-going through HTML or scraping CLI output:
+The compatibility ticket view is available to Python integrations without going
+through HTML or scraping CLI output:
 
 ```python
 from ticketbunker.api import TicketCatalog, TicketDatabase, TicketQuery
@@ -364,7 +393,8 @@ for reference in page.tickets:
     print(reference.project, reference.id, reference.title)
 ```
 
-This query API is deliberately read-only. Mutations use shared command
+This legacy query API is deliberately read-only while the Bunker-native read
+model is completed. Mutations use shared command
 envelopes—the CLI and localhost editor call the same handlers—so validation,
 Git publication, and the ledger cannot be bypassed. Optional
 `acceptance_criteria`, `metadata`, and provider-neutral `activity` entries
@@ -392,8 +422,8 @@ tb github https://github.com/TimothyBunker/coal/issues/4 --project 8
 tb github --project 8 --project-owner TimothyBunker
 ```
 
-Repeated identical pulls are no-ops: no ticket ledger entry and no companion
-commit. Changed source fields update while TicketBunker's branch assignments and
+Repeated identical pulls are no-ops: no ticket ledger entry and no storage
+revision. Changed source fields update while TicketBunker's branch assignments and
 local extensions remain intact. `--fixture snapshot.json` uses the same path
 offline for tests and demos. The JSON-only copy/paste wrapper remains under
 [examples/github_projects](examples/github_projects/README.md).
@@ -403,8 +433,9 @@ offline for tests and demos. The JSON-only copy/paste wrapper remains under
 The user chooses when synthesis is worth the model call. `tb init` installs
 local Git hooks for checkout, commit, merge, and rebase events, but each hook
 only records the newest ticket branch, HEAD, event, and change time below
-`.git`. It performs no network, observation, or agent work. Opening a ticket
-also refreshes companion data and Git refs without calling the model.
+local Git administrative state. It performs no network, observation, or agent
+work. Opening a ticket may sync its Bunker and refresh Git refs without calling
+the model.
 
 Press **Synthesize** or **Update synthesis** in the ticket state hub to queue
 the detached worker. It refreshes deterministic observations first, then runs

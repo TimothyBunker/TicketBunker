@@ -270,19 +270,33 @@ fn relay_agent_output(app: AppHandle, output: impl std::io::Read + Send + 'stati
 }
 
 fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<Value, String> {
+    let encoded = payload.to_string();
     let mut command = Command::new(&state.core);
     command
         .arg("_app-command")
         .arg(name)
         .arg("--payload")
-        .arg(payload.to_string())
-        .stdin(Stdio::null());
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(root) = bundle_root(state) {
         command.env("TB_BUNDLE_ROOT", root);
     }
-    let output = command
-        .output()
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "TicketBunker could not send that action to its core.".to_string())?;
+    input
+        .write_all(encoded.as_bytes())
+        .map_err(|_| "TicketBunker could not send that action to its core.".to_string())?;
+    drop(input);
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("TicketBunker could not finish its core action: {error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr)
             .trim()
@@ -301,7 +315,7 @@ fn core_command(state: &ApplicationState, name: &str, payload: Value) -> Result<
 
 fn require_launcher(window: &WebviewWindow) -> Result<(), String> {
     if window.label() != "launcher" {
-        return Err("This action is available only from the local Projects window.".to_string());
+        return Err("This action is available only from the local Bunkers window.".to_string());
     }
     Ok(())
 }
@@ -577,6 +591,94 @@ fn add_git_project(
 }
 
 #[tauri::command]
+fn create_bunker(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.create", payload)
+}
+
+#[tauri::command]
+fn create_bunker_project(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.project.create", payload)
+}
+
+#[tauri::command]
+fn inspect_git_repository(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    path: String,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(
+        &state,
+        "application.repository.inspect",
+        json!({ "path": path }),
+    )
+}
+
+#[tauri::command]
+fn attach_git_repository(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.repository.attach", payload)
+}
+
+#[tauri::command]
+fn configure_bunker_remote(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.remote.configure", payload)
+}
+
+#[tauri::command]
+fn inspect_bunker_invitation(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    invitation: String,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(
+        &state,
+        "application.invitation.inspect",
+        json!({ "invitation": invitation }),
+    )
+}
+
+#[tauri::command]
+fn join_bunker(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.join", payload)
+}
+
+#[tauri::command]
+fn import_companion_project(
+    window: WebviewWindow,
+    state: tauri::State<ApplicationState>,
+    payload: Value,
+) -> Result<Value, String> {
+    require_launcher(&window)?;
+    core_command(&state, "application.bunker.import.companion", payload)
+}
+
+#[tauri::command]
 fn remove_git_project(
     window: WebviewWindow,
     state: tauri::State<ApplicationState>,
@@ -679,6 +781,14 @@ pub fn run() {
             configure_agent,
             open_agent_auth_url,
             add_git_project,
+            create_bunker,
+            create_bunker_project,
+            inspect_git_repository,
+            attach_git_repository,
+            configure_bunker_remote,
+            inspect_bunker_invitation,
+            join_bunker,
+            import_companion_project,
             remove_git_project,
             connect_git_project,
             open_git_project

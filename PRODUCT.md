@@ -6,20 +6,23 @@ product
 
 ## Users
 
-Engineers, technical leads, and project contributors working from a shared
-git repository. Their primary job is to open one ticket, understand its
+Engineers, technical leads, and project contributors working across one or
+more source repositories. Their primary job is to open one ticket, understand its
 current truth, find the relevant branch and report, and continue or review the
 work without reconstructing history by hand.
 
 ## Product Purpose
 
-The project's companion Git repository owns the ticket system and acts as its
-shared, updating database; a committed locator connects source checkouts to it.
-TicketBunker combines the familiar information anatomy of
-an agile ticket with repository-owned lifecycle state, branches, verified
-reports, observations, and extensible metadata. Success means a contributor
-can understand and act on a ticket without needing the originating agent
-session or an external service.
+A Bunker is the product's configuration, membership, and synchronization
+boundary. It always has one device-local database and may connect through a
+TicketBunker service API to team-owned remote storage. Projects form a hierarchy
+inside the Bunker; Git repositories are attached resources rather than the
+database or authentication system. TicketBunker combines the familiar
+information anatomy of an agile ticket with Git lifecycle state, branches,
+verified reports, observations, and extensible metadata. Success means a
+contributor can understand and act on a ticket without needing the originating
+agent session or knowing which provider, Git executable, or database implements
+the boundary.
 
 ## Brand Personality
 
@@ -38,7 +41,7 @@ and report provenance easier to reach. It should disappear into the task.
 
 ## Design Principles
 
-1. The companion repository is the authority. External trackers are import sources and familiar information models.
+1. The Bunker is the authority. A local database always exists; an authenticated remote service becomes team authority only when configured. Git and trackers are attached sources, never membership proof.
 2. Design one ticket first. Global search and portfolio views come after the singular ticket works.
 3. Make the next useful object obvious. Branches and child reports stay visible and directly accessible.
 4. Put proof beside claims. Verification, freshness, and provenance are visible without dominating the page.
@@ -48,9 +51,11 @@ and report provenance easier to reach. It should disappear into the task.
 8. Make provenance structural. Ticket-owned information and agent-owned information live behind explicit Ticket and Agent views; Combined and branch reports are selected, never visually blended.
 9. Treat integrations as compositions. Presets accelerate setup, but custom integrations use the same field matrix and command contract.
 10. Make synthesis intentional. Ordinary checkout, commit, merge, and rebase events mark the affected ticket as changed without calling a model; the user starts synthesis from the ticket state hub when a new summary is useful.
-11. Make shared truth explicit. Render cached ticket data immediately, refresh companion and Git refs in the background, and name synthesis age, commits since, preserved state, and the next action whenever work stops.
+11. Make shared truth explicit. Render local ticket data immediately, synchronize remote Bunker state and Git refs independently, and name synthesis age, commits since, preserved state, and the next action whenever work stops.
 12. Keep the coworker in the ticket layer. One private per-user/per-ticket session may explain and propose gated child-report synthesis updates; it never edits source or Combined directly.
-13. Make it feel like one application. Preserve the direct ticket interface inside a distinct desktop shell; keep the Python core and CLI as the one behavior boundary, and keep browser mode as an explicit fallback.
+13. Make it feel like one application. The desktop opens to Bunkers, then Projects, then attached repositories and tickets. Keep the Python API/action registry as the behavior boundary; CLI automation and browser fallback remain optional clients.
+14. Treat Project as a recursive work scope, not a repository synonym. A Project may contain subprojects and attach zero or more repositories.
+15. Keep discovery separate from authority. Cloning code never joins a Bunker; authenticated invitation or explicit local creation does.
 
 ## Accessibility & Inclusion
 

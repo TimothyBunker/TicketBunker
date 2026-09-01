@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,8 +21,13 @@ class ApplicationStateTests(unittest.TestCase):
         self.source = self.root / "source"
         self.config_patch = mock.patch.object(config, "GLOBAL_CONFIG", self.settings)
         self.config_patch.start()
+        self.data_patch = mock.patch.dict(
+            os.environ, {"TB_DATA_HOME": str(self.root / "app-data")}
+        )
+        self.data_patch.start()
 
     def tearDown(self) -> None:
+        self.data_patch.stop()
         self.config_patch.stop()
         self.tempdir.cleanup()
 
@@ -153,6 +160,112 @@ class ApplicationStateTests(unittest.TestCase):
         outside.mkdir()
         with self.assertRaisesRegex(commands.CommandRejected, "Git working tree"):
             application.inspect_project(str(outside))
+
+    def test_desktop_creates_bunker_before_attaching_a_repository(self) -> None:
+        context = commands.CommandContext(self.root, transport="desktop")
+        created = commands.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "SYS", "project_name": "Systems"},
+            context,
+        )
+
+        self.assertEqual(created["bunker"]["name"], "Engineering")
+        self.assertEqual(created["bunker"]["repository_count"], 0)
+        self.assertEqual(application.state()["bunkers"][0]["project_count"], 1)
+        self.assertEqual(application.state()["legacy_projects"], [])
+
+    def test_desktop_repository_attachment_does_not_write_a_locator(self) -> None:
+        context = commands.CommandContext(self.root, transport="desktop")
+        created = commands.dispatch(
+            "application.bunker.create",
+            {"name": "ECS", "project_key": "ECS"},
+            context,
+        )["bunker"]
+        attached = commands.dispatch(
+            "application.bunker.repository.attach",
+            {
+                "bunker_id": created["id"],
+                "project_id": created["projects"][0]["id"],
+                "path": str(self.source),
+            },
+            context,
+        )["bunker"]
+
+        self.assertEqual(attached["repositories"][0]["local_path"], str(self.source))
+        self.assertFalse((self.source / ".ticketbunker.json").exists())
+
+    def test_invitation_inspection_never_returns_the_bearer_value(self) -> None:
+        result = commands.dispatch(
+            "application.invitation.inspect",
+            {
+                "invitation": (
+                    "ticketbunker://join?server=https%3A%2F%2Ftickets.example.test"
+                    "&bunker=engineering&invite=secret"
+                )
+            },
+            commands.CommandContext(self.root, transport="desktop"),
+        )
+
+        self.assertEqual(result["invitation"]["bunker_id"], "engineering")
+        self.assertNotIn("secret", json.dumps(result))
+
+    def test_desktop_payload_can_travel_over_stdin_instead_of_process_arguments(self) -> None:
+        invitation = (
+            "ticketbunker://join?server=https%3A%2F%2Ftickets.example.test"
+            "&bunker=engineering&invite=process-private"
+        )
+        process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from ticketbunker.cli import main; raise SystemExit(main())",
+                "_app-command",
+                "application.invitation.inspect",
+                "--payload",
+                "-",
+            ],
+            cwd=self.root,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1])},
+            input=json.dumps({"invitation": invitation}),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        self.assertNotIn("process-private", process.stdout)
+        self.assertEqual(json.loads(process.stdout)["invitation"]["bunker_id"], "engineering")
+
+    def test_join_creates_a_replica_only_after_remote_enrollment(self) -> None:
+        snapshot = application.remote.RemoteSnapshot(
+            bunker={"id": "engineering", "name": "Engineering"},
+            projects=({"id": "systems", "key": "SYS", "name": "Systems"},),
+            repository_bindings=(),
+            config_documents=(),
+            members=({"id": "tim", "display_name": "Tim"},),
+            current_member_id="tim",
+            capabilities=("tickets:read",),
+            revision="7",
+        )
+        enrollment = application.remote.Enrollment(snapshot, "vault:item-7")
+        adapter = mock.Mock()
+        adapter.enroll.return_value = enrollment
+        with mock.patch.object(
+            application.remote, "HTTPRemoteAdapter", return_value=adapter
+        ):
+            result = commands.dispatch(
+                "application.bunker.join",
+                {
+                    "invitation": (
+                        "ticketbunker://join?server=https%3A%2F%2Ftickets.example.test"
+                        "&bunker=engineering&invite=one-use"
+                    )
+                },
+                commands.CommandContext(self.root, transport="desktop"),
+            )
+
+        self.assertEqual(result["bunker"]["remote"]["config_revision"], "7")
+        self.assertEqual(result["bunker"]["projects"][0]["key"], "SYS")
+        adapter.enroll.assert_called_once()
 
     def test_agent_decision_is_distinct_from_model_configuration(self) -> None:
         self.assertFalse(application.state()["agent"]["decided"])

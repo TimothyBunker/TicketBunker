@@ -5,18 +5,18 @@ window. It starts the frozen `tb` core as a child, waits for the loopback viewer
 loads only that exact origin, and stops the child when the window is destroyed.
 The webview receives no Tauri operating-system capabilities.
 
-Launching the executable without `--repo` opens the bundled Projects window.
-Its native directory picker normalizes selections through the Python command
-backend, and its profile/project registry stays in the same machine-local
-TicketBunker config as the CLI. Ready projects open in a separate loopback
-window; projects that need setup receive an explicit Join or Connect dialog.
-Connect requires a repository the user already created. The app derives and
-prefills its access method, host, owner/group, and suggested TicketBunker name
-from the source `origin`; the Python command boundary assembles and validates
-the Git address. A stale or missing Linux session D-Bus socket selects GTK's
-in-memory settings backend so the native picker remains quiet and responsive.
+Launching the executable without `--repo` opens the bundled Bunkers window.
+Create Bunker makes one local SQLite database and a first Project without
+touching Git. Join Bunker inspects a bounded invitation, then requires remote
+authentication and enrollment before installing a local replica. Each Bunker
+renders its recursive Project tree; only an explicit Attach repository action
+opens the native directory picker, validates the checkout through the Python
+action registry, and records its device-local path. Existing companion-backed
+projects appear only in the read-only Migration section. A stale or missing
+Linux session D-Bus socket selects GTK's in-memory settings backend so the
+native picker remains quiet and responsive.
 
-Agent setup is also owned by the Projects window. It starts the verified Pi
+Agent setup is also owned by the Bunkers window. It starts the verified Pi
 runtime in constrained RPC mode with only `tb_auth.ts`, renders provider login
 as native forms, and sends secret responses straight from Rust to Pi. The
 Python core never receives provider secrets. Closing the dialog kills that Pi
@@ -53,6 +53,6 @@ Use `--stage-only` to inspect the ignored `src-tauri/binaries/` and
 `src-tauri/resources/` inputs without running the native bundler.
 
 The desktop boundary and first-run target are authoritative in `DESIGN.md`
-section 3.19. In particular, the native project picker remains in a separate
+section 3.19. In particular, the native Bunker launcher remains in a separate
 local webview and must never navigate that privileged window to ticket HTML.
 The same rule confines agent-setup events to that window.

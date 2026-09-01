@@ -1,8 +1,8 @@
 """Machine-local desktop application state and typed commands.
 
-The desktop shell is intentionally thin.  Project discovery and the local
-profile live behind the same command dispatcher used by every other
-TicketBunker transport.
+The desktop shell is intentionally thin. Bunker onboarding, repository
+attachment, legacy import, and the local profile live behind the same command
+dispatcher used by every other TicketBunker transport.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import agent_runtime, commands, config, project
+from . import agent_runtime, bunkerdb, commands, config, project, remote
 
 
 _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -206,9 +206,18 @@ def state() -> dict[str, Any]:
                     "repository": "",
                 }
             )
+    imported = bunkerdb.imported_companion_sources()
+    legacy_projects = [
+        {**value, "imported": str(value.get("path") or "") in imported}
+        for value in projects
+    ]
     agent = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
     return {
         "profile": _profile(settings),
+        "bunkers": bunkerdb.list_bunkers(),
+        # Companion-Git registrations remain visible only as migration input.
+        # New desktop onboarding does not use this list as its control plane.
+        "legacy_projects": legacy_projects,
         "projects": projects,
         "agent": {
             "enabled": bool(agent.get("enabled", True)),
@@ -218,6 +227,26 @@ def state() -> dict[str, Any]:
             "decided": "agent" in settings,
         },
     }
+
+
+def inspect_repository(raw: str) -> dict[str, Any]:
+    """Inspect a Git checkout without treating it as Bunker authority."""
+    root = _source_root(raw)
+    origin = _source_remote(root)
+    return {
+        "path": str(root),
+        "name": root.name,
+        "origin": origin,
+        "canonical_remote": bunkerdb.canonical_remote(origin),
+        "legacy_companion": project.load_locator(root) is not None,
+    }
+
+
+def _bunker_result(operation: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        return operation(*args, **kwargs)
+    except (bunkerdb.BunkerDatabaseError, remote.RemoteContractError) as exc:
+        raise commands.CommandRejected("bunker_action_rejected", str(exc)) from exc
 
 
 @commands.register("application.state")
@@ -362,4 +391,117 @@ def command_project_connect(
     return {"connection": result, "project": selected}
 
 
-__all__ = ["inspect_project", "state"]
+@commands.register("application.bunker.create")
+def command_bunker_create(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.create_bunker,
+        str(payload.get("name") or ""),
+        project_key=str(payload.get("project_key") or ""),
+        project_name=str(payload.get("project_name") or ""),
+    )
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.project.create")
+def command_bunker_project_create(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.create_project,
+        str(payload.get("bunker_id") or ""),
+        key=str(payload.get("key") or ""),
+        name=str(payload.get("name") or ""),
+        parent_id=str(payload.get("parent_id") or "") or None,
+        description=str(payload.get("description") or ""),
+    )
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.repository.inspect")
+def command_repository_inspect(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        repository = inspect_repository(str(payload.get("path") or ""))
+    except commands.CommandRejected:
+        raise
+    except (OSError, ValueError) as exc:
+        raise commands.CommandRejected("repository_invalid", str(exc)) from exc
+    return {"repository": repository}
+
+
+@commands.register("application.bunker.repository.attach")
+def command_bunker_repository_attach(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.attach_repository,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or ""),
+        local_path=str(payload.get("path") or ""),
+        name=str(payload.get("name") or ""),
+        default_branch=str(payload.get("default_branch") or ""),
+    )
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.remote.configure")
+def command_bunker_remote_configure(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.configure_remote,
+        str(payload.get("bunker_id") or ""),
+        server_url=str(payload.get("server_url") or ""),
+        remote_bunker_id=str(payload.get("remote_bunker_id") or ""),
+        credential_reference=str(payload.get("credential_reference") or ""),
+        state=str(payload.get("state") or "pending-auth"),
+    )
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.invitation.inspect")
+def command_invitation_inspect(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    invitation = _bunker_result(
+        remote.JoinInvitation.parse, str(payload.get("invitation") or "")
+    )
+    return {
+        "invitation": invitation.public_dict(),
+        "next": "Authenticate with this server before creating the local replica.",
+    }
+
+
+@commands.register("application.bunker.join")
+def command_bunker_join(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    invitation = _bunker_result(
+        remote.JoinInvitation.parse, str(payload.get("invitation") or "")
+    )
+    adapter = remote.HTTPRemoteAdapter(
+        invitation.server,
+        bearer=str(payload.get("authorization") or ""),
+        credential_reference=str(payload.get("credential_reference") or ""),
+    )
+    enrollment = _bunker_result(adapter.enroll, invitation)
+    bunker = _bunker_result(bunkerdb.create_replica, invitation, enrollment)
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.import.companion")
+def command_bunker_import_companion(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    result = _bunker_result(
+        bunkerdb.import_companion,
+        str(payload.get("path") or ""),
+        bunker_name=str(payload.get("name") or ""),
+    )
+    return {**result, "bunkers": bunkerdb.list_bunkers()}
+
+
+__all__ = ["inspect_project", "inspect_repository", "state"]

@@ -18,109 +18,154 @@ touched what, on which branch, against which baseline, and why.
 
 ## 2. Concept
 
-An **intermediate agent layer** that sits between the tracker and the repo:
+TicketBunker is an **intermediate context and workflow layer** with its own
+domain model. Trackers, Git repositories, agent harnesses, and persistence
+engines meet only behind its typed API:
 
 ```
-┌─────────────┐     ticket context      ┌──────────────────┐    git ops     ┌─────────┐
-│ Jira / agile │ ──────────────────────▶ │   TicketBunker   │ ─────────────▶ │  repos  │
-│   tracker    │ ◀────────────────────── │  (session layer) │ ◀───────────── │  (git)  │
-└─────────────┘   who/what/where/why    └──────────────────┘   diffs, logs  └─────────┘
+user → desktop app → TicketBunker API → domain services → adapters
+                                                    ├── Git repositories
+                                                    ├── agile providers
+                                                    ├── coworker harness
+                                                    ├── local database
+                                                    └── optional remote service
 ```
 
-It receives ticket context, resolves related branches, mechanically extracts the
-git facts, lets an agent enrich them with repo search, and reports a structured
-summary back to the requesting user.
+It receives ticket context, resolves related branches, mechanically extracts
+Git facts, lets an agent enrich them with repository search, and reports a
+structured summary back to the requesting user.
 
-**Deployment principle:** TicketBunker is a **layer on top of an existing git
-project** — any company, any security level. That constrains everything: the
-core processes must be **exceedingly simple and diagnosable**, self-hostable
-inside whatever boundary the repo already lives in, and adoptable without
-changing the project itself. Diagnosability is not a feature bolted on later;
-it is the design driver for §3.7–3.8.
+**Deployment principle:** TicketBunker must be **exceedingly simple and
+diagnosable**, self-hostable inside a team's security boundary, and adoptable
+without modifying a source repository. A local-only Bunker works with no
+service. Collaboration uses a compatible TicketBunker service selected and
+controlled by the team; TicketBunker the product does not require ownership of
+that host or its database.
 
-**Ownership principle:** **Pi does not own this system.** TicketBunker has its
-own backend; pi is a *client harness* that talks to it. Sessions run in pi
-because its extension model fits our stage discipline (§3.7), but the source
-of truth — ticket registry, bunker index, report storage, execution ledger —
-lives in the TicketBunker backend. If pi were replaced tomorrow, the bunkers,
-reports, and ledgers would be untouched.
+**Ownership principle:** **Pi does not own this system.** Pi is a replaceable
+agent adapter. TicketBunker owns ticket state, configuration, observations,
+reports, ledgers, and the publish gates. Replacing Pi cannot discard or redefine
+those artifacts.
 
-**Backend principle: the backend is a git repo.** The team's database — every
-bunker, with the information another user would need: tickets and their
-corresponding reports, configs, even session data where cheap — **lives in a
-remote git repository and is transferred regularly through git**. By default
-this is a dedicated companion repository; the source repository commits only
-the locator that names it. TicketBunker
-functionally mirrors git rather than standing up a whole new service:
-clone/pull/push are the sync protocol, history is the audit trail, remotes are
-the access model, and the companion data branch's **`.gitignore`** controls
-what enters shared history (harness session files and other local-only material
-stay local). Anywhere git already works — including air-gapped enclaves that move
-git bundles across boundaries — the TicketBunker backend already works. A
-thin API service can be layered on top later if a team wants one; it is an
-optimization, never the foundation.
+**Backend principle: the backend is TicketBunker's API and domain model.** Every
+user-facing client calls the same action registry. Every device has one SQLite
+database per Bunker. A Bunker may be local-only, or its local database may act
+as a replica of team state reached through an authenticated remote TicketBunker
+service. Desktop clients never connect directly to a remote database, and the
+physical remote engine is not part of the client contract.
+The versioned request/response boundary is specified in
+`docs/remote-service-contract.md`.
+
+**Git principle: Git is an attached source and workflow tool, not a control
+plane.** Git provides commits, branches, diffs, authorship, and source access.
+It does not provide TicketBunker membership, authentication, database discovery,
+configuration authority, or ticket synchronization. Cloning a repository never
+joins a Bunker. Explicit exports may use Git or portable files, but export is not
+live storage.
 
 ## 3. Architecture
 
 ### 3.1 Ticket bunkers, sessions, and storage
 
-**Cardinality model:**
+#### Domain boundaries
 
-- Each **branch** has a **user** (the owner/author of that work).
-- A ticket may exist before work is claimed and therefore may have **no
-  branch yet**. Once work begins it may have **multiple branches** over its
-  life. Branches within a
-  ticket are **ordered by recency of development**, or by **priority when one
-  is assigned**; this ordering is also the section order of the master report
-  (§3.4).
-- A ticket may span **multiple directories**.
-- Each ticket has a **unique ID**, and that ID names its **ticket bunker**.
-  Uniqueness is a hard requirement — the bunker directory *is* the ticket's
-  identity in the system, so collisions are unacceptable.
+- A **Bunker** is the configuration, membership, security, and synchronization
+  boundary a user creates or joins.
+- A **Project** is a recursive work scope inside one Bunker. A Project may have
+  a parent and any number of child Projects. It is not synonymous with a Git
+  repository or a tracker project.
+- A **Repository binding** attaches a canonical Git repository identity to one
+  Project. A Project may attach zero or more repositories. The shared binding
+  never contains a device filesystem path.
+- A **local repository attachment** maps one shared binding to one checkout path
+  on one device. That path never synchronizes.
+- A **ticket** belongs to one Project and may relate to work across any
+  repositories explicitly attached within the permitted Bunker scope.
+- A ticket may have zero branches before work starts and multiple branches over
+  its lifetime. Branch order remains recency-first unless explicit priority is
+  assigned; the master report follows the same order (§3.4).
 
-**Default on-disk layout — source locator plus companion checkouts:**
+The resulting hierarchy is:
 
 ```
-source-repo/
-├── .ticketbunker.json         # committed project + companion locator
-└── .tb/                       # ignored local companion checkouts/cache
-    ├── config/                # ticketbunker/config branch checkout
-    └── data/                  # ticketbunker/data branch checkout
-        └── projects/<PROJECT>/tickets/<TICKET-ID>/
-            ├── tb.md          # composed session context (§3.9)
-            ├── context/       # provenance-separated input fragments
-            ├── sessions/      # per-branch session configuration
-            ├── observations/  # atomic deterministic git facts
-            ├── inferences/    # tagged agent working inferences
-            ├── ledger.jsonl   # typed intake and execution history
-            └── reports/
-                ├── master.md
-                └── branches/<branch_slug>.md
+Bunker
+├── configuration and field registry
+├── members and capabilities
+└── Projects
+    ├── Project
+    │   ├── child Projects
+    │   ├── repository bindings
+    │   └── tickets
+    └── Project
 ```
 
-The canonical companion has two independent histories. `ticketbunker/config`
-holds global field sets and each project's composition/provider mappings;
-`ticketbunker/data` holds ticket bunkers. The default branch names are
-configurable in the committed locator. Legacy embedded bunkers named
-`<ticket_id>_bunker` remain readable and have an explicit, backed-up migration
-path, but they are not the default for new projects.
+#### Local database
 
-Note what is *not* here: the session file. **The harness persists its own
-session data** in its own storage (pi keeps its single-file sessions wherever
-pi keeps them). The bunker holds what TicketBunker owns — context, facts,
-ledger, reports — and nothing the harness owns.
+Every Bunker has exactly one device-local SQLite database. Multiple Bunkers on
+the same device remain isolated in separate files; a small machine-local
+registry lists them for the app. The local database stores the Bunker record,
+Project tree, repository bindings, device paths, configuration snapshots,
+tickets, reports, sync cursor, and local jobs. It preserves the provenance
+strata described in §4 rather than flattening them into presentation documents.
 
-**Local vs. remote:**
+The default machine-owned layout is outside source repositories:
 
-- The **pi session is local-first**: it comes into existence when someone makes a
-  new branch for the ticket, on that user's machine. It is the working substrate,
-  not the product.
-- The **report is the remotely-handled artifact** — it's what gets synced,
-  stored, and served to other users.
-- If session storage turns out to be cheap (pi sessions are single JSON files,
-  so plausibly yes), sessions can be stored remotely too — useful for
-  resuming/refreshing a bunker from a different machine. But this is an
-  optimization, not a requirement: the report must stand alone.
+```
+<TicketBunker data home>/
+├── bunkers/registry.sqlite3
+└── bunkers/<LOCAL-BUNKER-ID>/bunker.sqlite3
+```
+
+No `.ticketbunker.json`, `.tb/`, hook, credential, or database file is written
+to an attached source repository merely because it was selected. Repository
+hooks used for opt-in Git event observation must remain local Git metadata and
+must not become discovery or authorization state.
+
+#### Optional remote relationship
+
+A local-only Bunker is authoritative on its device. A shared Bunker adds one
+explicit relationship:
+
+```
+local Bunker database ↔ authenticated TicketBunker service ↔ host-owned database
+```
+
+The local connection record contains only the service origin, remote Bunker ID,
+replica identity, configuration revision, sync cursor, state, and a reference to
+an OS-vault credential. It never contains raw credentials or a database
+connection string. A host may use SQLite, PostgreSQL, or another transactional
+engine; clients cannot observe or depend on that choice.
+
+Joining is server-first and authorization-first:
+
+1. The user opens a short-lived invitation or selects a known server.
+2. The app displays the exact service origin and remote Bunker identity.
+3. The service authenticates the user and authorizes membership.
+4. Only after enrollment succeeds does TicketBunker create the local database.
+5. The first authenticated snapshot supplies the Bunker configuration, Project
+   hierarchy, repository identities, tickets, reports, capabilities, revision,
+   and sync cursor.
+6. The user maps permitted repository identities to local checkout paths.
+
+Possessing source code or an invitation is not proof of membership. Invitation
+bearer material is bounded, short-lived, and never returned in application
+state. Cloning or forking a repository therefore has no TicketBunker side
+effect.
+
+#### Legacy companion import
+
+The former companion-Git backend is a migration source, not a second live
+authority. Import reads its locator, configuration, tickets, and reports into a
+new local Bunker while leaving the source checkout and companion data unchanged.
+The import records source path, digest, counts, and time. Retirement or deletion
+of legacy data is a separate, explicit operation after the user verifies the new
+Bunker. Git bundles or JSON/markdown packages remain valid explicit export and
+air-gap transport formats (§3.17).
+
+The harness session stays local-first and separately owned. The Bunker stores
+TicketBunker facts, observations, ledgers, reports, and bounded coworker state;
+Pi continues to own its native session implementation. Reports remain readable
+without waking an agent.
 
 **Ticket context enters the session either:**
 
@@ -184,17 +229,18 @@ control:
 2. **Baseline identification.** Determine the reference branch (default: `main`,
    configurable per repo) and compute `merge-base` for each ticket branch.
 3. **Diff extraction.** `git diff <merge-base> <branch>` per branch — the actual
-   work, not noise from an aging fork point. The repository-owned `.tb/`
-   database is pathspec-excluded from code diffs and patches so reports never
-   recursively describe TicketBunker's own generated artifacts.
+   work, not noise from an aging fork point. TicketBunker data lives outside
+   attached repositories, so it cannot enter these diffs. During explicit
+   legacy import, old `.tb/` paths are still pathspec-excluded so reports never
+   recursively describe generated artifacts.
 4. **Merge history.** When the branch last merged main (or was rebased), how far
    its code-affecting history is ahead/behind, and whether its non-merge code
-   commits have been merged back. Database-only `.tb/` commits are excluded so
-   observing and committing a bunker cannot change its own development state.
-5. **Work separation.** Partition commits that touch project paths outside
-   `.tb/` into *author work* vs *incidental merges/main churn*, so database-only
-   commits do not become code authorship while the report still reflects what
-   the person actually did.
+   commits have been merged back. Legacy database-only `.tb/` commits are
+   excluded so old generated history cannot change the observed development
+   state.
+5. **Work separation.** Partition commits that touch source paths into *author
+   work* vs *incidental merges/main churn*. TicketBunker-owned paths, including
+   the legacy `.tb/` layout, never become code authorship.
 6. **Authorship map.** `git log` / blame over the touched paths: who committed,
    when, in what order.
 
@@ -285,16 +331,17 @@ consequences:
    session file is an append-only provenance record; the report is a living
    document with its own update lifecycle (children rewritten as branches move,
    master regenerated on every child change) and its own audience (remote, authorized users). So
-   reports sit beside the session in the bunker, and only `reports/` syncs
-   remotely. The local ticket coworker described in §3.5 has a separate private
-   session below Git's administrative directory. That conversation can propose
-   report changes but is never itself shared report truth.
+   reports are durable records in the Bunker database and only accepted report
+   state syncs through the remote service. The local ticket coworker described
+   in §3.5 has a separate private session in TicketBunker's machine-owned data
+   home. That conversation can propose report changes but is never itself
+   shared report truth.
 4. **Components live together under the ticket, keyed by source branch.** A
-   successful publish places the gated component on the companion data branch
-   immediately. Every checkout can therefore see the complete child set after
-   `tb init`; `tb checkout <TICKET>` refreshes the companion checkout and
-   recompiles the master. Legacy embedded mode retains its branch-collection
-   behavior for backward compatibility.
+   successful publish commits the gated component through the report service,
+   regenerates the master in the same local transaction, and queues a bounded
+   remote change when the Bunker is shared. Another authorized replica sees the
+   complete child set after sync. Legacy companion data may be imported but is
+   never a simultaneous writer.
 
 **Report component schema** — each new child leads with a compact Reader brief,
 then carries the complete who / what / where / why / state evidence trail. Each
@@ -327,12 +374,12 @@ tool:
   Git-triggered versions remain local audit history but render as the ordinary
   **Not synthesized** state until the user chooses Synthesize.
 - Generation is local until one component passes intake. Agent-side `tb infer`
-  calls remain typed and ledgered but do not each publish the companion
-  checkout; the worker owns one final companion publication after the ordinary
-  report gate succeeds. A transient remote/DNS problem therefore cannot turn
-  every inference into a separate failed push.
-- The pre-agent deterministic refresh takes its baseline from the project's
-  committed companion locator, never from a hard-coded `main`. It may read the
+  calls remain typed and ledgered but do not each enqueue a remote change; the
+  worker owns one final transactional publication after the ordinary report
+  gate succeeds. A transient remote/DNS problem therefore cannot turn every
+  inference into a separate failed sync.
+- The pre-agent deterministic refresh takes its baseline from the repository
+  binding's configured base branch, never from a hard-coded `main`. It may read the
   already-fetched `origin/<base>` ref when a collaborator has no local base
   branch; this is observation only and never checks out, pulls, or mutates the
   source worktree. If refresh cannot start, the worker preserves the concrete
@@ -367,16 +414,16 @@ tool:
   remains visible in local conversation history and is report context, never an
   instruction or independent evidence. It cannot edit source, execute shell or
   Git mutations, or directly edit Combined.
-- Raw coworker messages and Pi session files stay private below
-  `.git/ticketbunker/coworker/<project>/<ticket>/<user>/`. Pi is launched with
+- Raw coworker messages and Pi session files stay private below the Bunker's
+  machine-owned runtime directory, keyed by ticket and local user. Pi is launched with
   only `read`, `grep`, `find`, and `ls`. Report-check failures are expressed in
   conversation as a concise rejected/not-saved outcome; exact lint and anchor
   findings stay in the private local coworker diagnostics and never become
   coworker copy. A proposal is inert until the user accepts it. Acceptance
   rechecks the current child digest, report lint, and every real anchor, updates
   only the named child Reader brief subsection, and regenerates Combined
-  mechanically. The ordinary companion publication path remains the only way
-  the accepted report becomes shared truth.
+  mechanically. The ordinary typed report publication path remains the only
+  way the accepted report becomes shared truth.
 
 **The ticket surface mirrors a tracker page, read-only and honest about
 provenance.** `tb list` shows every ticket grouped by declared status and
@@ -395,20 +442,18 @@ people, and labels; status, assignee, reporter, label, and project are explicit
 facets. Filters and the current page live in the URL. Results are server-side
 pages of twenty lightweight ticket references, so the browser receives only the
 requested summaries and never composes every ticket/report to build a list.
-Each project commits those bounded references at
-`projects/<PROJECT>/tickets/index.json`. The index contains human-facing ticket
-summary fields, small report/branch counters, the canonical relative reference,
-source URL, and a digest of `ticket.json`; it never contains report bodies. It is
-generated from typed ticket mutations as a publication side effect, not another
-write authority.
+The database maintains those bounded summaries transactionally beside the
+ticket records. They contain human-facing ticket fields, small report/branch
+counters, source URLs, and content revisions, never report bodies. A summary is
+updated as a typed ticket mutation side effect, not through another write
+authority.
 
-**Projects is the companion catalog surface.** It lists projects known to the
-companion config/data branches; selecting one applies the same search and
-facets within that project. A project row and a ticket result are references to
-canonical companion data, not a claim operation and not a copy of bunker
-contents into the source repository. Opening a result is the deliberate point
-where the full ticket snapshot is composed. Standalone and legacy databases
-present their one inferred project through the same query contract.
+**Projects is the Bunker catalog surface.** It displays the recursive Project
+tree from the local replica; selecting one applies the same search and facets
+to that Project and, when requested, its descendants. Project and ticket rows
+are lightweight database references. Opening a result is the deliberate point
+where the full ticket snapshot is composed. Local-only, shared, and imported
+legacy Bunkers use the same query contract.
 
 Per-ticket pages remain organized around completing one ticket. The singular page has
 an explicit **Ticket / Agent** contract. Ticket is the default Jira-like issue
@@ -472,14 +517,14 @@ topic, scope, draft, attached reference, and expanded state survive navigation
 between the ticket and its included source editor. The other exception is an
 explicit local **Work** control: a small plus beside Branches opens a form for a
 short branch name and a real base-branch choice. Its CSRF-protected POST
-dispatches the same `workflow.start` command as `tb branch`; it is not a ticket,
+dispatches the same `workflow.start` action as automation clients; it is not a ticket,
 comment, report, or lifecycle editor. Every ticket page renders immediately
-from cached companion data and local or already-fetched Git refs. After the
-response is sent, one coalesced background command fast-forwards the ignored
-companion checkouts when safe, fetches source remote-tracking refs without
+from the local Bunker database and local or already-fetched Git refs. After the
+response is sent, one coalesced background command syncs through the configured
+remote service when permitted, fetches source remote-tracking refs without
 touching the source worktree, and never queues synthesis. A compact header
-cluster replaces the full-width status strip. Healthy Companion and Git
-refs are absent; loading, cached, and stopped states appear as small stateful
+cluster replaces the full-width status strip. Healthy remote sync and Git refs
+are absent; loading, cached, and stopped states appear as small stateful
 dots beside the title. Synthesis remains visible as its own dot plus `Updated
 <age>` when known, or its concise actionable state when no successful update
 exists. Hover, keyboard focus, and click reveal each full label, detail, and
@@ -541,12 +586,10 @@ editor is absent, cannot start, or requires a terminal launcher that is not
 available, the same source-link action falls back to TicketBunker's included
 editor. Opening or saving is always a user action and grants the coworker no
 source-writing capability.
-Neither
-`tb view` nor `tb open` enters the CLI's companion-publication tail; both are
-machine-local actions even in a connected project.
-Fresh clones and sparse companion checkouts recreate the ignored machine-local
-session directory before writing a form, so missing local artifacts are an
-empty state rather than a filesystem traceback.
+Neither `tb view` nor `tb open` publishes or mutates shared report truth; both
+are machine-local actions even in a shared Bunker. A new authorized replica
+creates its machine-local session directory before writing a form, so missing
+local artifacts are an empty state rather than a filesystem traceback.
 Pages poll that local state and reload only when ticket content or refs change.
 All content is HTML-escaped before the constrained
 report markup is re-introduced; agent text can never inject into the page.
@@ -563,7 +606,7 @@ remote, and workflow rejections render three concise facts: what stopped, what
 state was preserved, and the next command or action. Raw Git stderr and Python
 details never enter HTML or JSON responses. Unexpected failures use the same
 shape with an opaque diagnostic ID; full detail is appended only to the local
-Git administrative area at `.git/ticketbunker/viewer-errors.jsonl`. A browser
+Bunker diagnostics directory. A browser
 disconnect during a response is normal transport state and produces no error.
 Problem pages do not poll or auto-retry, and TicketBunker never performs a
 recovery merge, switch, reset, stash, pull, or rebase on the user's behalf.
@@ -762,19 +805,17 @@ language ("probably", "seems", "likely", ...), which is rejected. The lint
 cannot prove a claim true, but it can refuse the *form* that conjecture
 takes.
 
-**The surveyor runs like any other session** (`tb survey REPO --run`): the
-same harness path, its own stage contract (`survey_session`), and a
-project-level session home at `.tb/root/` — bunker-shaped (ledger,
-sessions/, context/, tb.md) so the machinery applies unchanged, above all
-ticket bunkers, never colliding with one (bunker directories end in
-`_bunker`). The runner seeds the session's working copy from the existing
+**The surveyor runs like any other session**: the same harness path, its own
+stage contract (`survey_session`), and a Project-scoped session namespace in
+the Bunker's machine-owned runtime directory. The runner seeds the session's
+working copy from the existing
 tbroot.md — updating, not rewriting — or from the template, composes the
 surveyor preamble (`00_surveyor.md`, ours: the write-the-universe rules),
 and the agent edits the working copy in place. Installation happens outside
-the session through the typed tbroot intake: the conjecture/anchor lint
-gates the text, acceptance and rejection are ledgered in
-`.tb/root/ledger.jsonl`, and the installed tbroot.md mirrors into every
-bunker's composition at the next recompose (§3.9). A session that leaves a
+the session through the typed tbroot intake: the conjecture/anchor lint gates
+the text, acceptance and rejection are ledgered in the local Bunker database,
+and the installed Project root context is composed into every affected ticket
+at the next recompose (§3.9). A session that leaves a
 fresh template untouched fails; an update session that changes nothing is
 recorded (`survey_no_update`). Refresh-triggered surveys on the main branch
 remain future work under the re-run cost policy.
@@ -828,9 +869,9 @@ object, so a translator can pipe directly into `tb ticket --from-json -`.
 For recurring imports, `ticket.upsert` and atomic-batch `ticket.sync` are the
 same programmatic gate used by installed adapters. Incoming fields refresh the
 source snapshot while absent local extensions survive; TicketBunker's branch
-key, explicit branch assignments, repository path, and mechanical timestamps
+key, explicit branch assignments, repository binding, and mechanical timestamps
 remain locally owned. A semantically identical snapshot performs no write,
-adds no ticket-ledger event, and creates no companion revision.
+adds no ticket-ledger event, and advances no local or remote revision.
 
 Adapters remain thin stdlib transports under `ticketbunker/integrations/`; they
 fetch and normalize but cannot write around `ticket.sync`. `tb github` is the
@@ -861,73 +902,49 @@ The repo separates cleanly by role, **per information type**:
   and the backend API next. Nothing outside adapters/ touches an external
   system.
 
-**The bunker is the instance directory** — easily navigable the way `.git`
-is: a fixed, well-known layout (context/, sessions/, observations/,
-inferences/, reports/, ledger.jsonl, tb.md) defined in one place
-(`layout.py`) and stable across every bunker. Knowing one bunker means
-knowing them all; tooling and humans can both address any piece of instance
-state by path without asking.
+**The Bunker is the instance boundary.** Its durable data is addressed through
+domain identifiers and typed services, not through client-visible filesystem
+paths. `bunkerdb.py` owns the SQLite schema and transactions; `application.py`
+owns the shared action registry; `remote.py` owns the versioned service
+protocol. `layout.py` remains the sole authority for legacy import paths and
+runtime artifacts that still need a filesystem representation.
 
-**The root is git-relative; the durable storage is companion-relative.** `tb
-init` runs inside a source git repository and fails outside one. The user first
-creates a Git repository on any host and supplies its clone URL. TicketBunker
-has no repository-creation path or hosting API: it verifies that the supplied
-remote exists and is accessible before creating `.tb/` or changing the source,
-then publishes only its config/data branches. An empty remote is valid. After
-both branches publish it writes `.ticketbunker.json` and adds `/.tb/` to the
-source ignore file. The ignored `.tb/config` and `.tb/data`
-directories are ordinary checkouts of the locator's canonical branches.
-Ticket IDs resolve under
-`.tb/data/projects/<PROJECT>/tickets/`. **`tb init` is the single connection
-command.** Without a locator it performs the one-time owner initialization;
-with a committed locator it connects or refreshes the current checkout. The
-legacy spelling `tb setup` is only an alias for the same command and backend
-handler. The canonical command fast-forwards both local checkouts. Remote Git
-operations disable prompts, use bounded timeouts, and retry transient DNS
-resolution three times. Failures are classified as DNS, timeout,
-authentication, access, or local fast-forward problems and name the next
-action; users are never asked to discover `getent` or `git ls-remote`, and raw
-Git exceptions are not a user interface. If a fresh clone starts on a default
-source branch without the locator, the command fetches source refs, searches
-them for one canonical locator, and switches a clean worktree to that tracking
-branch automatically. New locators carry the configured source base as the
-selection hint; older locators fall back to the project key and conservative
-branch ranking. It refuses dirty or ambiguous switches. A fresh connection checks out configuration normally but uses a
-sparse data checkout containing only project ticket indexes. Listing, search,
-facets, and pagination therefore work without copying every bunker. Opening or
-mutating one indexed ticket expands only that ticket's canonical path in the
-sparse checkout. Data branches made before indexes remain compatible: connection
-detects the missing index and falls back to a full checkout rather than hiding
-old tickets. Embedded same-repository and standalone `--root` operation
-remain compatibility modes, not defaults.
+**The root is Bunker-relative, not Git-relative.** Creating a Bunker requires a
+name and a first Project, but no repository. Attaching a repository is a later,
+explicit action that verifies a local checkout, records a canonical remote
+identity when one exists, and stores the device path only in that Bunker's local
+database. It writes no locator, database, ignore entry, or membership hint into
+the repository. The same repository may be attached to appropriate Projects in
+different Bunkers without implying that either Bunker owns it.
 
-**Initialization authority comes from Git, not TicketBunker identity.** The
-initializer is the user whose credentials successfully publish the initial
-config and data branches. TicketBunker records that Git identity but does not
-grant it authority. Repository/branch rules decide who may update
-`ticketbunker/config`; ordinary Git permission decides who may update data.
-The companion can be the source remote, but a dedicated repository is the
-default because it cleanly separates source history, ticket data, and config
-administration and can serve several projects.
+**Initialization authority comes from the selected storage authority.** A
+local-only Bunker is created by the local user and remains local. A shared
+Bunker is created by, or joined through, an authenticated TicketBunker service.
+The service decides membership and capabilities before a local replica exists.
+Git credentials and repository branch rules govern source access only; they
+never grant Bunker administration or ticket access.
 
-**The bunker merges the way Git merges.** Concurrent data-branch commits come
-together through ordinary git, with the merge behavior the data shapes demand,
-declared in the companion data branch's `.gitattributes`:
-append-only logs (`ledger.jsonl`, `inferences.jsonl`) merge by **union** —
-every side's entries survive, order within the merge is immaterial for
-append-only records; the **master is never merged**, it is a generated
-artifact — `merge=ours` keeps a placeholder and the post-merge hook
-regenerates it from the actual children. The generated ticket index likewise
-uses `merge=ours` to avoid line-oriented JSON conflicts; after a rebase the
-publisher recomputes each locally changed ticket reference against the selected
-remote index, so concurrent additions remain discoverable. `tb init`
-automatically installs `post-checkout`, `post-commit`, `post-merge`, and
-`post-rewrite` hooks. Branch creation/switching, commits (including
-cherry-picks), merges, rebases, and amended commits therefore record the newest
-ticket branch, HEAD, event set, and change time below the Git directory. The
-hook does no network, observation, or agent work and never starts a worker. It
-returns success immediately, so Git activity cannot spend model calls or be
-failed by a provider.
+The companion-Git implementation remains behind an explicit, read-only import
+adapter. Its `tb init`, locator, sparse checkout, and data-branch behavior are
+compatibility tools for existing installations, not discovery or persistence
+contracts for new Bunkers. Import never makes the legacy store and SQLite
+replica concurrent writers.
+
+**The Bunker reconciles typed records, not Git files.** Local mutations use
+SQLite transactions and append an ordered change record. A remote service
+accepts idempotency keys and expected revisions, authorizes each operation, and
+returns either the accepted revision or a typed conflict. Append-only ledger
+facts are unioned by identity; generated masters are always rebuilt from
+accepted children; mutable ticket and configuration records use explicit
+revision checks. There is no direct database connection and no file-level
+merge driver.
+
+Opt-in Git hooks may record branch creation, checkout, commit, merge, rebase,
+and rewrite events into the local Bunker job queue. They live only in local Git
+administrative metadata, chain pre-existing hooks, do no network or agent work,
+and return immediately. Git activity therefore cannot spend model calls or be
+failed by a provider. The app also works without hooks by refreshing attached
+repositories on explicit user actions.
 
 The viewer compares the current branch against the last accepted report and
 durable input fingerprint. It shows the last synthesis time and, when the
@@ -935,17 +952,17 @@ verified commit is known, the number of commits since. Only an explicit
 Synthesize, Update synthesis, or Retry synthesis command queues the detached
 worker. The worker first runs the deterministic observation refresh, then the
 ordinary harness-neutral agent pipeline and lint/anchor publish gate, then
-publishes through the companion data path. Existing successful components
+publishes through the typed report service. Existing successful components
 retain their harness on later requests; otherwise the local selected Pi or
 Codex profile is used. A queued or claimed request is represented by a durable
 running state so the state hub cannot offer a second request while work is in
 flight. The queued HEAD is checked after the agent returns; a form for a
 superseded commit stays an unpublished local draft. Provider failure preserves
-the prior report, records the failure in the bunker ledger, and exposes the
+the prior report, records the failure in the Bunker ledger, and exposes the
 bounded local log through View log. Pre-existing executable Git hooks are
 preserved and chained, and uninstalling TicketBunker's hooks restores them.
-Ticket.json edits from two branches still conflict like source code — by
-design, they are declared data. **Semantic conflicts get a merge session
+Concurrent report edits may still conflict semantically even when their records
+do not. **Semantic conflicts get a merge session
 in the same trust frame** (`tb merge`): merging is part of solving a
 ticket, so two branches' report components disagreeing about the same
 code is a legitimate agent task — a promoted session, never a silent
@@ -1045,29 +1062,28 @@ own.
 
 ### 3.15 Project configuration by composition
 
-Canonical configuration lives on the companion config branch and changes only
-through typed, revision-checked commands. `tb config` first refreshes that
-branch, then opens a localhost editor with five direct surfaces: Identity,
-Local settings, Repository, Ticket fields, and Integrations. Local settings
-never enter companion history. The included source editor is the default;
+Canonical configuration lives in the Bunker database and changes only through
+typed, revision-checked actions. In a shared Bunker the remote service
+authorizes configuration changes and distributes immutable revision snapshots;
+local replicas do not elevate their own capabilities. The configuration editor
+has five direct surfaces: Identity, Local settings, Storage, Ticket fields, and
+Integrations. Local settings never synchronize. The included source editor is the default;
 editor mode, indentation style, tab width, line wrapping, save cleanup, and an
 optional external command live only in `~/.tbconfig`. Both the browser and `tb
 config --editor` dispatch `local.editor.update`. The CLI, editor HTTP
 transport, and programmatic callers dispatch the same command envelopes;
 transports do not reimplement mutations.
 
-Repository connection is a three-step contract, not a wizard that owns external
-state: create an empty companion repository, connect it, then commit the source
-locator. Before connection the Repository page shows those three steps; after
-connection it renders the same local readiness checks as `tb doctor`. The
-doctor validates Git identity, the committed/ignored source contract, companion
-checkouts and canonical remote heads, resolved configuration, ticket index,
-local integration credential presence, synthesis change hooks/last result, and
-worktree cleanliness.
-Every failure includes a concrete next command or Git action, `--json` exposes
-the same result to automation, and `--offline` skips only remote access. Remote
-probing disables terminal prompts and times out; diagnostics write only a local
-execution ledger below `.git` and never mutate companion data.
+Storage connection is explicit and does not infer authority from source code.
+The Storage page shows the exact local Bunker database and, when configured,
+the service origin, remote Bunker identity, replica state, revision, and sync
+cursor. It never exposes a database URL or raw credential. Repository bindings
+are managed separately as Project resources. Diagnostics validate local schema,
+remote authentication/sync readiness, configuration revision, attached
+repository availability, integration credentials, agent readiness, and pending
+jobs. Every failure includes a concrete next action; structured output exposes
+the same result to automation, and offline mode skips only remote access.
+Diagnostics write only machine-local records and never mutate shared truth.
 
 Configuration is composition, not runtime inheritance. Versioned global field
 sets form the default composition copied and pinned when a project is created.
@@ -1084,7 +1100,7 @@ templates, not a closed provider enum; a user can add or remove a custom
 integration through the same typed command boundary. The editor renders each
 integration as a matrix of TicketBunker-field ↔ external-field input rows.
 Adding and removing rows is a local draft; **Publish mappings** replaces that
-integration's complete map in one revision-checked config commit, so partial UI
+integration's complete map in one revision-checked mutation, so partial UI
 publication cannot leave the matrix half-applied. The legacy one-pair command
 remains available to CLI/API callers for compatibility.
 
@@ -1098,27 +1114,24 @@ path returns secret values in configuration state or command output.
 
 ### 3.16 The project universe boundary
 
-**A ticket is restricted to the global project** — but more often than not
-it impacts multiple parts of that project, and that's fine: within the
-project universe the agent operates **focused and automated**, following
-the ticket wherever it leads across the project's directories.
+**A ticket belongs to exactly one Project in one Bunker.** A Project can contain
+child Projects and can attach multiple repositories, so the work scope is not
+forced to match one repository or one tracker board. By default the agent may
+follow the ticket through repository bindings attached to that Project. Access
+to descendants or ancestors must be explicitly included by Bunker policy; tree
+membership alone is not an implicit code-reading grant.
 
-**An agent and its session are project-specific.** An agent working one
-project cannot venture out into another project's code. If a ticket's
-trail leads outside the universe, the agent's only recourse is **another
-agent's report** — if one is available for the referenced ticket/project,
-it may be consumed (as tagged, provenance-carrying input); if not, the
-agent is out of luck, and says so (the tag-up recommendation applies: name
-the person, not the guess). Reports are thus the interface *between*
-project universes for agents, exactly as they are the interface between
-the system and humans — nothing crosses a project boundary except a
-report.
+**An agent and its session are scoped by authorized repository bindings.** An
+agent cannot venture into an unattached checkout or another Bunker's code. If a
+ticket trail leaves the authorized scope, the only automatic input is another
+authorized report reference. Otherwise the agent says what boundary stopped it
+and recommends a person to contact rather than guessing.
 
-**Cross-project tickets link by reference.** When work genuinely spans
-projects, the tickets are linked via references — a ticket carries the IDs
-of its counterparts in other projects (validated against the ticket
-pattern). The reference is a pointer to another bunker's reports, never a
-license to read another project's code.
+**Cross-Project tickets link by stable identity.** When work genuinely spans
+Projects, tickets carry references to their counterparts. An intra-Bunker
+reference may resolve through the Project tree; an inter-Bunker reference
+resolves only when the current user is independently authorized. A reference is
+never a license to read another Project's code.
 
 ### 3.17 Format doctrine: JSON and markdown
 
@@ -1218,7 +1231,7 @@ terminals, and direct commands.
 The application has three layers:
 
 1. A small Tauri shell owns windows, application startup and shutdown, and the
-   local-only project chooser.
+   privileged Bunker launcher.
 2. The frozen Python `tb` executable remains the application core. It owns Git,
    tracker adapters, typed commands, the read model, agent orchestration, and
    all durable TicketBunker state.
@@ -1244,22 +1257,22 @@ window must use a separate webview label and must never navigate to tracker,
 agent, or loopback ticket HTML. Remote HTML is never loaded into either native
 context.
 
-First run is application-facing:
+First run is application-facing and starts with the storage boundary:
 
 - establish a machine-local TicketBunker profile (display name and email),
   defaulting to Git identity when available;
 - select or defer an agent provider/model, with login handled in the app and
   secrets retained by the provider/runtime rather than TicketBunker;
-- choose **Add Git project**, then select a local checkout;
-- if the checkout has a locator, offer to join its TicketBunker project using
-  the authority that project already declares; otherwise offer to create a
-  TicketBunker project and explicitly link user-provided storage. The app
-  derives the common Git host, owner/group, repository name, and SSH/HTTPS
-  access from the source checkout's `origin`; users edit those components,
-  never construct a Git URL.
+- choose **Create Bunker** for a local Bunker and first Project, or **Join
+  Bunker** with an invitation from a known service;
+- for Join, inspect the service origin and Bunker identity locally, then require
+  explicit authentication and enrollment before creating a replica;
+- after the Bunker exists, add recursive Projects and explicitly attach local
+  Git checkouts to the appropriate Project. Repository identity is derived from
+  the checkout only after the user chooses Attach.
 
 Agent setup is an app-native conversation with Pi, not an embedded terminal.
-The privileged Projects window starts the verified Pi runtime in RPC mode with
+The privileged Bunkers window starts the verified Pi runtime in RPC mode with
 sessions, tools, context files, skills, prompt templates, themes, and ambient
 extension discovery disabled. It loads only TicketBunker's pinned
 `tb_auth.ts` bridge. That bridge enumerates Pi's provider/model catalog and
@@ -1271,7 +1284,7 @@ forms. Secret input travels from the local webview through Rust directly to
 Pi's stdin; it never enters the Python command dispatcher, `~/.tbconfig`, a
 TicketBunker log, or shared project data. Login URLs are displayed before a
 user action and a label-guarded Rust command opens only valid HTTPS URLs in the
-system browser. The Projects window alone may listen for these setup events;
+system browser. The Bunkers window alone may listen for these setup events;
 the ticket webview still has no native IPC capability.
 
 The bridge is packaged with the frozen core and materialized into a stable,
@@ -1287,31 +1300,30 @@ not enable an agent or record a first-run choice. **Use without agent** records
 the explicit local opt-out; **Use this model** saves only a successfully
 authenticated provider/model selection.
 
-Opening the app without `--repo` therefore creates one bundled **Projects**
-window. It reads a machine-local profile and project-path registry through
-typed `application.*` Python commands; Rust does not invent another config
-file. The profile defaults to Git's global name and email and the configured
-branch identifier, so a complete Git identity does not create a ceremonial
-signup step. Editing it changes only TicketBunker's local profile and branch
-identifier, never global Git configuration.
+Opening the app without a target creates one bundled **Bunkers** window. It
+reads a machine-local profile, registry, and Bunker summaries through typed
+`application.*` actions; Rust does not invent another config or data store. The
+profile may default from Git's global name and email for convenience, but that
+identity grants no Bunker capability and editing it never changes global Git
+configuration.
 
-**Add Git project** uses the operating system's directory chooser, normalizes
-the selection to the working-tree root, and rejects non-Git directories before
-remembering it. An existing locator is presented as **Join** until its ignored
-companion checkouts are ready. A project without a locator is presented as
-**Connect** and requires both a project key and an already-created shared Git
-repository; the app never creates or hosts that remote. The common hosted-Git
-path is a component form, not a raw-address field: Access, Git host, Owner or
-group, and Repository are prefilled from the source remote, while a read-only
-preview shows the exact address the Python command boundary will validate and
-assemble. Technical inputs disable spelling, capitalization, and credential
-autofill, force the ordinary text cursor, suppress native clear decorations,
-and defer preview reflow until the user pauses typing. The form remains
-host-agnostic and accepts nested group paths. Both
-actions use a visible confirmation dialog and dispatch the existing
-`project.connect` command. Only a ready checkout can open the unprivileged
-ticket window. Closing that window stops its owned Python child and returns to
-the Projects window.
+**Create Bunker** asks only for a Bunker name and first Project key/name. It
+creates one local SQLite database without touching a repository. **Join
+Bunker** accepts a bounded invitation, displays its service and Bunker identity,
+and exposes **Authenticate and join** only as the explicit network step. The
+service response supplies membership, capabilities, configuration, Project
+tree, ticket snapshot, revision, and sync cursor before the app installs the
+replica.
+
+Within a Bunker, **Add project** places a new Project under the selected parent.
+**Attach repository** uses the operating system directory chooser, normalizes
+the selection to the working-tree root, shows the derived repository identity,
+and records it only after confirmation. It rejects non-Git directories and
+writes nothing to valid ones. **Connect service** records a service relationship
+but clearly leaves it pending authentication; it does not accept a database
+connection string. A separate Migration section lists legacy companion-backed
+projects and offers **Import copy**. That operation is read-only with respect to
+both source and companion repositories and records its import digest.
 
 On Linux, the shell respects an explicitly selected GSettings backend. When no
 backend was selected and the advertised session D-Bus socket is absent, as in
@@ -1319,17 +1331,18 @@ some WSL sessions, it uses GTK's in-memory settings backend before creating any
 window. The native folder picker therefore remains responsive and does not
 flood a launching terminal with unrelated `dconf` warnings.
 
-The bundled Projects window is the sole recipient of the native directory
+The bundled Bunkers window is the sole recipient of the native directory
 dialog and event-listen permissions. Its Tauri commands also check the caller's
 window label.
 The loopback ticket window has no capability and no allowed remote-origin IPC;
 Tauri 2.11.5 or newer is required because remote origins are always subject to
 that ACL boundary.
 
-There is no universal TicketBunker account or hosted database implied by the
-desktop shell. Identity and membership are local or scoped to the storage
-authority selected by the project. TicketBunker may provide adapters and setup
-guidance, but teams own their database, credentials, access rules, and remote.
+There is no mandatory TicketBunker-hosted account or database implied by the
+desktop shell. Identity and membership are local or scoped to the remote
+service selected by the Bunker. TicketBunker may provide adapters and setup
+guidance, but teams own their service, database, credentials, access rules, and
+remote deployment.
 Browser mode remains an explicit accessibility, diagnostics, server, and
 air-gapped fallback rather than a lesser command path.
 
@@ -1361,29 +1374,36 @@ air-gapped fallback rather than a lesser command path.
 
 ## 5. Interfaces
 
-The TicketBunker backend is **a git repository of bunkers** (§2) — pi
-extensions and the CLI are clients of it, never owners of state:
+The TicketBunker backend is **the typed domain service** (§2). Desktop, optional
+CLI automation, integrations, Pi, and remote transport are clients of the same
+action registry and cannot invent parallel behavior:
 
 - **Ingest:** manual ticket context and read-only tracker snapshots through the
-  same provider-neutral upsert/batch command; remote branch events.
-- **Ledger:** stage markers and per-command log entries, written automatically
-  by the executing hooks (§3.8). JSONL ledgers are merged with git's union
-  strategy so concurrent appenders don't conflict.
-- **Publish:** child report components (through the typed intake) and
-  regenerated masters.
-- **Sync:** companion mutations commit, reconcile, and push the data branch as
-  part of command completion. Append-only ledgers use union merge and generated
-  masters use the ours driver before regeneration. `tb sync` remains the
-  explicit transport for standalone/legacy stores.
-- **Query:** by ticket ID — clone/pull, then read the bunker by its fixed
-  layout. Latest report, raw observations, ledger — all addressable by path.
-- **Emit:** structured report (markdown + machine-readable JSON alongside).
+  same provider-neutral upsert/batch action; explicit Git observation events.
+- **Ledger:** immutable stage and command facts appended transactionally by the
+  executing service (§3.8).
+- **Publish:** gated child report records and mechanically regenerated masters.
+- **Sync:** revisioned, idempotent change exchange through a compatible remote
+  TicketBunker service. Clients never connect to its physical database.
+- **Query:** bounded Bunker, Project, ticket, report, observation, and ledger
+  read models from the local database.
+- **Import/export:** explicit, portable JSON/markdown packages and a read-only
+  legacy companion adapter. Transfer is never confused with live membership.
 
 ## 6. Authorization
 
-- Session data is served only to authorized users. Authorization is the
-  companion remote's Git access model; teams should grant report access no
-  more broadly than the source material allows.
+- A local-only Bunker is accessible to its device user. A remote Bunker service
+  authenticates users, enrolls replicas, and authorizes every query/mutation by
+  Bunker capability before returning shared data.
+- Source Git access and Bunker membership are independent checks. Cloning a
+  repository, knowing its remote URL, or possessing a stale invitation grants
+  no ticket, report, configuration, or membership access.
+- Invitations are short-lived enrollment capabilities. Bearer material is
+  consumed only by the join request, never persisted in application state, and
+  never substitutes for the service's user authentication.
+- Teams should grant report access no more broadly than the source material
+  allows. A service may additionally require that repository access be proven,
+  but Git permission alone can never grant Bunker access.
 - Open question: whether to support a *redacted report tier* for the
   "data-consumer" persona (someone allowed to know ticket state but not code
   content). This is exactly the cross-boundary use case, and also the riskiest —
@@ -1397,6 +1417,8 @@ extensions and the CLI are clients of it, never owners of state:
 | Tracker APIs and field shapes differ | Normalize at a provider-neutral typed batch boundary; publish editable field-path matrices, retain provider metadata, and keep offline/manual JSON intake available. GitHub Issues/Projects is the first packaged transport. |
 | Branch-per-ticket naming is a convention, not guaranteed | Fuzzy matching + explicit manual branch association as fallback; report "no branches found" honestly rather than guessing. |
 | Reports go stale as branches move | Git events mark staleness without spending a model call; reports show their timestamp and commits since, and the state hub offers Update synthesis. |
+| Teams need different database scale and hosting | Keep the client contract at the versioned service API; local SQLite, hosted PostgreSQL, or another transactional engine can change without changing Bunker identity or exports. |
+| Existing companion-Git data must survive the cutover | Provide an explicit read-only import with digest and counts; never operate the old and new stores as concurrent authorities. |
 
 ## 8. Non-goals (v1)
 
@@ -1406,20 +1428,35 @@ extensions and the CLI are clients of it, never owners of state:
 
 ## 9. Resolved decisions
 
-- **Report storage:** the report is the remote artifact; the pi session stays
+- **Domain boundary:** Bunker owns configuration, membership, authorization,
+  synchronization, recursive Projects, tickets, and reports. A Project is a
+  work scope, not a repository. Repositories are explicitly attached resources.
+- **Storage:** every Bunker has one local SQLite database. Collaboration is an
+  optional relationship to an authenticated TicketBunker service backed by a
+  team-owned database. Clients never receive a database connection string.
+- **Git relationship:** Git supplies source history and guarded workflow only.
+  It supplies no membership, configuration authority, Bunker discovery, or
+  live database transport. Cloning a repository never joins a Bunker.
+- **Join:** the remote service authenticates and authorizes before a local
+  replica is created. Repository paths are mapped after enrollment and stay
+  device-local.
+- **Migration:** companion-Git installations enter only through an explicit,
+  read-only import. JSON/markdown and Git bundles remain explicit export/import
+  media, not live storage.
+- **Report storage:** the accepted report is a durable Bunker artifact; the pi session stays
   local (remote session storage is an optional optimization if cheap). A report
   never requires waking a session to read.
-- **Session/report layout:** `projects/<PROJECT>/tickets/<TICKET-ID>/` containing `tb.md` +
-  `context/` + `observations/` + `ledger.jsonl` + `reports/`; bunker name =
-  unique ticket ID. The harness persists its own session data in its own
-  storage — the bunker stores only what TicketBunker owns.
+- **Session/report layout:** local database records preserve ticket, context,
+  observation, ledger, report-child, and report-master identities without
+  exposing storage paths as an API. The harness persists its own session data
+  in its own storage; the Bunker stores only what TicketBunker owns.
 - **Session context:** delivered as `tb.md`, composed deterministically from
   separate fragments (explanation / workflow / current information) so context
   is modular and a user can see exactly what a session is fed (§3.9).
 - **Report structure:** the report is agent-authored and lives *outside* the
   session file. One component per branch, owned by the session; a master is
   fully regenerated (never patched) whenever a child changes, recording child
-  digests for staleness detection. Only `reports/` syncs remotely.
+  digests for staleness detection. Only accepted report records sync remotely.
 - **Cardinality:** a ticket may wait unclaimed with no branch and may later have many;
   branches (and master sections) are ordered by recency of development, or by
   priority when assigned.
@@ -1468,10 +1505,10 @@ extensions and the CLI are clients of it, never owners of state:
    directories *within* its project universe; projects are the hard boundary,
    crossed only by reports, with cross-project tickets linked by reference
    (§3.16).
-3. ~~Report sync transport~~ — resolved: the backend is a companion git repo;
-   command completion reconciles and pushes its data branch, while `tb sync`
-   remains for legacy/standalone stores (§2, §5). Works anywhere git works,
-   including bundle transfer across air gaps.
+3. ~~Report sync transport~~ — resolved: a local Bunker commits the accepted
+   report transactionally, then a shared Bunker exchanges revisioned changes
+   through its configured TicketBunker service (§2, §5). Explicit exports and
+   bundles carry data across air gaps without becoming live storage.
 4. ~~File format of components~~ — resolved by the format doctrine: JSON for
    certain machine export/import, markdown for framework-agnostic agent- and
    human-facing content; reports are markdown, their machine interchange (when
@@ -1479,6 +1516,6 @@ extensions and the CLI are clients of it, never owners of state:
 5. Concurrency on the master: if two users' sessions publish child updates for
    different branches at nearly the same time, who regenerates the master?
    Simplest answer: regeneration is idempotent from the child set, so
-   last-writer-wins is safe *as long as* the regenerator always pulls the
-   current children first — worth stating as an invariant when the sync
-   transport is chosen.
+   last-writer-wins is safe *as long as* the service checks the expected child
+   revision and regenerates from the accepted child set. This is a remote API
+   invariant, not a client-side merge responsibility.
