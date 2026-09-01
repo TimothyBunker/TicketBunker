@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +24,15 @@ class BunkerDatabaseTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.environment.stop()
         self.temporary.cleanup()
+
+    def test_database_context_releases_its_file_handle(self) -> None:
+        path = self.root / "managed.sqlite3"
+        connection = bunkerdb._connect(path)
+        with connection:
+            connection.execute("CREATE TABLE sample(value TEXT)")
+
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
 
     def test_local_bunker_owns_one_database_and_recursive_projects(self) -> None:
         created = bunkerdb.create_bunker(

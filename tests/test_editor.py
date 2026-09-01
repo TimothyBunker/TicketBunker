@@ -40,12 +40,13 @@ class EditorTests(unittest.TestCase):
         git_result = mock.Mock(returncode=1, stdout="")
         with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):
             with mock.patch.object(editor.subprocess, "run", return_value=git_result):
-                with mock.patch.object(
-                    editor.shutil,
-                    "which",
-                    side_effect=lambda name: "/usr/bin/nano" if name == "nano" else None,
-                ):
-                    value = editor.resolve_editor(self.root)
+                with mock.patch.object(editor, "_windows_git_editor_paths", return_value=[]):
+                    with mock.patch.object(
+                        editor.shutil,
+                        "which",
+                        side_effect=lambda name: "/usr/bin/nano" if name == "nano" else None,
+                    ):
+                        value = editor.resolve_editor(self.root)
 
         self.assertEqual(value, ("nano", "automatic"))
 

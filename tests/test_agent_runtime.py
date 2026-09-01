@@ -319,8 +319,8 @@ class AgentRuntimeTests(unittest.TestCase):
 
         expected = self.root / "data" / "runtime" / "pi" / "0.84.2" / "pi" / executable_name
         self.assertTrue(installed.ready)
-        self.assertEqual(Path(installed.path), expected)
-        self.assertEqual(config.load()["agent"]["pi_bin"], str(expected))
+        self.assertTrue(Path(installed.path).samefile(expected))
+        self.assertTrue(Path(config.load()["agent"]["pi_bin"]).samefile(expected))
         self.assertTrue((expected.parents[1] / "manifest.json").is_file())
         self.assertTrue(any("downloading verified Pi" in value for value in messages))
         self.assertTrue(any("installed and configured" in value for value in messages))

@@ -362,9 +362,10 @@ python3 tools/mock_product_loop.py
 python3 tools/mock_product_loop.py --json
 ```
 
-The script creates disposable local source and companion remotes, never touches
-the real voxel repository, and exercises 15 GitHub-shaped tickets with two Git
-users. It proves first sync, revision-level no-op sync, a three-ticket update,
+The script creates disposable local source and companion remotes, never reads
+an existing user repository, and exercises 15 GitHub-shaped `DEMO` tickets
+with two Git users. It proves first sync, revision-level no-op sync, a
+three-ticket update,
 active/faceted catalog queries, zero-ticket sparse setup, one-ticket
 fetch-on-open, separate convention-named branches, remote reconciliation, two
 clean doctor reports, and the Work UI. Measurements and explicit live-boundary
@@ -381,7 +382,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 254 Python tests, 9 Rust host tests, 2
+references. The current full suite is 258 Python tests, 9 Rust host tests, 2
 React component tests, and the real-browser standalone interaction flow.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,

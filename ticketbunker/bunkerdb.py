@@ -93,6 +93,16 @@ class BunkerDatabaseError(ValueError):
     """A stable local-model rejection that is safe to show to the user."""
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context, then release its OS file handle."""
+
+    def __exit__(self, *args: object) -> bool:
+        try:
+            return bool(super().__exit__(*args))
+        finally:
+            self.close()
+
+
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
@@ -117,7 +127,7 @@ def _connect(path: Path) -> sqlite3.Connection:
         path.parent.chmod(0o700)
     except OSError:
         pass
-    connection = sqlite3.connect(path)
+    connection = sqlite3.connect(path, factory=_ClosingConnection)
     try:
         path.chmod(0o600)
     except OSError:

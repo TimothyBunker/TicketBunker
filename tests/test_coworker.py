@@ -184,7 +184,10 @@ class CoworkerTests(unittest.TestCase):
         self.assertEqual(layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8"), before_report)
         session = coworker._root(self.root, "", "TB-9", identity)
         self.assertTrue((session / "messages.jsonl").is_file())
-        self.assertTrue(str(session).startswith(str(self.root / ".git")))
+        self.assertEqual(
+            session.relative_to(coworker._git_dir(self.root)).parts[0],
+            "ticketbunker",
+        )
 
     def test_selected_synthesis_reference_is_validated_persisted_and_sent_to_pi(self) -> None:
         reference = {
@@ -283,7 +286,8 @@ class CoworkerTests(unittest.TestCase):
         diagnostics_path = session / "diagnostics.jsonl"
         diagnostics = diagnostics_path.read_text(encoding="utf-8")
         self.assertIn("real-anchor", diagnostics)
-        self.assertEqual(diagnostics_path.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(diagnostics_path.stat().st_mode & 0o777, 0o600)
 
     def test_selected_synthesis_reference_cannot_cross_topic_or_scope(self) -> None:
         with self.assertRaises(commands.CommandRejected) as caught:

@@ -51,16 +51,16 @@ def _fixture_item(number: int) -> dict[str, Any]:
     )
     issue_state = "closed" if number == 14 else "open"
     assignee = "Ada" if number % 2 == 0 else "Lin"
-    label = "rendering" if number % 3 == 0 else "ecs"
+    label = "frontend" if number % 3 == 0 else "demo"
     return {
         "issue": {
             "node_id": f"I_MOCK_{number}",
             "number": number,
-            "title": f"ECS-{number} Mock voxel task {number}",
-            "body": f"Implement the mock voxel behavior for ticket {number}.",
+            "title": f"DEMO-{number} Mock project task {number}",
+            "body": f"Implement the deterministic demo behavior for ticket {number}.",
             "state": issue_state,
             "state_reason": "completed" if issue_state == "closed" else None,
-            "html_url": f"https://github.com/example/voxel/issues/{number}",
+            "html_url": f"https://github.com/example/sandbox/issues/{number}",
             "created_at": f"2026-08-{number:02d}T12:00:00Z",
             "updated_at": "2026-08-21T12:00:00Z",
             "closed_at": "2026-08-21T13:00:00Z" if issue_state == "closed" else None,
@@ -75,10 +75,10 @@ def _fixture_item(number: int) -> dict[str, Any]:
         "project": {
             "owner": "example",
             "number": 8,
-            "title": "Voxel ECS",
+            "title": "TicketBunker Demo",
             "url": "https://github.com/users/example/projects/8",
             "item_id": f"PVTI_MOCK_{number}",
-            "fields": {"Status": project_status, "Charge code": f"ECS-{100 + number}"},
+            "fields": {"Status": project_status, "Charge code": f"DEMO-{100 + number}"},
         },
     }
 
@@ -97,23 +97,23 @@ def run_mock(workspace: Path) -> dict[str, Any]:
     if workspace.exists():
         raise RuntimeError(f"mock workspace already exists: {workspace}")
     workspace.mkdir(parents=True)
-    source_remote = workspace / "voxel-source.git"
-    companion_remote = workspace / "voxel-ticketbunker.git"
+    source_remote = workspace / "demo-source.git"
+    companion_remote = workspace / "demo-ticketbunker.git"
     owner = workspace / "ada"
     collaborator = workspace / "lin"
     fixture = workspace / "github-project.json"
     subprocess.run(["git", "init", "--bare", str(source_remote)], check=True, capture_output=True)
     subprocess.run(["git", "init", "--bare", str(companion_remote)], check=True, capture_output=True)
     owner.mkdir()
-    _git(owner, "init", "-b", "ecs")
+    _git(owner, "init", "-b", "demo")
     _git(owner, "config", "user.name", "Ada")
     _git(owner, "config", "user.email", "ada@example.com")
-    (owner / "README.md").write_text("# Mock voxel engine\n", encoding="utf-8")
-    (owner / "voxel.py").write_text("CHUNK_SIZE = 32\n", encoding="utf-8")
-    _git(owner, "add", "README.md", "voxel.py")
-    _git(owner, "commit", "-m", "Seed mock voxel project")
+    (owner / "README.md").write_text("# Disposable TicketBunker demo\n", encoding="utf-8")
+    (owner / "demo.py").write_text("PAGE_SIZE = 32\n", encoding="utf-8")
+    _git(owner, "add", "README.md", "demo.py")
+    _git(owner, "commit", "-m", "Seed disposable demo project")
     _git(owner, "remote", "add", "origin", str(source_remote))
-    _git(owner, "push", "-u", "origin", "ecs")
+    _git(owner, "push", "-u", "origin", "demo")
 
     old_config = config.GLOBAL_CONFIG
     old_agent_disable = os.environ.get("TB_AGENT_DISABLE")
@@ -125,10 +125,10 @@ def run_mock(workspace: Path) -> dict[str, Any]:
             lambda: commands.dispatch(
                 "project.connect",
                 {
-                    "project": "ECS",
-                    "project_name": "Voxel ECS",
+                    "project": "DEMO",
+                    "project_name": "TicketBunker Demo",
                     "bunker_repo": str(companion_remote),
-                    "base_branch": "ecs",
+                    "base_branch": "demo",
                 },
                 commands.CommandContext(owner),
             )
@@ -148,13 +148,13 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         items[3]["comments"] = [
             {
                 "user": {"login": "Lin"},
-                "body": "Position update order matters.",
+                "body": "Demo update order matters.",
                 "created_at": "2026-08-22T12:00:00Z",
-                "html_url": "https://github.com/example/voxel/issues/4#issuecomment-1",
+                "html_url": "https://github.com/example/sandbox/issues/4#issuecomment-1",
             }
         ]
         items[3]["issue"]["updated_at"] = "2026-08-22T12:00:00Z"
-        items[7]["issue"]["title"] = "ECS-8 Updated mock voxel task"
+        items[7]["issue"]["title"] = "DEMO-8 Updated mock project task"
         items[7]["issue"]["updated_at"] = "2026-08-22T12:01:00Z"
         items[11]["issue"]["state"] = "closed"
         items[11]["issue"]["closed_at"] = "2026-08-22T12:02:00Z"
@@ -166,12 +166,12 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         all_page = catalog.query(api.TicketQuery(status="all", assignee="*", per_page=100))
         active_page = catalog.query(api.TicketQuery(status="active", assignee="*", per_page=100))
         filtered_page = catalog.query(
-            api.TicketQuery(status="active", assignee="Lin", label="rendering", per_page=5)
+            api.TicketQuery(status="active", assignee="Lin", label="frontend", per_page=5)
         )
         index_path = layout.ticket_index(project.tickets_dir(owner))
 
         subprocess.run(
-            ["git", "clone", "--branch", "ecs", str(source_remote), str(collaborator)],
+            ["git", "clone", "--branch", "demo", str(source_remote), str(collaborator)],
             check=True,
             capture_output=True,
         )
@@ -181,20 +181,22 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         before_open = _materialized(collaborator)
         collaborator_catalog = api.TicketCatalog(collaborator)
         collaborator_refs = collaborator_catalog.list_tickets()
-        opened, open_ticket_ms = _timed(lambda: collaborator_catalog.get_ticket("ECS", "ECS-7"))
+        opened, open_ticket_ms = _timed(
+            lambda: collaborator_catalog.get_ticket("DEMO", "DEMO-7")
+        )
         after_open = _materialized(collaborator)
 
         owner_branch, owner_branch_ms = _timed(
             lambda: commands.dispatch(
                 "workflow.start",
-                {"ticket": "ECS-4", "name": "position-system", "user": "Ada"},
+                {"ticket": "DEMO-4", "name": "sample-service", "user": "Ada"},
                 commands.CommandContext(owner),
             )
         )
         collaborator_branch, collaborator_branch_ms = _timed(
             lambda: commands.dispatch(
                 "workflow.start",
-                {"ticket": "ECS-7", "name": "render-chunks", "user": "Lin"},
+                {"ticket": "DEMO-7", "name": "frontend-state", "user": "Lin"},
                 commands.CommandContext(collaborator),
             )
         )
@@ -203,13 +205,13 @@ def run_mock(workspace: Path) -> dict[str, Any]:
         collaborator_doctor = doctor.report(collaborator)
         rendered = viewer.page_ticket(
             collaborator,
-            "ECS-7",
+            "DEMO-7",
             viewer.fingerprint(collaborator),
-            "ECS",
+            "DEMO",
             "mock-transport-token",
         )
         if rendered is None:
-            raise RuntimeError("mock ticket viewer failed to render ECS-7")
+            raise RuntimeError("mock ticket viewer failed to render DEMO-7")
         rendered_text = rendered.decode("utf-8")
 
         assertions = {
@@ -219,7 +221,7 @@ def run_mock(workspace: Path) -> dict[str, Any]:
             "catalog_complete": all_page.total == 15 and len(collaborator_refs) == 15,
             "active_filter": active_page.total == 12,
             "sparse_before_open": before_open == [],
-            "one_ticket_hydrated": after_open == ["ECS-7"] and opened.id == "ECS-7",
+            "one_ticket_hydrated": after_open == ["DEMO-7"] and opened.id == "DEMO-7",
             "two_users_branched": owner_branch["branch"].startswith("Ada/")
             and collaborator_branch["branch"].startswith("Lin/"),
             "doctors_ready": owner_doctor["ready"] and collaborator_doctor["ready"],
@@ -235,7 +237,7 @@ def run_mock(workspace: Path) -> dict[str, Any]:
             "project": initialized["project"],
             "tickets": all_page.total,
             "active_tickets": active_page.total,
-            "filtered_lin_rendering": filtered_page.total,
+            "filtered_lin_frontend": filtered_page.total,
             "sync": {
                 "first": {
                     "created": first_sync["created"],

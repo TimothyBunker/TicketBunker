@@ -120,7 +120,8 @@ class AutomaticAgentTests(unittest.TestCase):
 
         resolved = autoagent.resolve_bunker(self.repo, "Ada/ECS-4-automatic")
 
-        self.assertEqual(resolved, scope / "ECS-4")
+        self.assertEqual(resolved.name, "ECS-4")
+        self.assertTrue(resolved.parent.samefile(scope))
         self.assertFalse(resolved.exists())
 
     def test_event_arriving_during_worker_exit_is_not_stranded(self) -> None:

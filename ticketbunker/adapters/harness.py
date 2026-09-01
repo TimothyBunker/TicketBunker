@@ -9,10 +9,9 @@ any CLI (a stub for testing, a different agent runner, etc.).
 from __future__ import annotations
 
 import os
-import shlex
 from pathlib import Path
 
-from .. import agent_runtime, layout
+from .. import agent_runtime, layout, platform_services
 from ..contracts import StageContract, run_stage
 from ..ledger import Ledger
 from . import proc
@@ -209,7 +208,7 @@ def run_session(
             raise ValueError("harness 'command' requires a command template")
         argv = [
             part.format(form=str(form), tb_md=str(p["tb_md"]), repo=str(repo), prompt=prompt)
-            for part in shlex.split(command_template)
+            for part in platform_services.current().split_command(command_template)
         ]
     else:
         raise ValueError(f"unknown harness {harness!r} (known: pi, codex, command)")

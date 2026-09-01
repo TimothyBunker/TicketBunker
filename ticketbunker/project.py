@@ -1047,7 +1047,7 @@ def include_ticket_path(source_root: Path, project_key: str, ticket_id: str) -> 
     try:
         git(
             data_checkout(source_root),
-            ["sparse-checkout", "add", "--no-cone", pattern],
+            ["sparse-checkout", "add", pattern],
             ledger,
             "ticket_materialize",
         )

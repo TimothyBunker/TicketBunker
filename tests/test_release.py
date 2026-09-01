@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,14 +64,17 @@ class ReleaseBuilderTests(unittest.TestCase):
             output_dir = root / "out"
             builder.PI_MANIFEST = pi_manifest
 
-            output = builder.build(
-                argparse.Namespace(
-                    platform="linux-x64",
-                    tb=fake_tb,
-                    pi_archive=archive,
-                    output_dir=output_dir,
+            with mock.patch.object(builder, "smoke_auth_bridge") as smoke:
+                output = builder.build(
+                    argparse.Namespace(
+                        platform="linux-x64",
+                        tb=fake_tb,
+                        pi_archive=archive,
+                        output_dir=output_dir,
+                    )
                 )
-            )
+
+            smoke.assert_called_once()
 
             self.assertTrue(output.is_file())
             self.assertTrue(output.with_name(f"{output.name}.sha256").is_file())
@@ -86,6 +90,19 @@ class ReleaseBuilderTests(unittest.TestCase):
             self.assertTrue((bundle / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").is_file())
             self.assertTrue((bundle / "share" / "licenses" / "pi" / "LICENSE.txt").is_file())
             self.assertTrue((bundle / "share" / "ticketbunker" / "pi-runtime.json").is_file())
+
+    def test_auth_bridge_smoke_requires_the_typed_catalog_event(self) -> None:
+        builder = load_builder()
+        completed = mock.Mock(
+            returncode=0,
+            stdout=(
+                '{"method":"notify","message":"TB_AUTH_EVENT:'
+                '{\\"kind\\":\\"catalog\\",\\"providers\\":[]}"}\n'
+            ),
+        )
+
+        with mock.patch.object(builder.subprocess, "run", return_value=completed):
+            builder.smoke_auth_bridge(Path("pi"), Path("tb_auth.ts"))
 
     def test_wrong_upstream_checksum_stops_before_bundle_creation(self) -> None:
         builder = load_builder()

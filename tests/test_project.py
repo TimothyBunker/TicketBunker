@@ -306,6 +306,26 @@ class CompanionProjectTests(unittest.TestCase):
             ["ECS-4", "ECS-5"],
         )
 
+    def test_sparse_ticket_add_reuses_the_checkout_mode_for_older_git(self) -> None:
+        ledger = mock.Mock()
+        with mock.patch.object(
+            project, "sparse_data_enabled", return_value=True
+        ), mock.patch.object(
+            project, "_init_ledger", return_value=ledger
+        ), mock.patch.object(
+            project,
+            "data_checkout",
+            return_value=self.source / ".tb" / "data",
+        ), mock.patch.object(project, "git") as git:
+            project.include_ticket_path(self.source, "DEMO", "DEMO-7")
+
+        git.assert_called_once_with(
+            self.source / ".tb" / "data",
+            ["sparse-checkout", "add", "/projects/DEMO/tickets/DEMO-7/"],
+            ledger,
+            "ticket_materialize",
+        )
+
     def test_ticket_path_is_project_scoped_without_bunker_suffix(self) -> None:
         self.initialize()
         self.assertEqual(

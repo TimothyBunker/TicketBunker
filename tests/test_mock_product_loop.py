@@ -16,7 +16,7 @@ class MockProductLoopTests(unittest.TestCase):
         self.assertTrue(result["sync"]["repeat"]["revision_unchanged"])
         self.assertEqual(result["sync"]["changed"]["updated"], 3)
         self.assertEqual(result["sparse"]["before_open"], [])
-        self.assertEqual(result["sparse"]["after_open"], ["ECS-7"])
+        self.assertEqual(result["sparse"]["after_open"], ["DEMO-7"])
         self.assertTrue(result["doctor"]["ada_ready"])
         self.assertTrue(result["doctor"]["lin_ready"])
         self.assertTrue(all(result["assertions"].values()))

@@ -116,7 +116,10 @@ class SharedTruthTests(unittest.TestCase):
             )
 
         self.assertTrue(result["queued"])
-        enqueue.assert_called_once_with(self.root, "user-requested-synthesis")
+        enqueue.assert_called_once()
+        called_root, event = enqueue.call_args.args
+        self.assertTrue(called_root.samefile(self.root))
+        self.assertEqual(event, "user-requested-synthesis")
 
     def test_stopped_synthesis_exposes_retry_and_local_log(self) -> None:
         with mock.patch.object(

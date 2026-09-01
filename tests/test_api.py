@@ -158,7 +158,7 @@ class TicketDatabaseTests(unittest.TestCase):
         nested = self.root / "src" / "package"
         nested.mkdir(parents=True)
 
-        self.assertEqual(TicketDatabase.discover(nested).project_root, self.root)
+        self.assertTrue(TicketDatabase.discover(nested).project_root.samefile(self.root))
 
     def test_ticket_extension_fields_are_typed(self) -> None:
         self.assertIn(

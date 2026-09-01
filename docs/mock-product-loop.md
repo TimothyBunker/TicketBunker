@@ -1,19 +1,19 @@
 # Mock product loop
 
-Measured on 22 August 2026 with `python3 tools/mock_product_loop.py --json`.
+Measured on 1 September 2026 with `python3 tools/mock_product_loop.py --json`.
 The exercise creates new local bare source/companion remotes and never reads or
-changes the voxel repository.
+changes an existing user repository.
 
 ## Scenario
 
-- One `ECS` companion project.
+- One synthetic `DEMO` companion project.
 - 15 GitHub-shaped Project items across backlog, to do, in progress, in review,
   done, and closed.
 - Ada initializes and synchronizes the project; Lin joins from a fresh source
   clone.
 - The same fixture is pulled twice, then three source tickets change.
 - Lin lists every reference from a sparse checkout, opens one ticket, and both
-  users start convention-named branches from `ecs`.
+  users start convention-named branches from `demo`.
 - Both clones finish with a full remote `tb doctor` pass.
 
 ## Result
@@ -24,27 +24,27 @@ changes the voxel repository.
 | Identical second sync | 15 unchanged; companion revision unchanged |
 | Changed sync | 3 updated, 12 unchanged |
 | Active catalog | 12 of 15 tickets |
-| Lin + `rendering` filter | 3 tickets |
+| Lin + `frontend` filter | 3 tickets |
 | Fresh collaborator checkout | 15 references, 0 hydrated bunkers |
-| After opening ECS-7 | only ECS-7 hydrated |
-| Committed index | 11,003 bytes |
-| Created branches | `Ada/ECS-4-position-system`, `Lin/ECS-7-render-chunks` |
+| After opening DEMO-7 | only DEMO-7 hydrated |
+| Committed index | 11,377 bytes |
+| Created branches | `Ada/DEMO-4-sample-service`, `Lin/DEMO-7-frontend-state` |
 | Final diagnostics | Ada ready, Lin ready, no warnings |
-| Rendered ECS-7 page | 28.7 KB; direct empty Agent state and Work control present |
+| Rendered DEMO-7 page | 82.4 KB; direct empty Agent state and Work control present |
 
 Observed wall-clock timings on this machine (local filesystem remotes; not a
 performance benchmark):
 
 | Operation | Milliseconds |
 |---|---:|
-| Initialize companion | 60 |
-| First 15-ticket sync | 152 |
-| Identical 15-ticket sync | 49 |
-| Three-change sync | 87 |
-| Fresh collaborator setup | 46 |
-| Open one sparse ticket | 4 |
-| Ada branch start | 62 |
-| Lin branch start | 83 |
+| Initialize companion | 427 |
+| First 15-ticket sync | 442 |
+| Identical 15-ticket sync | 339 |
+| Three-change sync | 373 |
+| Fresh collaborator setup | 338 |
+| Open one sparse ticket | 6 |
+| Ada branch start | 58 |
+| Lin branch start | 81 |
 
 ## What this proves
 

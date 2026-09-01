@@ -21,10 +21,9 @@ try {
     await page.getByLabel("Branch name").fill("qa");
     await page.getByRole("button", { name: "Continue" }).click();
   }
-  await page.waitForTimeout(300);
-  if (await page.getByRole("button", { name: "Use without agent" }).isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Use without agent" }).click();
-  }
+  const withoutAgent = page.getByRole("button", { name: "Use without agent" });
+  await withoutAgent.waitFor({ state: "visible" });
+  await withoutAgent.click();
   await page.getByRole("button", { name: "Bunkers", exact: true }).click();
   await page.getByRole("heading", { name: "Bunkers", exact: true }).waitFor();
   await page.locator(".profile-control").click();

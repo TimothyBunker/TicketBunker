@@ -107,6 +107,10 @@ registry lists them for the app. The local database stores the Bunker record,
 Project tree, repository bindings, device paths, configuration snapshots,
 tickets, reports, sync cursor, and local jobs. It preserves the provenance
 strata described in §4 rather than flattening them into presentation documents.
+Every bounded database operation commits or rolls back and closes its SQLite
+connection before returning; callers never retain a file handle, which keeps
+database replacement, backup, and cleanup semantics consistent on Windows and
+Unix hosts.
 
 The default machine-owned layout is outside source repositories:
 
@@ -907,6 +911,9 @@ Machine-local operating-system behavior crosses one additional narrow boundary:
 `platform_services.py`. It detects the host per operation and supplies
 application-data locations, release/runtime keys, executable suffixes, command
 parsing, editor candidates, terminal launchers, and background-process flags.
+That parser also tokenizes configured command-harness templates, so native
+Windows paths retain their backslashes and quoted spaces without creating a
+second harness contract.
 Domain services never branch on Linux, Windows, macOS, WSL, drive letters, or
 desktop-session details. WSL runs the ordinary Linux implementation; if a
 native shell communicates with a core in another environment, that connection
