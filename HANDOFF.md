@@ -327,6 +327,10 @@ new Bunkers.
   Linux x64 emits Debian and AppImage installers; Linux arm64 emits the verified
   Debian installer because the upstream arm64 `linuxdeploy` AppImage path is not
   currently reproducible on GitHub's native arm runner.
+  Release workflow run `33583291812` passed all six matrix jobs at code commit
+  `f8cb223`; its Windows x64 artifact contains
+  `TicketBunker_0.5.0_x64-setup.exe` plus the portable bundle, and both published
+  SHA-256 files were independently verified after download.
   Git execution is repository-serialized inside each TicketBunker process, and
   branch creation holds the source-repository transaction throughout its Git
   sequence so ticket-open background fetches cannot race it on slower hosts.
@@ -392,7 +396,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 260 Python tests, 9 Rust host tests, 2
+references. The current full suite is 263 Python tests, 9 Rust host tests, 2
 React component tests, and the real-browser standalone interaction flow.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,
