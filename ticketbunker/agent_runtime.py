@@ -110,16 +110,21 @@ def _bundle_roots() -> list[Path]:
 
 
 def _bundle_candidates() -> list[tuple[Path, str]]:
-    executable = platform_services.current().executable_name("pi")
+    executable = Path("pi") / platform_services.current().executable_name("pi")
+    entry = (manifest().get("platforms") or {}).get(platform_key() or "")
+    if isinstance(entry, dict):
+        declared = Path(str(entry.get("executable") or ""))
+        if declared.parts and not declared.is_absolute() and ".." not in declared.parts:
+            executable = declared
     candidates: list[tuple[Path, str]] = []
     for root in _bundle_roots():
         candidates.extend(
             (
-                (root / "libexec" / "ticketbunker" / "pi" / executable, "bundled"),
-                (root / "_runtime" / "pi" / executable, "bundled"),
+                (root / "libexec" / "ticketbunker" / executable, "bundled"),
+                (root / "_runtime" / executable, "bundled"),
             )
         )
-    local = data_root() / "runtime" / "pi" / pinned_pi_version() / "pi" / executable
+    local = managed_root() / executable
     candidates.append((local, "managed"))
     return candidates
 

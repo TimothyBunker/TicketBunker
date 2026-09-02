@@ -320,7 +320,9 @@ new Bunkers.
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
   emits Debian/AppImage, app/DMG, or NSIS outputs. The app supplies its private
   resource root to the core, whose existing per-file integrity gate verifies
-  Pi before use. Release construction also opens the staged Pi RPC runtime and
+  Pi before use. Pi executable paths are archive-relative because the pinned
+  Windows archives are flat while Unix archives include a `pi/` directory.
+  Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with
   adjacent SHA-256 files. The final Linux Debian (89 MB) and AppImage (158 MB)
@@ -382,7 +384,7 @@ child-only report updates, private proposal-rejection diagnostics, and shared
 CLI/HTTP local editor selection, guarded built-in source saves, external-editor
 fallback, stale-viewer replacement, compact shared-truth indicators, guarded
 absolute-path copying, nested Markdown lists, and source-selection coworker
-references. The current full suite is 258 Python tests, 9 Rust host tests, 2
+references. The current full suite is 260 Python tests, 9 Rust host tests, 2
 React component tests, and the real-browser standalone interaction flow.
 
 Browser QA covers desktop, tablet, and mobile sizes. Ticket/Agent switching,

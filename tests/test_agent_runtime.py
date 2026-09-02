@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import agent_runtime, config
+from ticketbunker import agent_runtime, config, platform_services
 
 
 class AgentRuntimeTests(unittest.TestCase):
@@ -71,6 +71,42 @@ class AgentRuntimeTests(unittest.TestCase):
         for entry in value["platforms"].values():
             self.assertRegex(entry["sha256"], r"^[0-9a-f]{64}$")
             self.assertIn("/v0.84.2/", entry["url"])
+        self.assertEqual(value["platforms"]["windows-x64"]["executable"], "pi.exe")
+        self.assertEqual(value["platforms"]["windows-arm64"]["executable"], "pi.exe")
+
+    def test_flat_windows_runtime_path_drives_bundle_and_managed_discovery(self) -> None:
+        bundle = self.root / "bundle"
+        data = self.root / "data"
+        with mock.patch.object(
+            agent_runtime,
+            "manifest",
+            return_value={
+                "version": "0.84.2",
+                "platforms": {"windows-x64": {"executable": "pi.exe"}},
+            },
+        ), mock.patch.object(
+            agent_runtime, "platform_key", return_value="windows-x64"
+        ), mock.patch.object(
+            agent_runtime, "_bundle_roots", return_value=[bundle]
+        ), mock.patch.object(
+            agent_runtime, "data_root", return_value=data
+        ), mock.patch.object(
+            agent_runtime.platform_services,
+            "current",
+            return_value=platform_services.PlatformServices.detect(
+                system="win32", machine="AMD64"
+            ),
+        ):
+            candidates = agent_runtime._bundle_candidates()
+
+        self.assertEqual(
+            candidates,
+            [
+                (bundle / "libexec" / "ticketbunker" / "pi.exe", "bundled"),
+                (bundle / "_runtime" / "pi.exe", "bundled"),
+                (data / "runtime" / "pi" / "0.84.2" / "pi.exe", "managed"),
+            ],
+        )
 
     def test_ready_state_adopts_pi_selection_without_reading_credentials(self) -> None:
         with self.environment():

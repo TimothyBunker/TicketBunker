@@ -1200,8 +1200,11 @@ exists only in the ephemeral release runner and the repository's secret store.
 TicketBunker pins one reviewed pi version. Release construction downloads the
 corresponding official platform archive and refuses to extract it unless its
 recorded SHA-256 digest matches; runtime discovery verifies every extracted Pi
-file against the bundle manifest before invoking it. The native build also
-stages `tb` under Tauri's target-triple sidecar name and refuses to proceed when
+file against the bundle manifest before invoking it. The declared executable
+path is relative to each upstream archive and is allowed to differ by platform;
+staging, managed installation, and runtime discovery all consume that same
+path instead of assuming the archive has a wrapper directory. The native build
+also stages `tb` under Tauri's target-triple sidecar name and refuses to proceed when
 the frozen core or declared Pi executable is missing. Each native installer is
 copied into the flat release-asset directory with an adjacent SHA-256 file, so
 publishing does not depend on a build runner's nested Tauri directories.

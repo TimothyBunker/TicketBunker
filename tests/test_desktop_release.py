@@ -6,6 +6,7 @@ import json
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -44,6 +45,7 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", workflow)
         self.assertIn("Get-AuthenticodeSignature", workflow)
         self.assertIn('signature.Status -ne "Valid"', workflow)
+        self.assertIn("xdg-utils", workflow)
 
     def test_stage_places_the_frozen_core_and_verified_runtime_for_tauri(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_name:
@@ -107,6 +109,66 @@ class DesktopReleaseTests(unittest.TestCase):
             self.assertEqual(
                 (resources / "share" / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").read_text(),
                 "auth adapter",
+            )
+
+    def test_stage_accepts_the_flat_windows_pi_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_name:
+            root = Path(temporary_name)
+            source = root / "source"
+            (source / "ticketbunker" / "harness" / "pi").mkdir(parents=True)
+            (source / "ticketbunker" / "licenses").mkdir(parents=True)
+            (source / "ticketbunker" / "runtime").mkdir(parents=True)
+            (source / "desktop" / "src-tauri").mkdir(parents=True)
+            (source / "ticketbunker" / "harness" / "pi" / "tb.ts").write_text("adapter")
+            (source / "ticketbunker" / "harness" / "pi" / "tb_auth.ts").write_text("auth adapter")
+            (source / "ticketbunker" / "licenses" / "pi-MIT.txt").write_text("license")
+            (source / "THIRD_PARTY_NOTICES.md").write_text("notice")
+            (source / "pyproject.toml").write_text('[project]\nversion = "9.8.7"\n')
+            tb = root / "tb.exe"
+            tb.write_text("core")
+            runtime = root / "pi.exe"
+            runtime.write_text("runtime")
+            archive = root / "pi.zip"
+            with zipfile.ZipFile(archive, "w") as output:
+                output.write(runtime, arcname="pi.exe")
+            pi_manifest = source / "ticketbunker" / "runtime" / "pi-runtime.json"
+            pi_manifest.write_text(
+                json.dumps(
+                    {
+                        "version": "1.2.3",
+                        "platforms": {
+                            "windows-x64": {
+                                "archive": archive.name,
+                                "url": "https://example.invalid/pi.zip",
+                                "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                                "format": "zip",
+                                "executable": "pi.exe",
+                            }
+                        },
+                    }
+                )
+            )
+
+            with mock.patch.object(builder, "ROOT", source), mock.patch.object(
+                builder, "DESKTOP", source / "desktop"
+            ), mock.patch.object(
+                builder, "PI_MANIFEST", pi_manifest
+            ), mock.patch.object(
+                builder.build_release,
+                "PACKAGE_VERSION",
+                source / "pyproject.toml",
+            ):
+                sidecar, resources = builder.stage(
+                    platform_name="windows-x64",
+                    triple="x86_64-pc-windows-msvc",
+                    tb=tb,
+                    pi_archive=archive,
+                )
+
+            self.assertEqual(sidecar.name, "tb-x86_64-pc-windows-msvc.exe")
+            self.assertEqual(
+                (resources / "libexec" / "ticketbunker" / "pi.exe").read_text(),
+                "runtime",
             )
 
     def test_publish_native_packages_flattens_installers_with_checksums(self) -> None:
