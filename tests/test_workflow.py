@@ -5,12 +5,15 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from ticketbunker import api, commands, config, layout, project, viewer, workflow
+from ticketbunker.adapters.gitrun import repository_lock
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -196,8 +199,10 @@ class TicketWorkflowTests(unittest.TestCase):
         thread.start()
         base = f"http://127.0.0.1:{server.server_address[1]}"
         try:
-            page = urlopen(f"{base}/project/ECS/ticket/ECS-4").read().decode("utf-8")
-            state = json.loads(urlopen(f"{base}/work/state/ECS-4").read().decode("utf-8"))
+            with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
+                page = opened.read().decode("utf-8")
+            with urlopen(f"{base}/work/state/ECS-4") as opened:
+                state = json.loads(opened.read().decode("utf-8"))
             token = re.search(r'data-token="([^"]+)"', page).group(1)
             body = json.dumps({"ticket": "ECS-4", "name": "viewer-work", "base": "ecs"}).encode()
             with self.assertRaises(HTTPError) as rejected:
@@ -208,15 +213,15 @@ class TicketWorkflowTests(unittest.TestCase):
                         headers={"Content-Type": "application/json", "X-TicketBunker-Token": "wrong"},
                     )
                 )
-            response = json.loads(
-                urlopen(
+            rejected.exception.close()
+            with urlopen(
                     Request(
                         f"{base}/work",
                         data=body,
                         headers={"Content-Type": "application/json", "X-TicketBunker-Token": token},
                     )
-                ).read().decode("utf-8")
-            )
+                ) as opened:
+                response = json.loads(opened.read().decode("utf-8"))
         finally:
             server.shutdown()
             server.server_close()
@@ -228,6 +233,68 @@ class TicketWorkflowTests(unittest.TestCase):
         self.assertEqual(rejected.exception.code, 403)
         self.assertEqual(response["branch"], "Ada/ECS-4-viewer-work")
         self.assertEqual(run_git(self.source, "branch", "--show-current"), response["branch"])
+
+    def test_branch_creation_waits_for_ticket_open_git_refresh(self) -> None:
+        refresh_entered = threading.Event()
+        release_refresh = threading.Event()
+        request_finished = threading.Event()
+        request_result: dict[str, object] = {}
+
+        def held_refresh(root: Path, _ledger: object) -> tuple[bool, str]:
+            with repository_lock(root):
+                refresh_entered.set()
+                release_refresh.wait(timeout=5)
+                return True, ""
+
+        server = viewer.serve(self.source, 0)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        client_thread: threading.Thread | None = None
+        try:
+            with mock.patch.object(project, "refresh_source_refs", held_refresh):
+                with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
+                    page = opened.read().decode("utf-8")
+                token = re.search(r'data-token="([^"]+)"', page).group(1)
+                self.assertTrue(refresh_entered.wait(timeout=2))
+
+                def create_branch() -> None:
+                    try:
+                        body = json.dumps(
+                            {"ticket": "ECS-4", "name": "after-refresh", "base": "ecs"}
+                        ).encode()
+                        with urlopen(
+                            Request(
+                                f"{base}/work",
+                                data=body,
+                                headers={
+                                    "Content-Type": "application/json",
+                                    "X-TicketBunker-Token": token,
+                                },
+                            )
+                        ) as opened:
+                            request_result.update(json.loads(opened.read().decode("utf-8")))
+                    except Exception as exc:  # asserted on the test thread below
+                        request_result["error"] = exc
+                    finally:
+                        request_finished.set()
+
+                client_thread = threading.Thread(target=create_branch, daemon=True)
+                client_thread.start()
+                time.sleep(0.1)
+                self.assertFalse(request_finished.is_set())
+                release_refresh.set()
+                self.assertTrue(request_finished.wait(timeout=5))
+        finally:
+            release_refresh.set()
+            if client_thread is not None:
+                client_thread.join(timeout=2)
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=2)
+
+        self.assertNotIn("error", request_result)
+        self.assertEqual(request_result["branch"], "Ada/ECS-4-after-refresh")
 
 
 if __name__ == "__main__":

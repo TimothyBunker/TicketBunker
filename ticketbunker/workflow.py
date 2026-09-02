@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from . import commands, config, handlers, layout, project
-from .adapters.gitrun import GitError, git
+from .adapters.gitrun import GitError, git, repository_lock
 from .api import TicketCatalog
 from .ledger import Ledger
 from .processors.stages import relate_branches
@@ -215,9 +215,14 @@ def _preflight(
 
 @commands.register("workflow.start")
 def command_start(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    source_root = Path(context.project_root).resolve()
+    with repository_lock(source_root):
+        return _command_start_locked(source_root, payload)
+
+
+def _command_start_locked(source_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     ticket_id = str(payload.get("ticket") or "").strip()
     short_name = str(payload.get("name") or "")
-    source_root = Path(context.project_root).resolve()
     ticket, bunker, ledger, full, base, locals_, remotes = _preflight(
         source_root,
         ticket_id,

@@ -327,6 +327,9 @@ new Bunkers.
   Linux x64 emits Debian and AppImage installers; Linux arm64 emits the verified
   Debian installer because the upstream arm64 `linuxdeploy` AppImage path is not
   currently reproducible on GitHub's native arm runner.
+  Git execution is repository-serialized inside each TicketBunker process, and
+  branch creation holds the source-repository transaction throughout its Git
+  sequence so ticket-open background fetches cannot race it on slower hosts.
   Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with

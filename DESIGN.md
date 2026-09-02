@@ -1213,6 +1213,11 @@ an ambient npm update. Cross-platform release tooling resolves build commands to
 their concrete executable before launching them without a shell; this includes
 Windows command shims such as `npm.cmd`.
 
+Within one running TicketBunker process, Git commands are serialized per
+checkout. Multi-command worktree mutations such as branch creation hold that
+repository transaction across preflight, fetch, switch, and publication setup,
+so a ticket-open background ref refresh finishes before the mutation begins.
+
 Linux x64 publishes both Debian and AppImage installers. Linux arm64 publishes
 the native Debian installer; its AppImage is withheld until Tauri's upstream
 arm64 `linuxdeploy` path can be made reproducible. A failed optional packaging

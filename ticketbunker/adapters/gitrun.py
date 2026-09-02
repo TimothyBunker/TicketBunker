@@ -9,11 +9,27 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
 from ..ledger import Ledger
+
+
+_LOCKS_GUARD = threading.Lock()
+_REPOSITORY_LOCKS: dict[str, threading.RLock] = {}
+
+
+@contextmanager
+def repository_lock(repo: Path) -> Iterator[None]:
+    """Keep one process from interleaving Git transactions in a checkout."""
+    key = os.path.normcase(str(Path(repo).resolve()))
+    with _LOCKS_GUARD:
+        lock = _REPOSITORY_LOCKS.setdefault(key, threading.RLock())
+    with lock:
+        yield
 
 
 class GitError(RuntimeError):
@@ -53,33 +69,34 @@ def git_status(
     For commands whose answer *is* the exit status (e.g. merge-base
     --is-ancestor).
     """
-    argv = ["git", "-C", str(repo), *args]
-    start = time.monotonic()
-    process_env = None
-    if env is not None:
-        process_env = {**os.environ, **env}
-    try:
-        proc = subprocess.run(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=process_env,
-            timeout=timeout,
+    with repository_lock(repo):
+        argv = ["git", "-C", str(repo), *args]
+        start = time.monotonic()
+        process_env = None
+        if env is not None:
+            process_env = {**os.environ, **env}
+        try:
+            proc = subprocess.run(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=process_env,
+                timeout=timeout,
+            )
+            output = proc.stdout
+            status = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            prior = exc.stdout if isinstance(exc.stdout, bytes) else str(exc.stdout or "").encode()
+            output = prior + f"\nGit command timed out after {timeout:g} seconds".encode()
+            status = 124
+        duration_ms = int((time.monotonic() - start) * 1000)
+        ledger.command(
+            stage=stage,
+            argv=argv,
+            cwd=str(repo),
+            initiator=initiator,
+            exit_status=status,
+            stdout=output,
+            duration_ms=duration_ms,
         )
-        output = proc.stdout
-        status = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        prior = exc.stdout if isinstance(exc.stdout, bytes) else str(exc.stdout or "").encode()
-        output = prior + f"\nGit command timed out after {timeout:g} seconds".encode()
-        status = 124
-    duration_ms = int((time.monotonic() - start) * 1000)
-    ledger.command(
-        stage=stage,
-        argv=argv,
-        cwd=str(repo),
-        initiator=initiator,
-        exit_status=status,
-        stdout=output,
-        duration_ms=duration_ms,
-    )
-    return output.decode(errors="replace"), status
+        return output.decode(errors="replace"), status
