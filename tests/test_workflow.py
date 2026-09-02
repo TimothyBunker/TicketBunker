@@ -256,9 +256,15 @@ class TicketWorkflowTests(unittest.TestCase):
         client_thread: threading.Thread | None = None
         try:
             with mock.patch.object(project, "refresh_source_refs", held_refresh):
-                with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
-                    page = opened.read().decode("utf-8")
+                with mock.patch.object(viewer.truth, "queue_refresh", return_value=False):
+                    with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
+                        page = opened.read().decode("utf-8")
                 token = re.search(r'data-token="([^"]+)"', page).group(1)
+                self.assertTrue(
+                    viewer.truth.queue_refresh(
+                        self.source, "ECS", "ECS-4", force=True
+                    )
+                )
                 self.assertTrue(refresh_entered.wait(timeout=2))
 
                 def create_branch() -> None:
@@ -288,6 +294,17 @@ class TicketWorkflowTests(unittest.TestCase):
                 self.assertFalse(request_finished.is_set())
                 release_refresh.set()
                 self.assertTrue(request_finished.wait(timeout=5))
+                deadline = time.monotonic() + 10
+                while (
+                    viewer.truth.state(self.source, "ECS", "ECS-4").get("refresh")
+                    == "running"
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                self.assertNotEqual(
+                    viewer.truth.state(self.source, "ECS", "ECS-4").get("refresh"),
+                    "running",
+                )
         finally:
             release_refresh.set()
             if client_thread is not None:
