@@ -47,10 +47,21 @@ response is:
   "snapshot": {
     "bunker": {"id": "engineering", "name": "Engineering"},
     "projects": [],
-    "repository_bindings": [],
+    "repository_bindings": [{
+      "id": "coal",
+      "project_id": "ecs",
+      "name": "Coal",
+      "canonical_remote": "github.com/example/coal",
+      "default_branch": "main"
+    }],
     "config_documents": [],
     "tickets": [],
-    "reports": [],
+    "reports": [{
+      "ticket_id": "ECS-4",
+      "scope": "branch:tim/ECS-4-position",
+      "repository_id": "coal",
+      "content": "# Report"
+    }],
     "members": [{"id": "user-7", "display_name": "Tim", "role": "member"}],
     "current_member_id": "user-7",
     "capabilities": ["tickets:read"],
@@ -117,6 +128,14 @@ document is a pinned composition and does not track later Bunker-default
 updates. The client never treats cached capabilities as authorization: a local
 remote replica stays read-only until the service accepts the typed change and
 returns the new revision.
+
+Repository bindings are a whole-list, revision-checked Project configuration.
+Only an authorized service transaction may add, change, or remove the canonical
+remotes allowed for a Project. Device paths never synchronize. A client may map
+an allowed binding to a checkout only after the checkout's canonical `origin`
+matches and its fetch succeeds. Tickets name one `project_id`; every branch
+report also names its `repository_id`, allowing one ticket to span several
+Project repositories without assigning the ticket itself to one repository.
 
 ## Stable failures
 

@@ -574,8 +574,43 @@ def command_bunker_repository_attach(
         str(payload.get("bunker_id") or ""),
         project_id=str(payload.get("project_id") or ""),
         local_path=str(payload.get("path") or ""),
-        name=str(payload.get("name") or ""),
-        default_branch=str(payload.get("default_branch") or ""),
+        binding_id=str(payload.get("binding_id") or ""),
+    )
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.repository.replace")
+def command_bunker_repository_replace(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    repositories = payload.get("repositories")
+    if not isinstance(repositories, list):
+        raise commands.CommandRejected(
+            "repositories_invalid", "Project repositories must be a list."
+        )
+    configuration = _bunker_result(
+        bunkerdb.replace_repository_bindings,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or ""),
+        expected_revision=str(payload.get("expected_revision") or ""),
+        repositories=repositories,
+    )
+    return {
+        "configuration": configuration,
+        "bunker": bunkerdb.get_bunker(str(payload.get("bunker_id") or "")),
+        "bunkers": bunkerdb.list_bunkers(),
+    }
+
+
+@commands.register("application.bunker.repository.detach")
+def command_bunker_repository_detach(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker = _bunker_result(
+        bunkerdb.detach_repository,
+        str(payload.get("bunker_id") or ""),
+        project_id=str(payload.get("project_id") or ""),
+        binding_id=str(payload.get("binding_id") or ""),
     )
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
 

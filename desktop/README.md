@@ -31,9 +31,11 @@ the release matrix but needs hardware verification.
 
 Opening the app without `--repo` lands on Bunkers. Create makes a local SQLite
 Bunker and first Project without touching Git. Join validates an invitation and
-requires authenticated service enrollment before installing a replica. Attach
-repository is explicit and never writes discovery or authority state into the
-checkout. Legacy companion data appears only as a read-only import.
+requires authenticated service enrollment before installing a replica. The
+selected Project's Configure view owns an indexed allowed-repository table;
+connecting a local checkout validates and fetches its `origin` without writing
+discovery or authority state into it. Legacy companion data appears only as a
+read-only import.
 
 Installed users launch **TicketBunker** from the Windows Start menu or Linux
 application launcher. The installer supplies that launcher; `Terminal=false`
@@ -47,6 +49,10 @@ GitLab, and Jira are prefilled alongside custom integrations. Local Bunkers can
 publish locally. Remote replicas remain read-only until their authenticated
 service publishes configuration, even if a cached snapshot names a write
 capability.
+
+Only the Bunker header exposes remote-service connectivity. Projects never show
+a database or remote-service connection action. Their Repositories tab separates
+shared canonical remotes from the current computer's local checkout mappings.
 
 Agent setup starts the verified Pi runtime in constrained RPC mode with only
 `tb_auth.ts`. The app renders provider login and model selection itself; secret

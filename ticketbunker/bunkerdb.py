@@ -12,6 +12,7 @@ import datetime
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import subprocess
@@ -23,7 +24,7 @@ from urllib.parse import urlsplit
 from . import layout, platform_services, project as companion, remote
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PROJECT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9-]{0,31}$")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
@@ -227,7 +228,7 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS local_repositories (
             binding_id TEXT PRIMARY KEY REFERENCES repository_bindings(id) ON DELETE CASCADE,
-            local_path TEXT NOT NULL UNIQUE,
+            local_path TEXT NOT NULL,
             attached_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL
         );
@@ -251,9 +252,10 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS reports (
             ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
             scope TEXT NOT NULL,
+            repository_id TEXT NOT NULL DEFAULT '',
             content TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (ticket_id, scope)
+            PRIMARY KEY (ticket_id, scope, repository_id)
         );
         CREATE TABLE IF NOT EXISTS migration_imports (
             id TEXT PRIMARY KEY,
@@ -264,12 +266,79 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
             detail_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS projects_parent_idx ON projects(parent_id, position, name);
-        CREATE UNIQUE INDEX IF NOT EXISTS repositories_remote_idx
-            ON repository_bindings(bunker_id, canonical_remote)
+        CREATE UNIQUE INDEX IF NOT EXISTS repositories_project_remote_idx
+            ON repository_bindings(project_id, canonical_remote)
             WHERE canonical_remote <> '';
+        CREATE INDEX IF NOT EXISTS local_repositories_path_idx
+            ON local_repositories(local_path);
         CREATE INDEX IF NOT EXISTS tickets_project_idx ON tickets(project_id, updated_at DESC);
         """
     )
+    # Version 2 treated one Git checkout as unique across an entire Bunker.
+    # Projects are scopes, so one monorepo checkout may legitimately attach to
+    # several Projects. Rebuild only the machine-local mapping table; shared
+    # repository identities and source files remain untouched.
+    table_sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_repositories'"
+    ).fetchone()
+    if table_sql is not None and "UNIQUE" in str(table_sql["sql"] or "").upper():
+        connection.executescript(
+            """
+            ALTER TABLE local_repositories RENAME TO local_repositories_v2;
+            CREATE TABLE local_repositories (
+                binding_id TEXT PRIMARY KEY REFERENCES repository_bindings(id) ON DELETE CASCADE,
+                local_path TEXT NOT NULL,
+                attached_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );
+            INSERT INTO local_repositories(binding_id, local_path, attached_at, last_seen_at)
+                SELECT binding_id, local_path, attached_at, last_seen_at
+                FROM local_repositories_v2;
+            DROP TABLE local_repositories_v2;
+            """
+        )
+    connection.execute("DROP INDEX IF EXISTS repositories_remote_idx")
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS repositories_project_remote_idx
+        ON repository_bindings(project_id, canonical_remote)
+        WHERE canonical_remote <> ''
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS local_repositories_path_idx ON local_repositories(local_path)"
+    )
+    report_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(reports)").fetchall()
+    }
+    report_table = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+    ).fetchone()
+    report_sql = "".join(str(report_table["sql"] or "").lower().split())
+    if "repository_id" not in report_columns or "primarykey(ticket_id,scope)" in report_sql:
+        connection.execute("ALTER TABLE reports RENAME TO reports_v2")
+        connection.execute(
+            """
+            CREATE TABLE reports (
+                ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+                scope TEXT NOT NULL,
+                repository_id TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (ticket_id, scope, repository_id)
+            )
+            """
+        )
+        repository_expression = "repository_id" if "repository_id" in report_columns else "''"
+        connection.execute(
+            f"""
+            INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
+            SELECT ticket_id, scope, {repository_expression}, content, updated_at
+            FROM reports_v2
+            """
+        )
+        connection.execute("DROP TABLE reports_v2")
     connection.execute(
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
         (SCHEMA_VERSION, _now()),
@@ -553,7 +622,8 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         for item in connection.execute(
             """
             SELECT rb.id, rb.project_id, rb.name, rb.canonical_remote,
-                   rb.default_branch, lr.local_path, lr.last_seen_at
+                   rb.default_branch, lr.local_path, lr.attached_at,
+                   lr.last_seen_at AS last_fetched_at
             FROM repository_bindings rb
             LEFT JOIN local_repositories lr ON lr.binding_id = rb.id
             ORDER BY rb.name COLLATE NOCASE
@@ -721,12 +791,18 @@ def get_configuration(
                 "content": content,
             }
         permission = _config_permission(connection, bunker)
+        repositories = (
+            _project_repository_configuration(connection, scope_id)
+            if scope_type == "project"
+            else {"revision": "", "items": []}
+        )
     return {
         "scope_type": scope_type,
         "scope_id": scope_id,
         "documents": documents,
         "permission": permission,
         "composition": "pinned" if scope_type == "project" else "defaults-for-new-projects",
+        "repositories": repositories,
     }
 
 
@@ -1158,7 +1234,8 @@ def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
     with _database(bunker_id) as connection:
         source = connection.execute(
             """
-            SELECT t.source_kind, t.source_reference, p.key, lr.local_path
+            SELECT t.source_kind, t.source_reference, p.key, rb.id AS repository_id,
+                   lr.local_path
             FROM tickets t
             JOIN projects p ON p.id = t.project_id
             JOIN repository_bindings rb ON rb.project_id = p.id
@@ -1223,8 +1300,20 @@ def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
         )
         connection.execute("DELETE FROM reports WHERE ticket_id = ?", (ticket_id,))
         connection.executemany(
-            "INSERT INTO reports(ticket_id, scope, content, updated_at) VALUES (?, ?, ?, ?)",
-            [(ticket_id, scope, content, now) for scope, content in report_values],
+            """
+            INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    ticket_id,
+                    scope,
+                    str(source["repository_id"]) if scope.startswith("branch:") else "",
+                    content,
+                    now,
+                )
+                for scope, content in report_values
+            ],
         )
 
 
@@ -1255,15 +1344,17 @@ def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
             raise BunkerDatabaseError("The ticket's project is missing.")
         report_rows = connection.execute(
             """
-            SELECT scope, content, updated_at FROM reports
-            WHERE ticket_id = ? ORDER BY CASE scope WHEN 'combined' THEN 0 ELSE 1 END, scope
+            SELECT scope, repository_id, content, updated_at FROM reports
+            WHERE ticket_id = ?
+            ORDER BY CASE scope WHEN 'combined' THEN 0 ELSE 1 END, scope, repository_id
             """,
             (ticket_id,),
         ).fetchall()
         repository_rows = connection.execute(
             """
             SELECT rb.id, rb.name, rb.canonical_remote, rb.default_branch,
-                   lr.local_path, lr.last_seen_at
+                   lr.local_path, lr.attached_at,
+                   lr.last_seen_at AS last_fetched_at
             FROM repository_bindings rb
             LEFT JOIN local_repositories lr ON lr.binding_id = rb.id
             WHERE rb.project_id = ? ORDER BY rb.name COLLATE NOCASE
@@ -1278,23 +1369,27 @@ def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     branches: list[dict[str, Any]] = []
     for repository in repositories:
         branches.extend(_repository_branches(repository, ticket_id))
-    known = {str(value["name"]) for value in branches}
+    known = {(str(value["repository_id"]), str(value["name"])) for value in branches}
+    repositories_by_id = {str(value["id"]): value for value in repositories}
     for report in reports:
         scope = str(report.get("scope") or "")
         if not scope.startswith("branch:"):
             continue
         name = scope.removeprefix("branch:")
-        if name not in known:
+        repository_id = str(report.get("repository_id") or "")
+        marker = (repository_id, name)
+        if marker not in known:
+            repository = repositories_by_id.get(repository_id, {})
             branches.append(
                 {
                     "name": name,
                     "current": False,
                     "remote": False,
-                    "repository_id": "",
-                    "repository_name": "",
+                    "repository_id": repository_id,
+                    "repository_name": str(repository.get("name") or ""),
                 }
             )
-            known.add(name)
+            known.add(marker)
     return {
         "ticket": {**payload, **reference},
         "project": project,
@@ -1395,13 +1490,21 @@ def canonical_remote(raw: str) -> str:
     value = str(raw or "").strip()
     if not value or value.startswith(("/", "./", "../", "~")):
         return ""
+    if any(ord(character) < 33 for character in value):
+        return ""
     if re.match(r"^[A-Za-z]:[\\/]", value):
         return ""
     if "://" not in value:
         match = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", value)
-        if not match:
-            return ""
-        host, path = match.group(1), match.group(2)
+        if match:
+            host, path = match.group(1), match.group(2)
+        else:
+            # Remote snapshots persist the already-normalized identity rather
+            # than a clone URL. Revalidate that form at every intake boundary.
+            pieces = value.split("/")
+            if len(pieces) < 3 or any(not piece for piece in pieces):
+                return ""
+            host, path = pieces[0], "/".join(pieces[1:])
     else:
         try:
             parsed = urlsplit(value)
@@ -1411,7 +1514,205 @@ def canonical_remote(raw: str) -> str:
             return ""
         host, path = parsed.hostname, parsed.path
     normalized_path = path.strip("/").removesuffix(".git")
-    return f"{host.lower()}/{normalized_path}" if normalized_path else ""
+    path_parts = [piece for piece in normalized_path.split("/") if piece]
+    return (
+        f"{host.lower()}/{normalized_path}"
+        if len(path_parts) >= 2 and all(piece not in {".", ".."} for piece in path_parts)
+        else ""
+    )
+
+
+def _repository_rows(
+    connection: sqlite3.Connection, project_id: str
+) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in connection.execute(
+            """
+            SELECT rb.id, rb.project_id, rb.name, rb.canonical_remote,
+                   rb.default_branch, lr.local_path, lr.attached_at,
+                   lr.last_seen_at AS last_fetched_at
+            FROM repository_bindings rb
+            LEFT JOIN local_repositories lr ON lr.binding_id = rb.id
+            WHERE rb.project_id = ?
+            ORDER BY rb.name COLLATE NOCASE, rb.canonical_remote, rb.id
+            """,
+            (project_id,),
+        ).fetchall()
+    ]
+
+
+def _repository_revision(rows: Iterable[Mapping[str, Any]]) -> str:
+    shared = [
+        {
+            "id": str(row.get("id") or ""),
+            "name": str(row.get("name") or ""),
+            "canonical_remote": str(row.get("canonical_remote") or ""),
+            "default_branch": str(row.get("default_branch") or ""),
+        }
+        for row in rows
+    ]
+    raw = json.dumps(shared, sort_keys=True, separators=(",", ":"))
+    return "repositories:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _project_repository_configuration(
+    connection: sqlite3.Connection, project_id: str
+) -> dict[str, Any]:
+    rows = _repository_rows(connection, project_id)
+    return {"revision": _repository_revision(rows), "items": rows}
+
+
+def _repository_branch(raw: Any) -> str:
+    value = str(raw or "main").strip()
+    components = value.split("/")
+    if (
+        not value
+        or len(value) > 200
+        or value in {"@", "HEAD"}
+        or value.startswith(('/', '.', '-'))
+        or value.endswith(('/', '.'))
+        or ".." in value
+        or "//" in value
+        or "@{" in value
+        or any(ord(character) < 33 or character in "~^:?*[\\" for character in value)
+        or any(component.startswith(".") or component.endswith(".lock") for component in components)
+    ):
+        raise BunkerDatabaseError("Enter a valid default branch, such as main.")
+    return value
+
+
+def replace_repository_bindings(
+    bunker_id: str,
+    *,
+    project_id: str,
+    expected_revision: str,
+    repositories: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Replace one Project's shared repository allowlist.
+
+    Local checkout paths are deliberately excluded from this mutation and its
+    revision. They belong to the current device, while the binding list is
+    shared Bunker configuration.
+    """
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = _id(project_id, "project")
+    if not isinstance(repositories, (list, tuple)):
+        raise BunkerDatabaseError("Project repositories must be a list.")
+    if len(repositories) > 256:
+        raise BunkerDatabaseError("A Project may configure at most 256 repositories.")
+    with _database(bunker_id) as connection:
+        scope_type, scope_id, bunker = _config_scope(connection, bunker_id, project_id)
+        if scope_type != "project" or scope_id != project_id:
+            raise BunkerDatabaseError("Choose a project from this Bunker.")
+        permission = _config_permission(connection, bunker)
+        if not permission["can_write"]:
+            raise BunkerDatabaseError(str(permission["reason"]))
+        connection.execute("BEGIN IMMEDIATE")
+        current_rows = _repository_rows(connection, project_id)
+        current_revision = _repository_revision(current_rows)
+        if not expected_revision or expected_revision != current_revision:
+            raise BunkerDatabaseError(
+                "Project repositories changed after this editor opened. Reload them and review the latest revision."
+            )
+        current = {str(row["id"]): row for row in current_rows}
+        normalized: list[dict[str, str]] = []
+        seen_ids: set[str] = set()
+        seen_remotes: set[str] = set()
+        for raw in repositories:
+            if not isinstance(raw, Mapping):
+                raise BunkerDatabaseError("Each Project repository must be one row.")
+            raw_id = str(raw.get("id") or "").strip()
+            repository_id = _id(raw_id, "repository") if raw_id else str(uuid.uuid4())
+            if repository_id in seen_ids:
+                raise BunkerDatabaseError("A Project repository row appears more than once.")
+            if raw_id and repository_id not in current:
+                raise BunkerDatabaseError(
+                    "A Project repository changed after this editor opened. Reload it and retry."
+                )
+            identity = canonical_remote(str(raw.get("canonical_remote") or ""))
+            if not identity:
+                raise BunkerDatabaseError(
+                    "Enter an allowed Git remote, such as github.com/owner/repository."
+                )
+            if identity in seen_remotes:
+                raise BunkerDatabaseError(
+                    f"The allowed remote {identity} appears more than once in this Project."
+                )
+            existing = current.get(repository_id)
+            if (
+                existing
+                and existing.get("local_path")
+                and identity != str(existing.get("canonical_remote") or "")
+            ):
+                raise BunkerDatabaseError(
+                    "Disconnect this computer's checkout before changing its allowed remote."
+                )
+            normalized.append(
+                {
+                    "id": repository_id,
+                    "name": _clean_name(raw.get("name"), "repository"),
+                    "canonical_remote": identity,
+                    "default_branch": _repository_branch(raw.get("default_branch")),
+                }
+            )
+            seen_ids.add(repository_id)
+            seen_remotes.add(identity)
+        removed = set(current) - seen_ids
+        if any(current[value].get("local_path") for value in removed):
+            raise BunkerDatabaseError(
+                "Disconnect this computer's checkout before removing its allowed repository."
+            )
+        now = _now()
+        for value in normalized:
+            connection.execute(
+                """
+                INSERT INTO repository_bindings(
+                    id, bunker_id, project_id, name, canonical_remote,
+                    default_branch, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    canonical_remote = excluded.canonical_remote,
+                    default_branch = excluded.default_branch,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    value["id"], bunker_id, project_id, value["name"],
+                    value["canonical_remote"], value["default_branch"], now, now,
+                ),
+            )
+        if removed:
+            placeholders = ",".join("?" for _ in removed)
+            connection.execute(
+                f"DELETE FROM repository_bindings WHERE project_id = ? AND id IN ({placeholders})",
+                (project_id, *sorted(removed)),
+            )
+    return get_configuration(bunker_id, project_id=project_id)
+
+
+def _fetch_repository(root: Path) -> None:
+    environment = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "Never",
+    }
+    try:
+        process = subprocess.run(
+            ["git", "-C", str(root), "fetch", "--prune", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BunkerDatabaseError(
+            "Fetching origin timed out. Check the network and retry. No repository was connected."
+        ) from exc
+    if process.returncode != 0:
+        raise BunkerDatabaseError(
+            "TicketBunker could not fetch origin. Check network access and Git credentials, then retry. No repository was connected."
+        )
 
 
 def attach_repository(
@@ -1419,16 +1720,19 @@ def attach_repository(
     *,
     project_id: str,
     local_path: str,
-    name: str = "",
-    default_branch: str = "",
+    binding_id: str = "",
+    fetch: bool = True,
 ) -> dict[str, Any]:
     bunker_id = _id(bunker_id, "Bunker")
     project_id = _id(project_id, "project")
     root = _git_root(local_path)
     origin = _git_value(root, "remote", "get-url", "origin")
     identity = canonical_remote(origin)
-    branch = str(default_branch or _git_value(root, "branch", "--show-current") or "main")
-    display_name = _clean_name(name or root.name, "repository")
+    selected_binding = _id(binding_id, "repository") if binding_id else ""
+    if not identity:
+        raise BunkerDatabaseError(
+            "This Git checkout needs an origin remote before it can be connected."
+        )
     now = _now()
     with _database(bunker_id) as connection:
         if connection.execute(
@@ -1436,55 +1740,122 @@ def attach_repository(
             (project_id, bunker_id),
         ).fetchone() is None:
             raise BunkerDatabaseError("Choose a project from this Bunker.")
-        existing = None
-        if identity:
-            existing = connection.execute(
-                """
-                SELECT id, project_id FROM repository_bindings
-                WHERE bunker_id = ? AND canonical_remote = ?
-                """,
-                (bunker_id, identity),
-            ).fetchone()
-        if existing and str(existing["project_id"]) != project_id:
+        candidates = connection.execute(
+            """
+            SELECT id, canonical_remote FROM repository_bindings
+            WHERE bunker_id = ? AND project_id = ?
+            """,
+            (bunker_id, project_id),
+        ).fetchall()
+        existing = next(
+            (
+                row for row in candidates
+                if (selected_binding and str(row["id"]) == selected_binding)
+                or (not selected_binding and str(row["canonical_remote"]) == identity)
+            ),
+            None,
+        )
+        if existing is None:
             raise BunkerDatabaseError(
-                "That Git repository is already attached to another project in this Bunker."
+                f"This Project does not allow {identity}. Ask a Bunker configurator to add it under Project > Configure > Repositories."
             )
-        binding_id = str(existing["id"]) if existing else str(uuid.uuid4())
-        try:
-            if existing:
-                connection.execute(
-                    """
-                    UPDATE repository_bindings
-                    SET project_id = ?, name = ?, default_branch = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (project_id, display_name, branch, now, binding_id),
-                )
-            else:
-                connection.execute(
-                    """
-                    INSERT INTO repository_bindings(
-                        id, bunker_id, project_id, name, canonical_remote,
-                        default_branch, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (binding_id, bunker_id, project_id, display_name, identity, branch, now, now),
-                )
-            connection.execute(
-                """
-                INSERT INTO local_repositories(binding_id, local_path, attached_at, last_seen_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(binding_id) DO UPDATE SET
-                    local_path = excluded.local_path,
-                    last_seen_at = excluded.last_seen_at
-                """,
-                (binding_id, str(root), now, now),
-            )
-        except sqlite3.IntegrityError as exc:
+        if str(existing["canonical_remote"]) != identity:
             raise BunkerDatabaseError(
-                "That local Git folder is already attached to another repository in this Bunker."
-            ) from exc
+                f"That folder uses {identity}, but this row allows {existing['canonical_remote']}. Choose the matching checkout."
+            )
+        if fetch:
+            _fetch_repository(root)
+        resolved_binding_id = str(existing["id"])
+        connection.execute("BEGIN IMMEDIATE")
+        current_binding = connection.execute(
+            """
+            SELECT canonical_remote FROM repository_bindings
+            WHERE id = ? AND bunker_id = ? AND project_id = ?
+            """,
+            (resolved_binding_id, bunker_id, project_id),
+        ).fetchone()
+        if (
+            current_binding is None
+            or str(current_binding["canonical_remote"]) != identity
+        ):
+            raise BunkerDatabaseError(
+                "This Project's repository configuration changed while origin was fetching. Reopen Configure and retry."
+            )
+        connection.execute(
+            """
+            INSERT INTO local_repositories(binding_id, local_path, attached_at, last_seen_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(binding_id) DO UPDATE SET
+                local_path = excluded.local_path,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (resolved_binding_id, str(root), now, now),
+        )
     return get_bunker(bunker_id)
+
+
+def detach_repository(
+    bunker_id: str, *, project_id: str, binding_id: str
+) -> dict[str, Any]:
+    """Remove only this device's checkout mapping for a shared repository."""
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = _id(project_id, "project")
+    binding_id = _id(binding_id, "repository")
+    with _database(bunker_id) as connection:
+        binding = connection.execute(
+            """
+            SELECT 1 FROM repository_bindings
+            WHERE id = ? AND bunker_id = ? AND project_id = ?
+            """,
+            (binding_id, bunker_id, project_id),
+        ).fetchone()
+        if binding is None:
+            raise BunkerDatabaseError("That repository is not part of this Project.")
+        connection.execute(
+            "DELETE FROM local_repositories WHERE binding_id = ?", (binding_id,)
+        )
+    return get_bunker(bunker_id)
+
+
+def _attach_import_repository(
+    bunker_id: str,
+    project_id: str,
+    root: Path,
+    *,
+    default_branch: str,
+) -> str:
+    """Preserve one legacy checkout without network access or shared claims."""
+    origin = _git_value(root, "remote", "get-url", "origin")
+    identity = canonical_remote(origin)
+    now = _now()
+    with _database(bunker_id) as connection:
+        binding_id = str(uuid.uuid4())
+        connection.execute(
+            """
+            INSERT INTO repository_bindings(
+                id, bunker_id, project_id, name, canonical_remote,
+                default_branch, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                binding_id,
+                bunker_id,
+                project_id,
+                root.name,
+                identity,
+                str(default_branch or "main"),
+                now,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO local_repositories(binding_id, local_path, attached_at, last_seen_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (binding_id, str(root), now, now),
+        )
+    return binding_id
 
 
 def configure_remote(
@@ -1630,6 +2001,11 @@ def create_replica(
             )
             _insert_remote_projects(connection, local_id, snapshot.projects)
             for value in snapshot.repository_bindings:
+                identity = canonical_remote(str(value.get("canonical_remote") or ""))
+                if not identity:
+                    raise BunkerDatabaseError(
+                        "The remote snapshot contains an invalid repository identity."
+                    )
                 connection.execute(
                     """
                     INSERT INTO repository_bindings(
@@ -1642,8 +2018,8 @@ def create_replica(
                         local_id,
                         _id(value.get("project_id"), "project"),
                         _clean_name(value.get("name"), "repository"),
-                        str(value.get("canonical_remote") or ""),
-                        str(value.get("default_branch") or ""),
+                        identity,
+                        _repository_branch(value.get("default_branch")),
                         str(value.get("created_at") or now),
                         str(value.get("updated_at") or now),
                     ),
@@ -1714,14 +2090,43 @@ def create_replica(
                     ),
                 )
             for value in snapshot.reports:
+                ticket_id = _id(value.get("ticket_id"), "ticket")
+                scope = _clean_name(value.get("scope"), "report scope")
+                raw_repository_id = str(value.get("repository_id") or "").strip()
+                repository_id = (
+                    _id(raw_repository_id, "repository") if raw_repository_id else ""
+                )
+                if scope.startswith("branch:") and not repository_id:
+                    raise BunkerDatabaseError(
+                        "A remote branch report does not identify its Git repository."
+                    )
+                if not scope.startswith("branch:") and repository_id:
+                    raise BunkerDatabaseError(
+                        "Only branch reports may identify a Git repository."
+                    )
+                if repository_id:
+                    related = connection.execute(
+                        """
+                        SELECT 1
+                        FROM repository_bindings rb
+                        JOIN tickets t ON t.project_id = rb.project_id
+                        WHERE rb.id = ? AND t.id = ?
+                        """,
+                        (repository_id, ticket_id),
+                    ).fetchone()
+                    if related is None:
+                        raise BunkerDatabaseError(
+                            "A remote report names a repository outside its ticket's Project."
+                        )
                 connection.execute(
                     """
-                    INSERT INTO reports(ticket_id, scope, content, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
-                        _id(value.get("ticket_id"), "ticket"),
-                        _clean_name(value.get("scope"), "report scope"),
+                        ticket_id,
+                        scope,
+                        repository_id,
                         str(value.get("content") or ""),
                         str(value.get("updated_at") or now),
                     ),
@@ -1810,11 +2215,8 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
     )
     bunker_id = str(created["id"])
     project_id = str(created["projects"][0]["id"])
-    attach_repository(
-        bunker_id,
-        project_id=project_id,
-        local_path=str(root),
-        default_branch=default_branch,
+    repository_id = _attach_import_repository(
+        bunker_id, project_id, root, default_branch=default_branch
     )
     imported_tickets: list[str] = []
     imported_reports = 0
@@ -1898,10 +2300,17 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
                     digest.update(content.encode("utf-8"))
                     connection.execute(
                         """
-                        INSERT OR REPLACE INTO reports(ticket_id, scope, content, updated_at)
-                        VALUES (?, ?, ?, ?)
+                        INSERT OR REPLACE INTO reports(
+                            ticket_id, scope, repository_id, content, updated_at
+                        ) VALUES (?, ?, ?, ?, ?)
                         """,
-                        (ticket_id, scope, content, now),
+                        (
+                            ticket_id,
+                            scope,
+                            repository_id if scope.startswith("branch:") else "",
+                            content,
+                            now,
+                        ),
                     )
                     imported_reports += 1
         migration_id = str(uuid.uuid4())
@@ -1951,6 +2360,7 @@ __all__ = [
     "create_replica",
     "data_root",
     "database_path",
+    "detach_repository",
     "get_bunker",
     "get_configuration",
     "get_ticket",
@@ -1959,5 +2369,6 @@ __all__ = [
     "list_bunkers",
     "list_tickets",
     "replace_configuration",
+    "replace_repository_bindings",
     "registry_path",
 ]

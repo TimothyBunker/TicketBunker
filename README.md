@@ -54,7 +54,7 @@ repositories:
     └── <LOCAL-BUNKER-ID>/bunker.sqlite3
 ```
 
-The database stores the Project tree, shared repository identities, device-local
+The database stores the Project tree, shared per-Project repository allowlists, device-local
 checkout mappings, configuration revisions, tickets, reports, migration
 records, and remote replica state. Attaching a repository writes no locator,
 database, ignore entry, or authorization hint into that repository.
@@ -168,9 +168,10 @@ The desktop launcher is the primary onboarding path:
    invitation, then authenticates and enrolls the user before creating a local
    replica.
 3. Inside a Bunker, **Add project** builds the recursive work hierarchy.
-4. **Attach repository** selects a local Git checkout, previews its canonical
-   identity, and records the device path only after confirmation.
-5. **Connect service** records an optional remote-service relationship; it
+4. In a Project, **Configure → Repositories** publishes allowed Git remotes.
+   **Connect** accepts only a matching checkout, fetches `origin`, and then saves
+   that computer's path.
+5. At Bunker level, **Connect remote** records the one optional remote-service relationship; it
    never accepts a database connection string.
 
 Existing companion-Git projects appear under **Migration** with **Import copy**.
@@ -398,8 +399,9 @@ security and process-lifecycle contract is documented in
 [`desktop/README.md`](desktop/README.md). Opening the app itself lands on
 Bunkers. **Create Bunker** and **Join Bunker** are peer actions. Each Bunker row
 shows its recursive Projects, local database, optional remote-service state,
-repository attachments, and ticket counts. Source repositories enter only
-through **Attach repository** inside an existing Project.
+repository attachments, and ticket counts. Remote connectivity exists only at
+Bunker level. Source repositories enter through the selected Project's indexed
+**Configure → Repositories** allowlist.
 The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
@@ -410,9 +412,9 @@ to its request and all behavior still passes through the shared typed action
 registry.
 
 **Configure** opens either Bunker defaults or the selected Project's pinned
-configuration. New Projects copy the current defaults; later default changes do
-not silently alter old Projects. Ticket fields and the complete GitHub, GitLab,
-Jira, or custom integration matrix publish as revision-checked documents. Local
+configuration and repository allowlist. New Projects copy the current defaults;
+later default changes do not silently alter old Projects. Ticket fields and the
+complete GitHub, GitLab, Jira, or custom integration matrix publish as revision-checked documents. Local
 Bunkers are editable on the device. Remote replicas render their service-owned
 snapshot read-only until an authenticated service sync publishes the change, so
 a cached capability can never elevate itself.

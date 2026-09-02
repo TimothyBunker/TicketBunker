@@ -39,6 +39,8 @@ DESKTOP_ACTIONS = frozenset(
         "application.bunker.project.create",
         "application.repository.inspect",
         "application.bunker.repository.attach",
+        "application.bunker.repository.detach",
+        "application.bunker.repository.replace",
         "application.bunker.remote.configure",
         "application.invitation.inspect",
         "application.bunker.join",

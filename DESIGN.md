@@ -75,8 +75,9 @@ live storage.
   a parent and any number of child Projects. It is not synonymous with a Git
   repository or a tracker project.
 - A **Repository binding** attaches a canonical Git repository identity to one
-  Project. A Project may attach zero or more repositories. The shared binding
-  never contains a device filesystem path.
+  Project. It is the Project's shared allowlist: a Project may permit zero or
+  more repositories, and the shared binding never contains a device filesystem
+  path.
 - A **local repository attachment** maps one shared binding to one checkout path
   on one device. That path never synchronizes.
 - A **ticket** belongs to one Project and may relate to work across any
@@ -150,6 +151,18 @@ Joining is server-first and authorization-first:
    hierarchy, repository identities, tickets, reports, capabilities, revision,
    and sync cursor.
 6. The user maps permitted repository identities to local checkout paths.
+
+The optional remote relationship is configured only at Bunker scope. Projects
+cannot connect their own databases or services. A Project configurator may
+publish repository binding rows; every device then validates the selected
+checkout's credential-free `origin` identity against those rows and completes
+`git fetch --prune origin` before saving its local path. A failed fetch leaves
+the local mapping unchanged. The same checkout may serve multiple Project
+scopes in a monorepo because permission is evaluated per Project.
+
+A ticket belongs to one Project rather than one repository. Each branch report
+records the repository binding it observed, so one ticket can retain distinct
+work across several permitted repositories without branch-name collisions.
 
 Possessing source code or an invitation is not proof of membership. Invitation
 bearer material is bounded, short-lived, and never returned in application
@@ -931,11 +944,12 @@ runtime artifacts that still need a filesystem representation.
 
 **The root is Bunker-relative, not Git-relative.** Creating a Bunker requires a
 name and a first Project, but no repository. Attaching a repository is a later,
-explicit action that verifies a local checkout, records a canonical remote
-identity when one exists, and stores the device path only in that Bunker's local
-database. It writes no locator, database, ignore entry, or membership hint into
-the repository. The same repository may be attached to appropriate Projects in
-different Bunkers without implying that either Bunker owns it.
+explicit action against a Project's configured repository allowlist. It verifies
+the local checkout's canonical remote identity, fetches `origin`, and stores the
+device path only in that Bunker's local database. It writes no locator, database,
+ignore entry, or membership hint into the repository. The same repository may
+be attached to appropriate Projects in the same or different Bunkers without
+implying that any Bunker owns it.
 
 **Initialization authority comes from the selected storage authority.** A
 local-only Bunker is created by the local user and remains local. A shared
@@ -1345,8 +1359,9 @@ First run is application-facing and starts with the storage boundary:
 - for Join, inspect the service origin and Bunker identity locally, then require
   explicit authentication and enrollment before creating a replica;
 - after the Bunker exists, add recursive Projects and explicitly attach local
-  Git checkouts to the appropriate Project. Repository identity is derived from
-  the checkout only after the user chooses Attach.
+  Git checkouts to an allowed repository row in the appropriate Project.
+  Repository identity is derived from the checkout only after the user chooses
+  Connect.
 
 Agent setup is an app-native conversation with Pi, not an embedded terminal.
 The privileged Bunkers window starts the verified Pi runtime in RPC mode with
@@ -1405,14 +1420,15 @@ tree, ticket snapshot, revision, and sync cursor before the app installs the
 replica.
 
 Within a Bunker, **Add project** places a new Project under the selected parent.
-**Attach repository** uses the operating system directory chooser, normalizes
-the selection to the working-tree root, shows the derived repository identity,
-and records it only after confirmation. It rejects non-Git directories and
-writes nothing to valid ones. **Connect service** records a service relationship
-but clearly leaves it pending authentication; it does not accept a database
-connection string. A separate Migration section lists legacy companion-backed
-projects and offers **Import copy**. That operation is read-only with respect to
-both source and companion repositories and records its import digest.
+The selected Project's **Configure → Repositories** table is the only repository
+surface. A configurator publishes canonical allowed remotes and base branches;
+each user maps a row to a checkout with **Connect**. The picker normalizes the
+working-tree root, validates its `origin` against that row, fetches remote refs,
+and saves only the device path. **Connect remote** appears only at Bunker scope
+and records a service relationship, never a database connection string. A
+separate Migration section lists legacy companion-backed projects and offers
+**Import copy**. That operation is read-only with respect to both source and
+companion repositories and records its import digest.
 
 **Configure** edits Bunker defaults or the selected Project snapshot. Ticket
 fields and integration matrices are whole revisioned documents: a publish uses

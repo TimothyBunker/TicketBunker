@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfigurationPanel from "./ConfigurationPanel";
-import { chooseGitDirectory, command } from "./transport";
+import { command } from "./transport";
 import type { AppState, Bunker, Project, TicketPage, TicketReference } from "./types";
 import { relativeTime } from "./report";
 
@@ -158,7 +158,7 @@ function TicketCatalog({
   );
 }
 
-type ActionMode = "" | "create" | "join" | "project" | "attach" | "remote" | "config";
+type ActionMode = "" | "create" | "join" | "project" | "remote" | "config";
 
 function ActionPanel({
   mode,
@@ -215,21 +215,6 @@ function ActionPanel({
         { ...values, bunker_id: bunker.id },
         "Remote relationship saved",
       );
-    } else if (mode === "attach" && bunker) {
-      await submit(
-        "application.bunker.repository.attach",
-        { ...values, bunker_id: bunker.id, project_id: project?.id || values.project_id },
-        "Repository attached",
-      );
-    }
-  }
-
-  async function pickDirectory(setValue: (path: string) => void) {
-    try {
-      const path = await chooseGitDirectory();
-      if (path) setValue(path);
-    } catch (reason) {
-      setError(String(reason));
     }
   }
 
@@ -242,7 +227,6 @@ function ActionPanel({
       error={error}
       onSubmit={handle}
       onClose={onClose}
-      onPick={pickDirectory}
     />
   );
 }
@@ -255,7 +239,6 @@ function ActionForm({
   error,
   onSubmit,
   onClose,
-  onPick,
 }: {
   mode: ActionMode;
   bunker?: Bunker;
@@ -264,14 +247,11 @@ function ActionForm({
   error: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onClose: () => void;
-  onPick: (setter: (path: string) => void) => void;
 }) {
-  const [path, setPath] = useState("");
   const title = {
     create: "Create Bunker",
     join: "Join Bunker",
     project: "Add project",
-    attach: "Attach repository",
     remote: "Connect remote service",
     config: "Configuration",
     "": "",
@@ -295,12 +275,6 @@ function ActionForm({
           <label>Project key<input name="key" placeholder="ECS" maxLength={32} required /></label>
           <label>Project name<input name="name" required /></label>
           <label>Description<textarea name="description" rows={3} /></label>
-        </>}
-        {mode === "attach" && <>
-          {!project && <label>Project<select name="project_id" required>{flatten(bunker?.projects || []).map(({ project: value, depth }) => <option key={value.id} value={value.id}>{"· ".repeat(depth)}{value.key} · {value.name}</option>)}</select></label>}
-          <label>Git project folder<div className="path-field"><input name="path" value={path} onChange={(event) => setPath(event.target.value)} required /><button type="button" onClick={() => onPick(setPath)}>Browse</button></div></label>
-          <label>Repository name<input name="name" placeholder="Defaults to folder name" /></label>
-          <label>Base branch<input name="default_branch" placeholder="main" /></label>
         </>}
         {mode === "remote" && <>
           <p className="drawer-copy">TicketBunker connects to a service API, not directly to its database.</p>
@@ -410,17 +384,16 @@ export default function BunkerHub({
             </div>
             <div className="header-actions">
               <button onClick={() => setAction("config")}>Configure</button>
-              <button onClick={() => setAction("remote")}>{bunker.remote ? "Remote" : "Connect remote"}</button>
-              <button onClick={() => setAction("attach")}>Attach repository</button>
-              <button className="primary" onClick={() => setAction("project")}>Add project</button>
+              {!project && <button onClick={() => setAction("remote")}>{bunker.remote ? "Remote" : "Connect remote"}</button>}
+              <button className="primary" onClick={() => setAction("project")}>{project ? "Add subproject" : "Add project"}</button>
             </div>
           </header>
           <TicketCatalog bunker={bunker} project={project} onTicket={(ticket) => onTicket(bunker.id, ticket)} />
-          <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}</p>}</details>
+          {!project && <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}</p>}</details>}
         </>}
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
-      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} onClose={() => setAction("")} notify={notify} />}
+      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} onClose={() => setAction("")} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} notify={notify} />}
     </div>
   );
 }

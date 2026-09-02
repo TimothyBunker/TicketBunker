@@ -14,7 +14,8 @@ export type Repository = {
   canonical_remote?: string;
   default_branch?: string;
   local_path?: string | null;
-  last_seen_at?: string;
+  attached_at?: string | null;
+  last_fetched_at?: string | null;
 };
 
 export type Bunker = {
@@ -113,7 +114,7 @@ export type TicketDetail = {
     repository_id: string;
     repository_name: string;
   }>;
-  reports: Array<{ scope: string; content: string; updated_at: string }>;
+  reports: Array<{ scope: string; repository_id?: string; content: string; updated_at: string }>;
   comments: Array<Record<string, unknown>>;
   activity: Array<Record<string, unknown>>;
   truth?: Record<string, unknown>;
@@ -154,6 +155,10 @@ export type ConfigurationState = {
     can_write: boolean;
     reason: string;
     capabilities: string[];
+  };
+  repositories: {
+    revision: string;
+    items: Repository[];
   };
   documents: {
     "ticket-fields"?: {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { command } from "./transport";
-import type { Bunker, ConfigurationState, Integration, Project, TicketField } from "./types";
+import { chooseGitDirectory, command } from "./transport";
+import type { Bunker, ConfigurationState, Integration, Project, Repository, TicketField } from "./types";
 
 const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", "user", "enum", "tags", "url"];
 
@@ -12,34 +12,44 @@ export default function ConfigurationPanel({
   bunker,
   project,
   onClose,
+  onBunker,
   notify,
 }: {
   bunker: Bunker;
   project?: Project;
   onClose: () => void;
+  onBunker: (bunker: Bunker) => void;
   notify: (message: string, error?: boolean) => void;
 }) {
   const [state, setState] = useState<ConfigurationState | null>(null);
   const [fields, setFields] = useState<TicketField[]>([]);
   const [providers, setProviders] = useState<Record<string, Integration>>({});
-  const [tab, setTab] = useState<"fields" | "integrations">("fields");
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [tab, setTab] = useState<"repositories" | "fields" | "integrations">(project ? "repositories" : "fields");
   const [provider, setProvider] = useState("github");
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState("");
   const [error, setError] = useState("");
+
+  function applyConfiguration(value: ConfigurationState) {
+    setState(value);
+    setFields(clone(value.documents["ticket-fields"]?.content.fields || []));
+    const next = clone(value.documents.integrations?.content.providers || {});
+    setProviders(next);
+    setRepositories(clone(value.repositories.items || []));
+    setProvider((current) => current in next ? current : Object.keys(next)[0] || "");
+  }
 
   useEffect(() => {
     let active = true;
     setError("");
+    setTab(project ? "repositories" : "fields");
     command<ConfigurationState>("application.bunker.configuration.get", {
       bunker_id: bunker.id,
       project_id: project?.id || "",
     }).then((value) => {
       if (!active) return;
-      setState(value);
-      setFields(clone(value.documents["ticket-fields"]?.content.fields || []));
-      const next = clone(value.documents.integrations?.content.providers || {});
-      setProviders(next);
-      setProvider((current) => current in next ? current : Object.keys(next)[0] || "");
+      applyConfiguration(value);
     }).catch((reason) => active && setError(String(reason)));
     return () => { active = false; };
   }, [bunker.id, project?.id]);
@@ -61,14 +71,96 @@ export default function ConfigurationPanel({
         expected_revision: document.revision,
         content: kind === "ticket-fields" ? { fields } : { providers },
       });
-      setState(value);
-      setFields(clone(value.documents["ticket-fields"]?.content.fields || []));
-      setProviders(clone(value.documents.integrations?.content.providers || {}));
+      applyConfiguration(value);
       notify(kind === "ticket-fields" ? "Ticket fields published" : "Integration mappings published");
     } catch (reason) {
       setError(String(reason));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function publishRepositories() {
+    if (!state || !project) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{
+        configuration: ConfigurationState;
+        bunker: Bunker;
+      }>("application.bunker.repository.replace", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+        expected_revision: state.repositories.revision,
+        repositories: repositories.map(({ id, name, canonical_remote, default_branch }) => ({
+          id,
+          name,
+          canonical_remote,
+          default_branch,
+        })),
+      });
+      applyConfiguration(value.configuration);
+      onBunker(value.bunker);
+      notify("Project repositories published");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateRepository(index: number, patch: Partial<Repository>) {
+    setRepositories((values) => values.map((value, item) => item === index ? { ...value, ...patch } : value));
+  }
+
+  async function connectRepository(repository: Repository) {
+    if (!project || !repository.id) return;
+    setError("");
+    try {
+      const path = await chooseGitDirectory();
+      if (!path) return;
+      setConnecting(repository.id);
+      const value = await command<{ bunker: Bunker }>("application.bunker.repository.attach", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+        binding_id: repository.id,
+        path,
+      });
+      const configuration = await command<ConfigurationState>("application.bunker.configuration.get", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+      });
+      applyConfiguration(configuration);
+      onBunker(value.bunker);
+      notify("Repository connected and fetched");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setConnecting("");
+    }
+  }
+
+  async function disconnectRepository(repository: Repository) {
+    if (!project || !repository.id) return;
+    setConnecting(repository.id);
+    setError("");
+    try {
+      const value = await command<{ bunker: Bunker }>("application.bunker.repository.detach", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+        binding_id: repository.id,
+      });
+      const configuration = await command<ConfigurationState>("application.bunker.configuration.get", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+      });
+      applyConfiguration(configuration);
+      onBunker(value.bunker);
+      notify("Local checkout disconnected");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setConnecting("");
     }
   }
 
@@ -109,10 +201,38 @@ export default function ConfigurationPanel({
         <div><p className="eyebrow">{project ? `${project.key} · pinned project setup` : "Bunker defaults · new projects"}</p><h2>Configuration</h2></div>
         <button className="icon-control" onClick={onClose} aria-label="Back">←</button>
       </header>
-      <nav><button className={tab === "fields" ? "selected" : ""} onClick={() => setTab("fields")}>Ticket fields</button><button className={tab === "integrations" ? "selected" : ""} onClick={() => setTab("integrations")}>Integrations</button></nav>
+      <nav>
+        {project && <button className={tab === "repositories" ? "selected" : ""} onClick={() => setTab("repositories")}>Repositories</button>}
+        <button className={tab === "fields" ? "selected" : ""} onClick={() => setTab("fields")}>Ticket fields</button>
+        <button className={tab === "integrations" ? "selected" : ""} onClick={() => setTab("integrations")}>Integrations</button>
+      </nav>
       {!state && !error && <div className="ticket-loading">Loading configuration</div>}
       {state && !canWrite && <div className="permission-note"><strong>Read only</strong><span>{state.permission.reason}</span></div>}
       {error && <div className="inline-error">{error}</div>}
+
+      {state && project && tab === "repositories" && <section className="config-surface">
+        <div className="config-heading">
+          <div><h3>Project repositories</h3><p>Allowed remotes and this computer's checkout.</p></div>
+          <button className="primary" disabled={!canWrite || busy} onClick={publishRepositories}>{busy ? "Publishing…" : "Publish repositories"}</button>
+        </div>
+        <div className="repository-matrix" role="table" aria-label="Project repositories">
+          <div className="repository-heading" role="row"><span>#</span><span>Name</span><span>Allowed remote</span><span>Base</span><span>This computer</span><span /></div>
+          {repositories.map((repository, index) => <div className="repository-row" role="row" key={repository.id || `new-${index}`}>
+            <span className="repository-index">{index + 1}</span>
+            <input aria-label={`Repository ${index + 1} name`} value={repository.name} disabled={!canWrite} onChange={(event) => updateRepository(index, { name: event.target.value })} />
+            <input aria-label={`Repository ${index + 1} allowed remote`} value={repository.canonical_remote || ""} disabled={!canWrite || Boolean(repository.local_path)} placeholder="github.com/owner/repository" onChange={(event) => updateRepository(index, { canonical_remote: event.target.value })} />
+            <input aria-label={`Repository ${index + 1} base branch`} value={repository.default_branch || ""} disabled={!canWrite} placeholder="main" onChange={(event) => updateRepository(index, { default_branch: event.target.value })} />
+            <div className="repository-local">
+              {repository.local_path ? <span title={repository.local_path}>{repository.local_path}</span> : <span>Not connected</span>}
+              <button disabled={!repository.id || connecting === repository.id} onClick={() => connectRepository(repository)}>{connecting === repository.id ? "Working…" : repository.local_path ? "Change" : "Connect"}</button>
+              {repository.local_path && <button className="danger-control" disabled={connecting === repository.id} onClick={() => disconnectRepository(repository)}>Disconnect</button>}
+            </div>
+            <button aria-label={`Remove ${repository.name || `repository ${index + 1}`}`} disabled={!canWrite || Boolean(repository.local_path)} onClick={() => setRepositories((values) => values.filter((_, item) => item !== index))}>−</button>
+          </div>)}
+          {repositories.length === 0 && <div className="repository-empty">No repositories allowed</div>}
+        </div>
+        <button disabled={!canWrite} onClick={() => setRepositories((values) => [...values, { id: "", project_id: project.id, name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>
+      </section>}
 
       {state && tab === "fields" && <section className="config-surface">
         <div className="config-heading"><div><h3>Ticket fields</h3><p>{project ? "This Project keeps this exact composition." : "New Projects copy these fields when created."}</p></div><button className="primary" disabled={!canWrite || busy} onClick={() => publish("ticket-fields")}>Publish fields</button></div>

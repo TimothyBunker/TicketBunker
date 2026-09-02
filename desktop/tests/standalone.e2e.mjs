@@ -18,7 +18,7 @@ try {
   const identity = page.getByRole("heading", { name: "Your local identity" });
   const withoutAgent = page.getByRole("button", { name: "Use without agent" });
   const bunkersNavigation = page.getByRole("button", { name: "Bunkers", exact: true });
-  await identity.or(withoutAgent).or(bunkersNavigation).waitFor({ state: "visible" });
+  await identity.or(withoutAgent).or(bunkersNavigation).first().waitFor({ state: "visible" });
   if (await identity.isVisible()) {
     await page.getByLabel("Name", { exact: true }).fill("TicketBunker QA");
     await page.getByLabel("Email", { exact: true }).fill("qa@example.test");
@@ -43,8 +43,12 @@ try {
   await page.screenshot({ path: output.replace(/\.png$/, "-bunkers.png"), fullPage: true });
   await page.locator(".bunker-overview > button").first().click();
   await page.getByRole("heading", { name: "Tickets", exact: true }).waitFor();
+  await page.locator(".nav-project").first().click();
+  await page.locator(".nav-project.selected").waitFor();
   await page.getByRole("button", { name: "Configure" }).click();
   await page.getByRole("heading", { name: "Configuration" }).waitFor();
+  await page.getByRole("table", { name: "Project repositories" }).waitFor();
+  await page.screenshot({ path: output.replace(/\.png$/, "-repositories.png"), fullPage: true });
   await page.getByRole("button", { name: "Integrations" }).click();
   await page.getByLabel("Integration").selectOption("github");
   await page.locator('.mapping-row input[value="title"]').first().waitFor();

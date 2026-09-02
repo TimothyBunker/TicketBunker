@@ -34,6 +34,64 @@ class BunkerDatabaseTests(unittest.TestCase):
         with self.assertRaises(sqlite3.ProgrammingError):
             connection.execute("SELECT 1")
 
+    def test_version_three_migrates_project_scoped_repositories_and_reports(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="ENG")
+        path = bunkerdb.database_path(created["id"])
+        connection = sqlite3.connect(path)
+        connection.executescript(
+            """
+            PRAGMA foreign_keys = OFF;
+            DROP INDEX repositories_project_remote_idx;
+            CREATE UNIQUE INDEX repositories_remote_idx
+                ON repository_bindings(bunker_id, canonical_remote)
+                WHERE canonical_remote <> '';
+            ALTER TABLE local_repositories RENAME TO local_repositories_v3;
+            CREATE TABLE local_repositories (
+                binding_id TEXT PRIMARY KEY REFERENCES repository_bindings(id) ON DELETE CASCADE,
+                local_path TEXT NOT NULL UNIQUE,
+                attached_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );
+            INSERT INTO local_repositories SELECT * FROM local_repositories_v3;
+            DROP TABLE local_repositories_v3;
+            ALTER TABLE reports RENAME TO reports_v3;
+            CREATE TABLE reports (
+                ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+                scope TEXT NOT NULL,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (ticket_id, scope)
+            );
+            INSERT INTO reports(ticket_id, scope, content, updated_at)
+                SELECT ticket_id, scope, content, updated_at FROM reports_v3;
+            DROP TABLE reports_v3;
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        bunkerdb.get_bunker(created["id"])
+
+        migrated = sqlite3.connect(path)
+        local_sql = migrated.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_repositories'"
+        ).fetchone()[0]
+        report_sql = migrated.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'reports'"
+        ).fetchone()[0]
+        indexes = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+        migrated.close()
+
+        self.assertNotIn("UNIQUE", local_sql.upper())
+        self.assertIn("repository_id", report_sql)
+        self.assertIn("repositories_project_remote_idx", indexes)
+        self.assertNotIn("repositories_remote_idx", indexes)
+
     def test_local_bunker_owns_one_database_and_recursive_projects(self) -> None:
         created = bunkerdb.create_bunker(
             "Engineering", project_key="SYS", project_name="Systems"
@@ -161,6 +219,17 @@ class BunkerDatabaseTests(unittest.TestCase):
                 expected_revision=document["revision"],
                 content=document["content"],
             )
+        project_id = created["projects"][0]["id"]
+        project_configuration = bunkerdb.get_configuration(
+            created["id"], project_id=project_id
+        )
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "controlled by"):
+            bunkerdb.replace_repository_bindings(
+                created["id"],
+                project_id=project_id,
+                expected_revision=project_configuration["repositories"]["revision"],
+                repositories=[],
+            )
 
     def test_repository_attachment_keeps_the_local_path_out_of_git(self) -> None:
         source = self.root / "coal"
@@ -179,14 +248,35 @@ class BunkerDatabaseTests(unittest.TestCase):
         )
         created = bunkerdb.create_bunker("ECS", project_key="ECS")
         project_id = created["projects"][0]["id"]
-
-        attached = bunkerdb.attach_repository(
-            created["id"], project_id=project_id, local_path=str(source)
+        configuration = bunkerdb.get_configuration(
+            created["id"], project_id=project_id
         )
+        configured = bunkerdb.replace_repository_bindings(
+            created["id"],
+            project_id=project_id,
+            expected_revision=configuration["repositories"]["revision"],
+            repositories=[
+                {
+                    "name": "Coal",
+                    "canonical_remote": "git@github.com:Example/coal.git",
+                    "default_branch": "main",
+                }
+            ],
+        )
+        binding_id = configured["repositories"]["items"][0]["id"]
+
+        with mock.patch.object(bunkerdb, "_fetch_repository") as fetched:
+            attached = bunkerdb.attach_repository(
+                created["id"],
+                project_id=project_id,
+                binding_id=binding_id,
+                local_path=str(source),
+            )
 
         repository = attached["repositories"][0]
         self.assertEqual(repository["canonical_remote"], "github.com/Example/coal")
         self.assertEqual(repository["local_path"], str(source.resolve()))
+        fetched.assert_called_once_with(source.resolve())
         self.assertFalse((source / ".ticketbunker.json").exists())
         self.assertFalse((source / ".tb").exists())
 
@@ -194,10 +284,84 @@ class BunkerDatabaseTests(unittest.TestCase):
             created["id"], key="CHILD", name="Child", parent_id=project_id
         )
         child_id = child["projects"][0]["children"][0]["id"]
-        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "already attached"):
+        child_config = bunkerdb.get_configuration(created["id"], project_id=child_id)
+        child_config = bunkerdb.replace_repository_bindings(
+            created["id"],
+            project_id=child_id,
+            expected_revision=child_config["repositories"]["revision"],
+            repositories=[
+                {
+                    "name": "Coal monorepo",
+                    "canonical_remote": "github.com/Example/coal",
+                    "default_branch": "main",
+                }
+            ],
+        )
+        with mock.patch.object(bunkerdb, "_fetch_repository"):
             bunkerdb.attach_repository(
-                created["id"], project_id=child_id, local_path=str(source)
+                created["id"],
+                project_id=child_id,
+                binding_id=child_config["repositories"]["items"][0]["id"],
+                local_path=str(source),
             )
+        self.assertEqual(bunkerdb.get_bunker(created["id"])["repository_count"], 2)
+
+    def test_repository_attachment_rejects_a_remote_outside_project_allowlist(self) -> None:
+        source = self.root / "other"
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "remote", "add", "origin", "https://github.com/Example/other.git"],
+            check=True,
+        )
+        created = bunkerdb.create_bunker("ECS", project_key="ECS")
+        project_id = created["projects"][0]["id"]
+
+        with mock.patch.object(bunkerdb, "_fetch_repository") as fetched:
+            with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "does not allow"):
+                bunkerdb.attach_repository(
+                    created["id"], project_id=project_id, local_path=str(source)
+                )
+
+        fetched.assert_not_called()
+
+    def test_failed_fetch_does_not_connect_the_local_checkout(self) -> None:
+        source = self.root / "coal"
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "remote", "add", "origin", "https://github.com/Example/coal.git"],
+            check=True,
+        )
+        created = bunkerdb.create_bunker("ECS", project_key="ECS")
+        project_id = created["projects"][0]["id"]
+        configuration = bunkerdb.get_configuration(created["id"], project_id=project_id)
+        configured = bunkerdb.replace_repository_bindings(
+            created["id"],
+            project_id=project_id,
+            expected_revision=configuration["repositories"]["revision"],
+            repositories=[{
+                "name": "Coal",
+                "canonical_remote": "github.com/Example/coal",
+                "default_branch": "main",
+            }],
+        )
+
+        with mock.patch.object(
+            bunkerdb,
+            "_fetch_repository",
+            side_effect=bunkerdb.BunkerDatabaseError("Network unavailable"),
+        ):
+            with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "Network unavailable"):
+                bunkerdb.attach_repository(
+                    created["id"],
+                    project_id=project_id,
+                    binding_id=configured["repositories"]["items"][0]["id"],
+                    local_path=str(source),
+                )
+
+        repositories = bunkerdb.get_configuration(
+            created["id"], project_id=project_id
+        )["repositories"]["items"]
+        self.assertIsNone(repositories[0]["local_path"])
 
     def test_remote_relationship_names_a_service_not_a_database(self) -> None:
         created = bunkerdb.create_bunker("Engineering", project_key="ENG")
@@ -300,6 +464,12 @@ class BunkerDatabaseTests(unittest.TestCase):
                     "scope": "combined",
                     "content": "# Combined\n",
                 },
+                {
+                    "ticket_id": "ECS-4",
+                    "scope": "branch:tim/ECS-4-position",
+                    "repository_id": "coal",
+                    "content": "# Branch\n",
+                },
             ),
             members=(
                 {
@@ -348,6 +518,9 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual(detail["ticket"]["labels"], ["ECS", "C0"])
         self.assertEqual(detail["comments"][0]["body"], "Ready")
         self.assertEqual(detail["reports"][0]["scope"], "combined")
+        self.assertEqual(detail["reports"][1]["repository_id"], "coal")
+        self.assertEqual(detail["branches"][0]["repository_id"], "coal")
+        self.assertEqual(detail["branches"][0]["repository_name"], "Coal")
 
     def test_companion_import_is_read_only_and_copies_tickets_and_reports(self) -> None:
         source = self.root / "legacy"

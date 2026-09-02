@@ -61,9 +61,11 @@ exercise unless a live boundary is explicitly called out.
   shared repository identities, device-local checkout paths, versioned config
   documents, tickets, reports, remote relationships, and migration receipts.
 - Creating a Bunker needs only its name and first Project. Adding child Projects
-  and attaching repositories are separate typed actions. Repository attachment
-  validates the Git checkout and records its canonical remote identity without
-  writing `.ticketbunker.json`, `.tb/`, `.gitignore`, hooks, credentials, or a
+  and configuring repositories are separate typed actions. Each Project owns a
+  revision-checked allowlist of canonical remote identities. Local attachment
+  validates a checkout against that list and fetches `origin` before saving its
+  machine-only path, without writing `.ticketbunker.json`, `.tb/`, `.gitignore`,
+  hooks, credentials, or a
   database file into source.
 - `ticketbunker/remote.py` defines the versioned service boundary. HTTPS is
   required except for localhost development. Join invitations are inspected
@@ -74,8 +76,9 @@ exercise unless a live boundary is explicitly called out.
   the endpoint, enrollment, capability, conflict, and error contracts.
 - The desktop launcher now lands on **Bunkers** with peer **Create Bunker** and
   **Join Bunker** actions. Bunker rows show their Project tree, local database,
-  remote relationship, repository/ticket counts, and explicit Add project,
-  Attach repository, and Connect service actions.
+  remote relationship, and repository/ticket counts. Connect remote exists only
+  at Bunker scope. Project Configure opens to an indexed Repositories table with
+  shared allowlist fields and per-device Connect/Disconnect actions.
 - Existing companion-backed projects appear in a separate Migration section.
   **Import copy** reads legacy locator/config/ticket/report material into a new
   local Bunker, records its digest and counts, and does not modify the source or
@@ -279,15 +282,16 @@ new Bunkers.
   window. Create makes a local Bunker plus first Project before Git is involved;
   Join reviews a bounded invitation and calls the remote enrollment contract
   before creating a replica. Each Bunker shows its recursive Project tree,
-  local/remote storage relationship, counts, and explicit Project/repository/
-  service actions. Repository inspection and attachment happen only after a
-  native picker selection and never mutate the checkout. Linux sessions with a
-  stale advertised D-Bus socket use GTK's in-memory settings backend,
+  local/remote storage relationship, and counts. Project repository
+  configuration is separate from Bunker remote connectivity. Checkout
+  validation and fetch happen only after a native picker selection and never
+  mutate the checkout. Linux sessions with a stale advertised D-Bus socket use GTK's in-memory settings backend,
   preventing picker warning floods. The bundled local window alone receives
   the directory-dialog and agent-setup capabilities; remote HTML is never
   loaded into it.
 - **Configure** edits revision-checked Bunker defaults or a selected Project's
-  pinned field/integration documents. New Projects copy the current defaults;
+  pinned field/integration documents and repository allowlist. New Projects
+  copy the current defaults;
   existing Projects do not mutate when defaults change. GitHub, GitLab, Jira,
   and custom mappings share one editable matrix. Local Bunkers can publish;
   remote replicas remain read-only until their service authorizes a shared

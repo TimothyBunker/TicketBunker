@@ -199,21 +199,56 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertEqual(application.state()["legacy_projects"], [])
 
     def test_desktop_repository_attachment_does_not_write_a_locator(self) -> None:
+        subprocess.run(
+            [
+                "git", "-C", str(self.source), "remote", "add", "origin",
+                "git@github.com:Example/coal.git",
+            ],
+            check=True,
+        )
         context = commands.CommandContext(self.root, transport="desktop")
         created = commands.dispatch(
             "application.bunker.create",
             {"name": "ECS", "project_key": "ECS"},
             context,
         )["bunker"]
-        attached = commands.dispatch(
-            "application.bunker.repository.attach",
+        project_id = created["projects"][0]["id"]
+        configuration = commands.dispatch(
+            "application.bunker.configuration.get",
             {
                 "bunker_id": created["id"],
-                "project_id": created["projects"][0]["id"],
-                "path": str(self.source),
+                "project_id": project_id,
             },
             context,
-        )["bunker"]
+        )
+        configured = commands.dispatch(
+            "application.bunker.repository.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": project_id,
+                "expected_revision": configuration["repositories"]["revision"],
+                "repositories": [
+                    {
+                        "name": "Coal",
+                        "canonical_remote": "github.com/Example/coal",
+                        "default_branch": "main",
+                    }
+                ],
+            },
+            context,
+        )
+        binding_id = configured["configuration"]["repositories"]["items"][0]["id"]
+        with mock.patch.object(bunkerdb, "_fetch_repository"):
+            attached = commands.dispatch(
+                "application.bunker.repository.attach",
+                {
+                    "bunker_id": created["id"],
+                    "project_id": project_id,
+                    "binding_id": binding_id,
+                    "path": str(self.source),
+                },
+                context,
+            )["bunker"]
 
         self.assertEqual(attached["repositories"][0]["local_path"], str(self.source))
         self.assertFalse((self.source / ".ticketbunker.json").exists())

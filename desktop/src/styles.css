@@ -167,7 +167,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .config-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
 .config-heading h3 { font-size: 13px; }
 .config-heading p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
-.field-matrix, .mapping-matrix { border-top: 1px solid var(--line); }
+.field-matrix, .mapping-matrix, .repository-matrix { border-top: 1px solid var(--line); }
 .matrix-heading, .field-row, .mapping-row { display: grid; align-items: center; gap: 7px; border-bottom: 1px solid var(--soft-line); }
 .matrix-heading { grid-template-columns: 1fr 1fr 120px 64px 32px; min-height: 30px; color: #7a8798; font-size: 9px; font-weight: 720; }
 .field-row { grid-template-columns: 1fr 1fr 120px 64px 32px; padding: 7px 0; }
@@ -181,6 +181,17 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .mapping-row { padding: 7px 0; }
 .integration-actions { display: flex; justify-content: space-between; gap: 8px; }
 .danger-control { color: var(--red); }
+.repository-matrix { min-width: 700px; overflow: hidden; }
+.repository-heading, .repository-row { display: grid; grid-template-columns: 24px 110px minmax(200px, 1.2fr) 110px minmax(190px, 1fr) 30px; align-items: center; gap: 7px; border-bottom: 1px solid var(--soft-line); }
+.repository-heading { min-height: 30px; color: #7a8798; font-size: 9px; font-weight: 720; }
+.repository-row { padding: 7px 0; }
+.repository-row > input { min-width: 0; height: 33px; font-size: 10px; }
+.repository-row > button { width: 30px; min-width: 30px; min-height: 30px; padding: 0; }
+.repository-index { color: #8a95a4; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; }
+.repository-local { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.repository-local > span { min-width: 0; flex: 1; overflow: hidden; color: #687589; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.repository-local > button { min-height: 29px; padding: 0 7px; font-size: 8px; }
+.repository-empty { padding: 22px 0; border-bottom: 1px solid var(--soft-line); color: var(--muted); font-size: 10px; text-align: center; }
 
 .ticket-shell { min-height: 100vh; background: #fff; }
 .ticket-header { position: sticky; z-index: 10; top: 0; height: 132px; display: grid; grid-template-columns: 105px minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 22px 30px 0; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .97); }
@@ -358,4 +369,5 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
   .source-editor { height: 70vh; margin: 0; }
   .source-editor > header { grid-template-columns: 70px minmax(0, 1fr); }
   .source-editor > header > div:last-child { grid-column: 1 / -1; padding-bottom: 6px; }
+  .configuration-drawer { overflow-x: auto; }
 }
