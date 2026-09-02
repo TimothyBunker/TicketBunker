@@ -118,6 +118,20 @@ class PlatformServices:
             flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
         return {"creationflags": flags}
 
+    def headless_process_options(self) -> dict[str, Any]:
+        """Keep a piped helper from allocating a Windows console window."""
+        if not self.is_windows:
+            return {}
+        # CREATE_NO_WINDOW is intentionally kept behind the platform boundary.
+        # Use its SDK value as a fallback so cross-platform tests can exercise
+        # the Windows contract even though Python exposes the constant only on
+        # Windows hosts.
+        return {
+            "creationflags": int(
+                getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            )
+        }
+
     def terminal_argv(
         self,
         argv: list[str],

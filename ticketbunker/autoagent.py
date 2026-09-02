@@ -611,6 +611,7 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if refreshed.returncode != 0:
         output = (refreshed.stdout or "").strip()
@@ -648,7 +649,12 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     ):
         if profile.get(key):
             command.extend([flag, profile[key]])
-    completed = subprocess.run(command, cwd=str(repo), env=env)
+    completed = subprocess.run(
+        command,
+        cwd=str(repo),
+        env=env,
+        **platform_services.current().headless_process_options(),
+    )
     if completed.returncode != 0:
         latest, _ = _git(repo, "rev-parse", "HEAD")
         if latest and latest != payload.get("head"):

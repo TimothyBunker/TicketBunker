@@ -52,7 +52,8 @@ Agent setup starts the verified Pi runtime in constrained RPC mode with only
 `tb_auth.ts`. The app renders provider login and model selection itself; secret
 answers travel from Rust directly to Pi, and Pi alone writes provider
 credentials. The Python command dispatcher receives only the validated model
-selection. Choosing no model is an explicit machine-local mode.
+selection. On Windows, the production app, private core, and Pi children all
+run without console windows. Choosing no model is an explicit machine-local mode.
 
 Browser fallback is implemented by `ticketbunker/app_server.py`. It binds to
 loopback, serves the same Vite output, injects one launch CSRF token, exposes the

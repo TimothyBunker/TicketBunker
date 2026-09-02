@@ -46,6 +46,15 @@ class DesktopReleaseTests(unittest.TestCase):
             configuration["bundle"]["windows"]["nsis"]["installMode"],
             "currentUser",
         )
+        main = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(
+            encoding="utf-8"
+        )
+        shell = (ROOT / "desktop" / "src-tauri" / "src" / "lib.rs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('windows_subsystem = "windows"', main)
+        self.assertIn("CREATE_NO_WINDOW", shell)
+        self.assertEqual(shell.count("suppress_child_console(&mut command);"), 2)
 
     def test_tagged_windows_release_requires_and_verifies_authenticode(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(

@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from .. import platform_services
 from ..ledger import Ledger
 
 
@@ -23,7 +24,13 @@ def run(
     initiator: str = "auto",
 ) -> tuple[str, int]:
     start = time.monotonic()
-    proc = subprocess.run(argv, cwd=str(cwd), capture_output=True, env=env)
+    proc = subprocess.run(
+        argv,
+        cwd=str(cwd),
+        capture_output=True,
+        env=env,
+        **platform_services.current().headless_process_options(),
+    )
     duration_ms = int((time.monotonic() - start) * 1000)
     ledger.command(
         stage=stage,

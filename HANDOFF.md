@@ -40,7 +40,10 @@ exercise unless a live boundary is explicitly called out.
 - `ticketbunker/platform_services.py` is the only Python boundary that detects
   the operating system and architecture. It supplies application-data paths,
   Pi/release keys, executable suffixes, Windows-safe command parsing, editor
-  candidates, terminal launchers, and detached-process flags.
+  candidates, terminal launchers, detached-process flags, and no-console flags
+  for piped helpers. Windows production builds use the graphical subsystem;
+  the native core worker, Pi setup bridge, readiness probes, report sessions,
+  and coworker sessions never allocate or flash a terminal window.
 - Bunker storage, runtime discovery, the desktop launcher, browser worker,
   synthesis worker, and external editor consume that boundary. The domain has
   no WSL branch; WSL runs the ordinary Linux implementation. DNS failures give
@@ -293,7 +296,7 @@ new Bunkers.
   opening Pi's terminal UI. The Bunkers window starts verified Pi in
   constrained RPC mode with only TicketBunker's pinned auth bridge, renders
   OAuth, device-code, select, and secret prompts itself, and sends replies
-  directly from Rust to Pi. Pi alone writes credentials; Python receives only
+  directly from Rust to a headless Pi child. Pi alone writes credentials; Python receives only
   readiness and the selected provider/model. Closing setup kills the child,
   and opening/cancelling does not silently enable an agent. The explicit
   **Use without agent** route preserves non-agent work.

@@ -113,6 +113,23 @@ class PlatformServicesTests(unittest.TestCase):
                 {"creationflags": 10},
             )
 
+    def test_headless_helpers_do_not_allocate_a_windows_console(self) -> None:
+        linux = platform_services.PlatformServices.detect(
+            system="linux", machine="x86_64"
+        )
+        windows = platform_services.PlatformServices.detect(
+            system="win32", machine="AMD64"
+        )
+
+        self.assertEqual(linux.headless_process_options(), {})
+        with mock.patch.object(
+            platform_services.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True
+        ):
+            self.assertEqual(
+                windows.headless_process_options(),
+                {"creationflags": 0x08000000},
+            )
+
     def test_linux_terminal_discovery_is_not_a_domain_decision(self) -> None:
         linux = platform_services.PlatformServices.detect(
             system="linux", machine="x86_64"

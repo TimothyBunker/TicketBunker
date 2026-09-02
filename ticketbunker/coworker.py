@@ -21,7 +21,17 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import agent_runtime, commands, config, editor, handlers, layout, project, truth
+from . import (
+    agent_runtime,
+    commands,
+    config,
+    editor,
+    handlers,
+    layout,
+    platform_services,
+    project,
+    truth,
+)
 from .api import ReportSnapshot, TicketCatalog, TicketDatabase, TicketSnapshot
 from .builders import master
 from .handlers import IntakeRejected
@@ -572,6 +582,7 @@ def _run_pi(
             capture_output=True,
             env=env,
             timeout=CHAT_TIMEOUT_SECONDS,
+            **platform_services.current().headless_process_options(),
         )
         output = completed.stdout + completed.stderr
         status = completed.returncode

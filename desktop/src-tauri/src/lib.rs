@@ -71,6 +71,17 @@ struct AgentSetupProcess {
     input: ChildStdin,
 }
 
+#[cfg(windows)]
+fn suppress_child_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn suppress_child_console(_command: &mut Command) {}
+
 fn parse_options<I>(args: I) -> Result<LaunchOptions, String>
 where
     I: IntoIterator<Item = OsString>,
@@ -163,6 +174,7 @@ fn start_command_worker(state: &ApplicationState) -> Result<CoreWorker, String> 
     if let Some(root) = bundle_root(state) {
         command.env("TB_BUNDLE_ROOT", root);
     }
+    suppress_child_console(&mut command);
     let mut child = command
         .spawn()
         .map_err(|error| format!("TicketBunker could not start its core: {error}"))?;
@@ -474,6 +486,7 @@ fn start_agent_setup(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    suppress_child_console(&mut command);
     let mut child = command
         .spawn()
         .map_err(|_| "TicketBunker could not start agent setup. Retry setup.".to_string())?;

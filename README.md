@@ -90,7 +90,9 @@ On first run, TicketBunker uses your Git identity when it is complete, then
 offers agent setup. Choose a provider, sign in through a normal app dialog, and
 select a model, or choose **Use without agent** to keep synthesis off on that
 computer. Pi owns provider credentials; TicketBunker saves only the selected
-provider and model. Change the choice later from your identity menu → **Agent**.
+provider and model. Pi stays headless behind the app; Windows does not open a
+helper terminal during setup or synthesis. Change the choice later from your
+identity menu → **Agent**.
 
 The optional CLI-first portable archive remains beside the app for automation,
 servers, air-gapped transfer, and managed installs. It contains the same frozen

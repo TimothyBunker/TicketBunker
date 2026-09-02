@@ -219,6 +219,7 @@ def _inspect(path: str | Path, origin: str) -> Runtime:
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            **platform_services.current().headless_process_options(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return Runtime(str(resolved.resolve()), origin, detail=f"cannot run pi: {exc}", integrity=integrity)
@@ -453,6 +454,7 @@ def auth_check(runtime: Runtime, provider: str, model: str, *, repo: Path | None
             capture_output=True,
             text=True,
             timeout=AUTH_TIMEOUT_SECONDS,
+            **platform_services.current().headless_process_options(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ready": False, "status": "auth-check-failed", "detail": str(exc)}

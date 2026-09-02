@@ -913,7 +913,10 @@ application-data locations, release/runtime keys, executable suffixes, command
 parsing, editor candidates, terminal launchers, and background-process flags.
 That parser also tokenizes configured command-harness templates, so native
 Windows paths retain their backslashes and quoted spaces without creating a
-second harness contract.
+second harness contract. Piped, headless helpers receive the Windows
+`CREATE_NO_WINDOW` process flag through this boundary; an agent, synthesis, or
+readiness check may never allocate a terminal merely because its parent is the
+graphical application.
 Domain services never branch on Linux, Windows, macOS, WSL, drive letters, or
 desktop-session details. WSL runs the ordinary Linux implementation; if a
 native shell communicates with a core in another environment, that connection
@@ -1303,7 +1306,9 @@ The application has three layers:
 The packaged desktop executable and `tb` core are siblings. The shell starts
 one `tb _app-worker` when the first native action is requested, retains its
 private stdin/stdout pipes for the application lifetime, and stops it with the
-launcher. The worker accepts only an explicit desktop action allowlist, bounds
+launcher. Production Windows builds use the graphical subsystem, and both the
+core worker and direct Pi setup process are explicitly launched without a
+console window. The worker accepts only an explicit desktop action allowlist, bounds
 every JSON request, redirects accidental handler output away from the protocol,
 and returns stable command codes without exposing tracebacks or payloads.
 Unexpected failures receive an opaque ID and a credential-safe diagnostic in
@@ -1346,7 +1351,8 @@ First run is application-facing and starts with the storage boundary:
 Agent setup is an app-native conversation with Pi, not an embedded terminal.
 The privileged Bunkers window starts the verified Pi runtime in RPC mode with
 sessions, tools, context files, skills, prompt templates, themes, and ambient
-extension discovery disabled. It loads only TicketBunker's pinned
+extension discovery disabled. On Windows that child is headless and cannot
+open or flash a console window. It loads only TicketBunker's pinned
 `tb_auth.ts` bridge. That bridge enumerates Pi's provider/model catalog and
 calls Pi's own `ModelRuntime.login`; Pi remains the sole credential-store
 writer and the sole implementation of provider OAuth and API-key flows.
