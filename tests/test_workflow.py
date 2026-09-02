@@ -199,8 +199,11 @@ class TicketWorkflowTests(unittest.TestCase):
         thread.start()
         base = f"http://127.0.0.1:{server.server_address[1]}"
         try:
-            with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
-                page = opened.read().decode("utf-8")
+            # This test owns the HTTP/CSRF contract. The dedicated refresh-race
+            # test below owns ticket-open background work and waits for it.
+            with mock.patch.object(viewer.truth, "queue_refresh", return_value=False):
+                with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
+                    page = opened.read().decode("utf-8")
             with urlopen(f"{base}/work/state/ECS-4") as opened:
                 state = json.loads(opened.read().decode("utf-8"))
             token = re.search(r'data-token="([^"]+)"', page).group(1)
