@@ -1213,6 +1213,11 @@ an ambient npm update. Cross-platform release tooling resolves build commands to
 their concrete executable before launching them without a shell; this includes
 Windows command shims such as `npm.cmd`.
 
+Linux x64 publishes both Debian and AppImage installers. Linux arm64 publishes
+the native Debian installer; its AppImage is withheld until Tauri's upstream
+arm64 `linuxdeploy` path can be made reproducible. A failed optional packaging
+format must not discard an already verified native installer for that platform.
+
 A portable CLI-first archive with the same frozen core and verified Pi runtime
 remains available for servers, air-gapped transfer, and environments that do
 not install desktop applications. It is a distribution alternative, not a

@@ -18,21 +18,27 @@ jobs:
           - os: ubuntu-latest
             platform: linux-x64
             executable: dist/tb
+            bundles: deb,appimage
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             executable: dist/tb
+            bundles: deb
           - os: macos-15-intel
             platform: darwin-x64
             executable: dist/tb
+            bundles: app,dmg
           - os: macos-15
             platform: darwin-arm64
             executable: dist/tb
+            bundles: app,dmg
           - os: windows-latest
             platform: windows-x64
             executable: dist/tb.exe
+            bundles: nsis
           - os: windows-11-arm
             platform: windows-arm64
             executable: dist/tb.exe
+            bundles: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -102,7 +108,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The frozen TicketBunker core could not be signed." }
           "WINDOWS_SIGNED_BUILD=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build native desktop app
-        run: python tools/build_desktop.py --platform "${{ matrix.platform }}" --tb "${{ matrix.executable }}"
+        run: python tools/build_desktop.py --platform "${{ matrix.platform }}" --tb "${{ matrix.executable }}" --bundles "${{ matrix.bundles }}"
       - name: Verify Windows product signatures
         if: runner.os == 'Windows' && env.WINDOWS_SIGNED_BUILD == 'true'
         shell: pwsh

@@ -324,6 +324,9 @@ new Bunkers.
   Windows archives are flat while Unix archives include a `pi/` directory.
   The desktop builder resolves the concrete build-tool path before launch so
   Windows uses the installed `npm.cmd` shim without invoking a shell.
+  Linux x64 emits Debian and AppImage installers; Linux arm64 emits the verified
+  Debian installer because the upstream arm64 `linuxdeploy` AppImage path is not
+  currently reproducible on GitHub's native arm runner.
   Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with
