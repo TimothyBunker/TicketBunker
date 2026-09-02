@@ -21,6 +21,17 @@ SPEC.loader.exec_module(builder)
 
 
 class DesktopReleaseTests(unittest.TestCase):
+    def test_build_tool_resolves_windows_command_shims(self) -> None:
+        npm = r"C:\Program Files\nodejs\npm.CMD"
+
+        with mock.patch.object(builder.shutil, "which", return_value=npm):
+            self.assertEqual(builder.build_tool("npm"), npm)
+
+    def test_build_tool_explains_a_missing_dependency(self) -> None:
+        with mock.patch.object(builder.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(ValueError, "npm.*not found on PATH"):
+                builder.build_tool("npm")
+
     def test_native_bundle_declares_a_no_terminal_os_launcher(self) -> None:
         configuration = json.loads(
             (ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(

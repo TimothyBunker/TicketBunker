@@ -43,6 +43,16 @@ def default_bundles() -> str:
     return "deb,appimage"
 
 
+def build_tool(name: str) -> str:
+    """Resolve command shims such as npm.cmd before launching without a shell."""
+    executable = shutil.which(name)
+    if not executable:
+        raise ValueError(
+            f"{name} is required to build the desktop app but was not found on PATH"
+        )
+    return executable
+
+
 def _reset_directory(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
@@ -157,7 +167,7 @@ def build(args: argparse.Namespace) -> None:
     if args.stage_only:
         return
     command = [
-        "npm",
+        build_tool("npm"),
         "run",
         "tauri",
         "--",

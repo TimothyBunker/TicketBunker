@@ -322,6 +322,8 @@ new Bunkers.
   resource root to the core, whose existing per-file integrity gate verifies
   Pi before use. Pi executable paths are archive-relative because the pinned
   Windows archives are flat while Unix archives include a `pi/` directory.
+  The desktop builder resolves the concrete build-tool path before launch so
+  Windows uses the installed `npm.cmd` shim without invoking a shell.
   Release construction also opens the staged Pi RPC runtime and
   requires a valid provider/model catalog from the pinned auth bridge. Native
   installers are flattened into `dist/releases/` with

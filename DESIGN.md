@@ -1209,7 +1209,9 @@ the frozen core or declared Pi executable is missing. Each native installer is
 copied into the flat release-asset directory with an adjacent SHA-256 file, so
 publishing does not depend on a build runner's nested Tauri directories.
 Updating the Pi pin is an explicit, tested TicketBunker release change, never
-an ambient npm update.
+an ambient npm update. Cross-platform release tooling resolves build commands to
+their concrete executable before launching them without a shell; this includes
+Windows command shims such as `npm.cmd`.
 
 A portable CLI-first archive with the same frozen core and verified Pi runtime
 remains available for servers, air-gapped transfer, and environments that do
