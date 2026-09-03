@@ -591,8 +591,24 @@ def _project_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def _project_tree(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    nodes = {str(row["id"]): {**dict(row), "children": []} for row in rows}
+def _project_tree(
+    rows: Iterable[Mapping[str, Any]],
+    ticket_counts: Mapping[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Nest Project rows and give each node its ticket count.
+
+    A Project's ``ticket_count`` includes its descendants, matching what the
+    ticket catalog shows when that Project is selected (``_project_scope``).
+    """
+    counts = dict(ticket_counts or {})
+    nodes = {
+        str(row["id"]): {
+            **dict(row),
+            "children": [],
+            "ticket_count": int(counts.get(str(row["id"]), 0)),
+        }
+        for row in rows
+    }
     roots: list[dict[str, Any]] = []
     for node in nodes.values():
         parent_id = str(node.get("parent_id") or "")
@@ -600,6 +616,13 @@ def _project_tree(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
             nodes[parent_id]["children"].append(node)
         else:
             roots.append(node)
+
+    def accumulate(node: dict[str, Any]) -> int:
+        node["ticket_count"] += sum(accumulate(child) for child in node["children"])
+        return int(node["ticket_count"])
+
+    for root in roots:
+        accumulate(root)
     return roots
 
 
@@ -631,6 +654,12 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         ).fetchall()
     ]
     tickets = int(connection.execute("SELECT COUNT(*) FROM tickets").fetchone()[0])
+    ticket_counts = {
+        str(item["project_id"]): int(item["total"])
+        for item in connection.execute(
+            "SELECT project_id, COUNT(*) AS total FROM tickets GROUP BY project_id"
+        ).fetchall()
+    }
     remote_value = dict(connection_row) if connection_row else None
     membership = None
     if remote_value is not None:
@@ -662,7 +691,7 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "database": str(connection.execute("PRAGMA database_list").fetchone()[2]),
         "remote": remote_value,
         "membership": membership,
-        "projects": _project_tree(projects),
+        "projects": _project_tree(projects, ticket_counts),
         "project_count": len(projects),
         "repositories": repositories,
         "repository_count": len(repositories),

@@ -42,9 +42,14 @@ try {
   }
   await page.screenshot({ path: output.replace(/\.png$/, "-bunkers.png"), fullPage: true });
   await page.locator(".bunker-overview > button").first().click();
-  await page.getByRole("heading", { name: "Tickets", exact: true }).waitFor();
-  await page.locator(".nav-project").first().click();
+  await page.getByRole("heading", { name: "Projects", exact: true }).waitFor();
+  if (await page.getByLabel("Search tickets").isVisible().catch(() => false)) {
+    throw new Error("a Bunker page must list Projects, not a ticket catalog");
+  }
+  await page.screenshot({ path: output.replace(/\.png$/, "-projects.png"), fullPage: true });
+  await page.locator(".project-row").first().click();
   await page.locator(".nav-project.selected").waitFor();
+  await page.getByLabel("Search tickets").waitFor();
   await page.getByRole("button", { name: "Configure" }).click();
   await page.getByRole("heading", { name: "Configuration" }).waitFor();
   await page.getByRole("table", { name: "Project repositories" }).waitFor();

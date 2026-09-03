@@ -167,7 +167,9 @@ The desktop launcher is the primary onboarding path:
 2. **Join Bunker** first shows the service and Bunker identity from the
    invitation, then authenticates and enrolls the user before creating a local
    replica.
-3. Inside a Bunker, **Add project** builds the recursive work hierarchy.
+3. A Bunker page lists its Projects with their allowed repositories and ticket
+   counts; **Add project** builds the recursive work hierarchy. Tickets are
+   listed only inside a selected Project.
 4. In a Project, **Configure → Repositories** publishes allowed Git remotes.
    **Connect** accepts only a matching checkout, fetches `origin`, and then saves
    that computer's path.

@@ -50,8 +50,10 @@ publish locally. Remote replicas remain read-only until their authenticated
 service publishes configuration, even if a cached snapshot names a write
 capability.
 
-Only the Bunker header exposes remote-service connectivity. Projects never show
-a database or remote-service connection action. Their Repositories tab separates
+A Bunker page lists its Projects with repository and ticket counts; the ticket
+catalog lives inside a selected Project, after that Project's subprojects. Only
+the Bunker header exposes remote-service connectivity. Projects never show a
+database or remote-service connection action. Their Repositories tab separates
 shared canonical remotes from the current computer's local checkout mappings.
 
 Agent setup starts the verified Pi runtime in constrained RPC mode with only

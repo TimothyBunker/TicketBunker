@@ -23,6 +23,17 @@ function flatten(projects: Project[], depth = 0): Array<{ project: Project; dept
   ]);
 }
 
+function ancestors(projects: Project[], id: string): Project[] {
+  const byId = new Map(flatten(projects).map(({ project }) => [project.id, project]));
+  const chain: Project[] = [];
+  let current = byId.get(id);
+  while (current?.parent_id && byId.has(current.parent_id)) {
+    current = byId.get(current.parent_id);
+    if (current) chain.unshift(current);
+  }
+  return chain;
+}
+
 function remoteLabel(bunker: Bunker) {
   if (!bunker.remote) return "Local";
   try {
@@ -31,6 +42,50 @@ function remoteLabel(bunker: Bunker) {
   } catch {
     return "Remote needs attention";
   }
+}
+
+function count(value: number, singular: string, plural: string) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function ProjectCatalog({
+  bunker,
+  projects,
+  title,
+  onProject,
+}: {
+  bunker: Bunker;
+  projects: Project[];
+  title: string;
+  onProject: (project: Project) => void;
+}) {
+  const rows = flatten(projects);
+  return (
+    <section className="project-catalog" aria-label={title}>
+      <header><h2>{title}</h2><span>{rows.length}</span></header>
+      {rows.length === 0 ? (
+        <div className="quiet-empty"><h3>No projects yet</h3><p>Add a project to hold tickets and attach repositories.</p></div>
+      ) : (
+        <div className="project-rows">
+          {rows.map(({ project, depth }) => {
+            const repositories = bunker.repositories.filter((value) => value.project_id === project.id);
+            return (
+              <button className="project-row" key={project.id} style={{ paddingLeft: `${4 + depth * 18}px` }} onClick={() => onProject(project)}>
+                <span className="project-key">{project.key}</span>
+                <span className="project-name"><strong>{project.name}</strong>{project.description && <small>{project.description}</small>}</span>
+                <span className="project-repositories">
+                  {repositories.length === 0
+                    ? <small>No repositories</small>
+                    : repositories.map((value) => <span key={value.id} className={value.local_path ? "connected" : ""} title={value.local_path ? `Connected at ${value.local_path}` : "Not connected on this computer"}>{value.name}</span>)}
+                </span>
+                <span className="project-count">{count(project.ticket_count ?? 0, "ticket", "tickets")}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function TicketCatalog({
@@ -251,7 +306,7 @@ function ActionForm({
   const title = {
     create: "Create Bunker",
     join: "Join Bunker",
-    project: "Add project",
+    project: project ? "Add subproject" : "Add project",
     remote: "Connect remote service",
     config: "Configuration",
     "": "",
@@ -271,7 +326,9 @@ function ActionForm({
           <label>Credential reference<input name="credential_reference" placeholder="System credential store reference" /></label>
         </>}
         {mode === "project" && <>
-          {!project && <label>Parent<select name="parent_id"><option value="">Top level</option>{flatten(bunker?.projects || []).map(({ project: value, depth }) => <option key={value.id} value={value.id}>{"· ".repeat(depth)}{value.key} · {value.name}</option>)}</select></label>}
+          {project
+            ? <p className="drawer-copy">Placed under {project.key} · {project.name}.</p>
+            : <label>Parent<select name="parent_id"><option value="">Top level</option>{flatten(bunker?.projects || []).map(({ project: value, depth }) => <option key={value.id} value={value.id}>{"· ".repeat(depth)}{value.key} · {value.name}</option>)}</select></label>}
           <label>Project key<input name="key" placeholder="ECS" maxLength={32} required /></label>
           <label>Project name<input name="name" required /></label>
           <label>Description<textarea name="description" rows={3} /></label>
@@ -334,7 +391,7 @@ export default function BunkerHub({
           {state.bunkers.map((value) => (
             <div className="bunker-nav" key={value.id}>
               <button className={selection?.bunkerId === value.id && !selection.projectId ? "nav-item selected" : "nav-item"} onClick={() => onSelection({ bunkerId: value.id })}>
-                <span>{value.name}</span><small>{value.ticket_count}</small>
+                <span>{value.name}</span><small>{value.project_count}</small>
               </button>
               {flatten(value.projects).map(({ project: item, depth }) => (
                 <button
@@ -362,13 +419,13 @@ export default function BunkerHub({
             <div className="header-actions"><button onClick={() => setAction("join")}>Join</button><button className="primary" onClick={() => setAction("create")}>Create Bunker</button></div>
           </header>
           {state.bunkers.length === 0 ? (
-            <div className="quiet-empty large"><h2>Create or join a Bunker</h2><p>A Bunker owns projects, tickets, configuration, and membership. Repositories attach afterward.</p></div>
+            <div className="quiet-empty large"><h2>Create or join a Bunker</h2><p>A Bunker owns projects, tickets, configuration, and membership. Repositories attach to its projects afterward.</p></div>
           ) : (
             <div className="bunker-overview">
               {state.bunkers.map((value) => (
                 <button key={value.id} onClick={() => onSelection({ bunkerId: value.id })}>
                   <span><strong>{value.name}</strong><small><i className={value.remote?.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(value)}</small></span>
-                  <span className="bunker-counts">{value.project_count} projects · {value.ticket_count} tickets</span>
+                  <span className="bunker-counts">{count(value.project_count, "project", "projects")} · {count(value.repository_count, "repository", "repositories")} · {count(value.ticket_count, "ticket", "tickets")}</span>
                 </button>
               ))}
             </div>
@@ -376,20 +433,40 @@ export default function BunkerHub({
           {legacy.length > 0 && <section className="migration-list"><header><p className="eyebrow">Migration</p><h2>Companion projects</h2></header><p>Import a read-only copy into the standalone database. The repository stays unchanged.</p>{legacy.map((value) => <div key={String(value.path)}><span><strong>{String(value.project || value.name || "Project")}</strong><small>{String(value.path || "")}</small></span><button disabled={Boolean(value.imported) || importing === value.path} onClick={() => importLegacy(value)}>{value.imported ? "Imported" : importing === value.path ? "Importing…" : "Import copy"}</button></div>)}</section>}
         </>}
 
-        {bunker && <>
+        {bunker && !project && <>
           <header className="workspace-header">
             <div>
-              <button className="breadcrumb" onClick={() => onSelection(null)}>{bunker.name}</button>
-              <h1>{project?.name || "Tickets"}</h1>
+              <button className="breadcrumb" onClick={() => onSelection(null)}>Bunkers</button>
+              <h1>{bunker.name}</h1>
+              <p className="bunker-meta"><i className={bunker.remote?.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
             </div>
             <div className="header-actions">
               <button onClick={() => setAction("config")}>Configure</button>
-              {!project && <button onClick={() => setAction("remote")}>{bunker.remote ? "Remote" : "Connect remote"}</button>}
-              <button className="primary" onClick={() => setAction("project")}>{project ? "Add subproject" : "Add project"}</button>
+              <button onClick={() => setAction("remote")}>{bunker.remote ? "Remote" : "Connect remote"}</button>
+              <button className="primary" onClick={() => setAction("project")}>Add project</button>
             </div>
           </header>
+          <ProjectCatalog bunker={bunker} projects={bunker.projects} title="Projects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />
+          <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}</p>}</details>
+        </>}
+
+        {bunker && project && <>
+          <header className="workspace-header">
+            <div>
+              <nav className="breadcrumbs" aria-label="Location">
+                <button className="breadcrumb" onClick={() => onSelection({ bunkerId: bunker.id })}>{bunker.name}</button>
+                {ancestors(bunker.projects, project.id).map((value) => <button className="breadcrumb" key={value.id} onClick={() => onSelection({ bunkerId: bunker.id, projectId: value.id })}>{value.name}</button>)}
+              </nav>
+              <h1><span className="project-key">{project.key}</span>{project.name}</h1>
+              {project.description && <p className="project-description">{project.description}</p>}
+            </div>
+            <div className="header-actions">
+              <button onClick={() => setAction("config")}>Configure</button>
+              <button className="primary" onClick={() => setAction("project")}>Add subproject</button>
+            </div>
+          </header>
+          {(project.children || []).length > 0 && <ProjectCatalog bunker={bunker} projects={project.children || []} title="Subprojects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />}
           <TicketCatalog bunker={bunker} project={project} onTicket={(ticket) => onTicket(bunker.id, ticket)} />
-          {!project && <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}</p>}</details>}
         </>}
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />

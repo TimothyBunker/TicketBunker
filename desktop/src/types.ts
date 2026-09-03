@@ -5,6 +5,7 @@ export type Project = {
   name: string;
   description?: string;
   children?: Project[];
+  ticket_count?: number;
 };
 
 export type Repository = {

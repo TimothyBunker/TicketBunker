@@ -75,10 +75,14 @@ exercise unless a live boundary is explicitly called out.
   remote database connection string. `docs/remote-service-contract.md` records
   the endpoint, enrollment, capability, conflict, and error contracts.
 - The desktop launcher now lands on **Bunkers** with peer **Create Bunker** and
-  **Join Bunker** actions. Bunker rows show their Project tree, local database,
-  remote relationship, and repository/ticket counts. Connect remote exists only
-  at Bunker scope. Project Configure opens to an indexed Repositories table with
-  shared allowlist fields and per-device Connect/Disconnect actions.
+  **Join Bunker** actions. Bunker rows show their local/remote relationship and
+  project/repository/ticket counts. Selecting a Bunker shows its Project
+  catalog (each Project's allowed repositories, this computer's connection
+  state, and ticket count including descendants), never a ticket list; the
+  Bunker header offers only Configure, Connect remote, and Add project.
+  Selecting a Project shows its subprojects, then the ticket catalog. Project
+  Configure opens to an indexed Repositories table with shared allowlist fields
+  and per-device Connect/Disconnect actions.
 - Existing companion-backed projects appear in a separate Migration section.
   **Import copy** reads legacy locator/config/ticket/report material into a new
   local Bunker, records its digest and counts, and does not modify the source or

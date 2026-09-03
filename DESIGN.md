@@ -465,10 +465,16 @@ counters, source URLs, and content revisions, never report bodies. A summary is
 updated as a typed ticket mutation side effect, not through another write
 authority.
 
-**Projects is the Bunker catalog surface.** It displays the recursive Project
-tree from the local replica; selecting one applies the same search and facets
-to that Project and, when requested, its descendants. Project and ticket rows
-are lightweight database references. Opening a result is the deliberate point
+**A Bunker page is its Project catalog, never a ticket list.** Selecting a
+Bunker shows the recursive Project tree from the local replica. Each row names
+the Project, its allowed repositories with this computer's connection state,
+and its ticket count including descendants, so the count matches what the
+Project's own page will list. The Bunker header carries only Configure
+(defaults for new Projects), Connect remote, and Add project. Selecting a
+Project applies the same search and facets to that Project and its
+descendants, lists any subprojects above the ticket catalog, and owns the
+repository allowlist through Configure. Project and ticket rows are
+lightweight database references. Opening a result is the deliberate point
 where the full ticket snapshot is composed. Local-only, shared, and imported
 legacy Bunkers use the same query contract.
 
@@ -1419,6 +1425,8 @@ service response supplies membership, capabilities, configuration, Project
 tree, ticket snapshot, revision, and sync cursor before the app installs the
 replica.
 
+A selected Bunker lists its Projects rather than tickets; the ticket catalog
+appears only inside a selected Project, beneath that Project's subprojects.
 Within a Bunker, **Add project** places a new Project under the selected parent.
 The selected Project's **Configure → Repositories** table is the only repository
 surface. A configurator publishes canonical allowed remotes and base branches;

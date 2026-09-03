@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BunkerHub from "./BunkerHub";
 import type { AppState, ConfigurationState } from "./types";
@@ -10,7 +10,15 @@ const transport = vi.hoisted(() => ({
 
 vi.mock("./transport", () => transport);
 
-const project = { id: "ecs", key: "ECS", name: "Entity Component System", children: [] };
+const project = { id: "ecs", key: "ECS", name: "Entity Component System", children: [], ticket_count: 3 };
+const repository = {
+  id: "coal",
+  project_id: "ecs",
+  name: "Coal",
+  canonical_remote: "github.com/Example/coal",
+  default_branch: "main",
+  local_path: null,
+};
 const bunker = {
   id: "engineering",
   name: "Engineering",
@@ -18,10 +26,10 @@ const bunker = {
   database: "/data/engineering.sqlite3",
   remote: null,
   projects: [project],
-  repositories: [],
+  repositories: [repository],
   project_count: 1,
-  repository_count: 0,
-  ticket_count: 0,
+  repository_count: 1,
+  ticket_count: 3,
 };
 const state: AppState = {
   profile: { name: "Tim Bunker", email: "tim@example.test", branch_user: "tim", complete: true },
@@ -36,14 +44,7 @@ const configuration: ConfigurationState = {
   permission: { can_write: true, reason: "Local", capabilities: ["config:write"] },
   repositories: {
     revision: "repositories:one",
-    items: [{
-      id: "coal",
-      project_id: "ecs",
-      name: "Coal",
-      canonical_remote: "github.com/Example/coal",
-      default_branch: "main",
-      local_path: null,
-    }],
+    items: [repository],
   },
   documents: {
     "ticket-fields": { kind: "ticket-fields", revision: "1", updated_at: "", content: { fields: [] } },
@@ -82,6 +83,37 @@ describe("Bunker and Project boundaries", () => {
     );
     expect(screen.getByRole("button", { name: "Connect remote" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Attach repository" })).not.toBeInTheDocument();
+  });
+
+  it("lists Projects at Bunker scope and tickets only inside a Project", async () => {
+    const onSelection = vi.fn();
+    const { rerender } = render(
+      <BunkerHub state={state} selection={{ bunkerId: bunker.id }} onSelection={onSelection} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Engineering" })).toBeInTheDocument();
+    const catalog = screen.getByRole("region", { name: "Projects" });
+    expect(within(catalog).getByRole("heading", { name: "Projects" })).toBeInTheDocument();
+    const row = within(catalog).getByRole("button", { name: /Entity Component System/ });
+    expect(row).toHaveTextContent("Coal");
+    expect(row).toHaveTextContent("3 tickets");
+    expect(screen.queryByRole("searchbox", { name: "Search tickets" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Tickets" })).not.toBeInTheDocument();
+    expect(transport.command).not.toHaveBeenCalledWith("application.ticket.list", expect.anything());
+
+    fireEvent.click(row);
+    expect(onSelection).toHaveBeenCalledWith({ bunkerId: bunker.id, projectId: project.id });
+
+    rerender(
+      <BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={onSelection} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+    expect(screen.getByRole("heading", { name: /Entity Component System/ })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search tickets" })).toBeInTheDocument();
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith(
+      "application.ticket.list",
+      expect.objectContaining({ bunker_id: bunker.id, project_id: project.id }),
+    ));
   });
 
   it("shows the indexed repository allowlist in Project configuration", async () => {

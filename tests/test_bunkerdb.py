@@ -107,6 +107,8 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual(updated["name"], "Engineering")
         self.assertEqual(updated["project_count"], 2)
         self.assertEqual(updated["projects"][0]["children"][0]["key"], "ECS")
+        self.assertEqual(updated["projects"][0]["ticket_count"], 0)
+        self.assertEqual(updated["projects"][0]["children"][0]["ticket_count"], 0)
         self.assertEqual(Path(updated["database"]), bunkerdb.database_path(created["id"]))
         self.assertEqual(len(bunkerdb.list_bunkers()), 1)
 
@@ -498,6 +500,10 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertEqual(created["projects"][0]["children"][0]["key"], "ECS")
         self.assertEqual(created["repositories"][0]["local_path"], None)
         self.assertEqual(created["ticket_count"], 2)
+        # A parent Project counts its descendants' tickets, matching the
+        # catalog scope a user sees when selecting that Project.
+        self.assertEqual(created["projects"][0]["ticket_count"], 2)
+        self.assertEqual(created["projects"][0]["children"][0]["ticket_count"], 2)
         self.assertEqual(created["membership"]["display_name"], "Tim")
         self.assertEqual(created["remote"]["capabilities"], ["tickets:read"])
         self.assertNotIn("secret-value", json.dumps(created))
