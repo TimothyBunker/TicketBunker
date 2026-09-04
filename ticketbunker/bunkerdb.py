@@ -691,12 +691,118 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "database": str(connection.execute("PRAGMA database_list").fetchone()[2]),
         "remote": remote_value,
         "membership": membership,
+        "sharing": _sharing(str(row["mode"]), remote_value, membership),
         "projects": _project_tree(projects, ticket_counts),
         "project_count": len(projects),
         "repositories": repositories,
         "repository_count": len(repositories),
         "ticket_count": tickets,
     }
+
+
+def _sharing(
+    mode: str,
+    remote_value: Mapping[str, Any] | None,
+    membership: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Display-safe membership facts for the current device user."""
+    if mode == "local" or remote_value is None:
+        return {
+            "state": "local",
+            "role": remote.ROLE_OWNER,
+            "is_owner": True,
+            "can_share": True,
+            "can_invite": False,
+            "can_manage_members": False,
+            "server": "",
+        }
+    capabilities = set(remote_value.get("capabilities") or [])
+    role = str((membership or {}).get("role") or "")
+    return {
+        "state": str(remote_value.get("state") or ""),
+        "role": role,
+        "is_owner": role == remote.ROLE_OWNER,
+        "can_share": False,
+        "can_invite": "members:invite" in capabilities,
+        "can_manage_members": "members:manage" in capabilities,
+        "server": str(remote_value.get("server_url") or ""),
+    }
+
+
+def remote_connection(bunker_id: str) -> dict[str, Any]:
+    """The service relationship, including the credential reference (never a secret)."""
+    bunker_id = _id(bunker_id, "Bunker")
+    with _database(bunker_id) as connection:
+        mode_row = connection.execute("SELECT mode FROM bunker WHERE id = ?", (bunker_id,)).fetchone()
+        if mode_row is None:
+            raise BunkerDatabaseError("That Bunker is not available on this device.")
+        row = connection.execute(
+            """
+            SELECT server_url, remote_bunker_id, state, credential_reference,
+                   config_revision, sync_cursor, current_member_id, capabilities_json
+            FROM remote_connection WHERE singleton = 1
+            """
+        ).fetchone()
+    if str(mode_row["mode"]) != "remote" or row is None:
+        raise BunkerDatabaseError("This Bunker is local. Share it before using service actions.")
+    try:
+        capabilities = json.loads(str(row["capabilities_json"] or "[]"))
+    except ValueError:
+        capabilities = []
+    return {
+        "server_url": str(row["server_url"]),
+        "remote_bunker_id": str(row["remote_bunker_id"]),
+        "state": str(row["state"]),
+        "credential_reference": str(row["credential_reference"] or ""),
+        "config_revision": str(row["config_revision"] or ""),
+        "sync_cursor": str(row["sync_cursor"] or ""),
+        "current_member_id": str(row["current_member_id"] or ""),
+        "capabilities": [str(item) for item in capabilities if isinstance(item, str)],
+    }
+
+
+def _record_acceptance(connection: sqlite3.Connection, accepted: Mapping[str, Any]) -> None:
+    connection.execute(
+        """
+        UPDATE remote_connection
+        SET sync_cursor = COALESCE(NULLIF(?, ''), sync_cursor),
+            config_revision = COALESCE(NULLIF(?, ''), config_revision),
+            last_synced_at = ?
+        WHERE singleton = 1
+        """,
+        (str(accepted.get("cursor") or ""), str(accepted.get("revision") or ""), _now()),
+    )
+
+
+def _mode(connection: sqlite3.Connection, bunker_id: str) -> str:
+    row = connection.execute("SELECT mode FROM bunker WHERE id = ?", (bunker_id,)).fetchone()
+    if row is None:
+        raise BunkerDatabaseError("That Bunker is not available on this device.")
+    return str(row["mode"] or "local")
+
+
+def _require_acceptance(mode: str, accepted: Mapping[str, Any] | None) -> None:
+    if mode == "remote" and not accepted:
+        raise BunkerDatabaseError(
+            "Shared changes must be accepted by the Bunker's service before they apply here."
+        )
+
+
+def _remote_scope_id(connection: sqlite3.Connection, scope_type: str, scope_id: str, mode: str) -> str:
+    """Bunker-scope documents are addressed by the remote Bunker id on the service."""
+    if scope_type != "bunker" or mode != "remote":
+        return scope_id
+    row = connection.execute(
+        "SELECT remote_bunker_id FROM remote_connection WHERE singleton = 1"
+    ).fetchone()
+    return str(row["remote_bunker_id"]) if row else scope_id
+
+
+def _next_revision(current_revision: str, mode: str) -> str:
+    if mode == "remote":
+        return f"shared:{uuid.uuid4().hex[:12]}"
+    match = re.fullmatch(r"local:(\d+)", current_revision)
+    return f"local:{int(match.group(1)) + 1}" if match else f"local:{uuid.uuid4()}"
 
 
 def get_bunker(bunker_id: str) -> dict[str, Any]:
@@ -780,15 +886,21 @@ def _config_permission(
         except ValueError:
             pass
     server = str(row["server_url"] or "the remote service") if row else "the remote service"
-    # A remote snapshot is deliberately never a local authorization oracle.
-    # The future authenticated sync broker may publish a typed change, but this
-    # local database cannot promote itself even when its cached capability list
-    # includes config:write.
-    return {
-        "can_write": False,
-        "reason": f"Shared configuration is controlled by {server}; connect and synchronize there to publish changes.",
-        "capabilities": capabilities,
-    }
+    state = str(row["state"] or "") if row else ""
+    # A cached capability only decides what the editor offers. Every shared
+    # write is still sent to the service first and applied locally only after
+    # the service accepts it (apply_*_change requires that acceptance).
+    if state == "ready" and "config:write" in capabilities:
+        return {
+            "can_write": True,
+            "reason": f"Changes are published through {server} before they apply here.",
+            "capabilities": capabilities,
+        }
+    if state != "ready":
+        reason = f"Shared configuration is controlled by {server}; reconnect to it before publishing changes."
+    else:
+        reason = f"Shared configuration is controlled by {server}; only a Bunker owner can change it."
+    return {"can_write": False, "reason": reason, "capabilities": capabilities}
 
 
 def get_configuration(
@@ -934,7 +1046,7 @@ def _validated_integrations(
     return {"providers": providers}
 
 
-def replace_configuration(
+def propose_configuration(
     bunker_id: str,
     *,
     project_id: str | None,
@@ -942,7 +1054,11 @@ def replace_configuration(
     expected_revision: str,
     content: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Replace one complete configuration document with optimistic locking."""
+    """Validate one complete document replacement and return the typed change.
+
+    Nothing is written. Local Bunkers apply the proposal immediately; shared
+    Bunkers send ``proposal["change"]`` to their service first.
+    """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
     if document_kind not in {"ticket-fields", "integrations"}:
@@ -953,6 +1069,7 @@ def replace_configuration(
         scope_type, scope_id, bunker = _config_scope(
             connection, bunker_id, project_id
         )
+        mode = str(bunker.get("mode") or "local")
         permission = _config_permission(connection, bunker)
         if not permission["can_write"]:
             raise BunkerDatabaseError(str(permission["reason"]))
@@ -1029,9 +1146,45 @@ def replace_configuration(
         raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         if len(raw.encode("utf-8")) > 1024 * 1024:
             raise BunkerDatabaseError("That configuration document is too large.")
-        match = re.fullmatch(r"local:(\d+)", current_revision)
-        revision = f"local:{int(match.group(1)) + 1}" if match else f"local:{uuid.uuid4()}"
-        now = _now()
+        revision = _next_revision(current_revision, mode)
+        remote_scope = _remote_scope_id(connection, scope_type, scope_id, mode)
+    change = remote.change_record(
+        key=uuid.uuid4().hex,
+        kind="config-document",
+        record_id=f"{scope_type}:{remote_scope}:{document_kind}",
+        expected_revision=current_revision,
+        revision=revision,
+        payload={
+            "scope_type": scope_type,
+            "scope_id": remote_scope,
+            "kind": document_kind,
+            "content": normalized,
+        },
+    )
+    return {
+        "mode": mode,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "project_id": project_id or None,
+        "kind": document_kind,
+        "content": normalized,
+        "expected_revision": current_revision,
+        "revision": revision,
+        "change": change,
+    }
+
+
+def apply_configuration_change(
+    bunker_id: str,
+    proposal: Mapping[str, Any],
+    *,
+    accepted: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write a proposed document. Shared Bunkers require service acceptance."""
+    bunker_id = _id(bunker_id, "Bunker")
+    raw = json.dumps(proposal["content"], sort_keys=True, separators=(",", ":"))
+    with _database(bunker_id) as connection:
+        _require_acceptance(_mode(connection, bunker_id), accepted)
         changed = connection.execute(
             """
             UPDATE config_documents
@@ -1039,20 +1192,45 @@ def replace_configuration(
             WHERE scope_type = ? AND scope_id = ? AND kind = ? AND revision = ?
             """,
             (
-                revision,
+                str(proposal["revision"]),
                 raw,
-                now,
-                scope_type,
-                scope_id,
-                document_kind,
-                current_revision,
+                _now(),
+                str(proposal["scope_type"]),
+                str(proposal["scope_id"]),
+                str(proposal["kind"]),
+                str(proposal["expected_revision"]),
             ),
         ).rowcount
-        if changed != 1:
+        if not changed:
             raise BunkerDatabaseError(
-                "Configuration changed while it was publishing. Reload it and retry."
+                "Configuration changed after this editor opened. Reload it and review the latest revision."
             )
-    return get_configuration(bunker_id, project_id=project_id)
+        if accepted:
+            _record_acceptance(connection, accepted)
+    return get_configuration(bunker_id, project_id=proposal.get("project_id") or None)
+
+
+def replace_configuration(
+    bunker_id: str,
+    *,
+    project_id: str | None,
+    kind: str,
+    expected_revision: str,
+    content: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Replace one complete configuration document on a local Bunker."""
+    proposal = propose_configuration(
+        bunker_id,
+        project_id=project_id,
+        kind=kind,
+        expected_revision=expected_revision,
+        content=content,
+    )
+    if proposal["mode"] == "remote":
+        raise BunkerDatabaseError(
+            "This Bunker is shared. Publish configuration through the application so the service can accept it."
+        )
+    return apply_configuration_change(bunker_id, proposal)
 
 
 _CLOSED_STATUSES = {
@@ -1456,6 +1634,145 @@ def imported_companion_sources() -> set[str]:
     return sources
 
 
+def propose_project(
+    bunker_id: str,
+    *,
+    key: str,
+    name: str,
+    parent_id: str | None = None,
+    description: str = "",
+) -> dict[str, Any]:
+    """Validate a new Project and return the typed changes that create it.
+
+    The Project pins the current Bunker defaults, so the proposal carries the
+    copied ticket-field and integration documents alongside the Project row.
+    """
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = str(uuid.uuid4())
+    project_key = _project_key(key)
+    project_name = _clean_name(name, "project")
+    parent = _id(parent_id, "parent project") if parent_id else None
+    with _database(bunker_id) as connection:
+        mode = _mode(connection, bunker_id)
+        if mode == "remote":
+            bunker = connection.execute("SELECT id, mode FROM bunker WHERE id = ?", (bunker_id,)).fetchone()
+            permission = _config_permission(connection, dict(bunker))
+            if not permission["can_write"]:
+                raise BunkerDatabaseError(str(permission["reason"]))
+        if parent and connection.execute(
+            "SELECT 1 FROM projects WHERE id = ? AND bunker_id = ?",
+            (parent, bunker_id),
+        ).fetchone() is None:
+            raise BunkerDatabaseError("Choose a parent project from this Bunker.")
+        if connection.execute(
+            "SELECT 1 FROM projects WHERE bunker_id = ? AND key = ?", (bunker_id, project_key)
+        ).fetchone() is not None:
+            raise BunkerDatabaseError(f"Project key {project_key} already exists in this Bunker.")
+        defaults = connection.execute(
+            """
+            SELECT kind, content_json FROM config_documents
+            WHERE scope_type = 'bunker' AND scope_id = ?
+              AND kind IN ('ticket-fields', 'integrations')
+            ORDER BY kind
+            """,
+            (bunker_id,),
+        ).fetchall()
+    project = {
+        "id": project_id,
+        "parent_id": parent or "",
+        "key": project_key,
+        "name": project_name,
+        "description": str(description or ""),
+        "position": 0,
+    }
+    documents = [
+        {"kind": str(row["kind"]), "content": _payload_object(row["content_json"]), "revision": "local:1"}
+        for row in defaults
+    ]
+    changes = [
+        remote.change_record(
+            key=uuid.uuid4().hex,
+            kind="project",
+            record_id=project_id,
+            expected_revision="",
+            revision="1",
+            payload=project,
+        )
+    ]
+    for document in documents:
+        changes.append(
+            remote.change_record(
+                key=uuid.uuid4().hex,
+                kind="config-document",
+                record_id=f"project:{project_id}:{document['kind']}",
+                expected_revision="",
+                revision=document["revision"],
+                payload={
+                    "scope_type": "project",
+                    "scope_id": project_id,
+                    "kind": document["kind"],
+                    "content": document["content"],
+                },
+            )
+        )
+    return {"mode": mode, "project": project, "documents": documents, "changes": changes}
+
+
+def apply_project_change(
+    bunker_id: str,
+    proposal: Mapping[str, Any],
+    *,
+    accepted: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a proposed Project. Shared Bunkers require service acceptance."""
+    bunker_id = _id(bunker_id, "Bunker")
+    project = proposal["project"]
+    now = _now()
+    try:
+        with _database(bunker_id) as connection:
+            _require_acceptance(_mode(connection, bunker_id), accepted)
+            connection.execute(
+                """
+                INSERT INTO projects(
+                    id, bunker_id, parent_id, key, name, description, position, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(project["id"]),
+                    bunker_id,
+                    str(project.get("parent_id") or "") or None,
+                    str(project["key"]),
+                    str(project["name"]),
+                    str(project.get("description") or ""),
+                    int(project.get("position") or 0),
+                    now,
+                    now,
+                ),
+            )
+            for document in proposal.get("documents") or []:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO config_documents(
+                        scope_type, scope_id, kind, revision, content_json, updated_at
+                    ) VALUES ('project', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(project["id"]),
+                        str(document["kind"]),
+                        str(document.get("revision") or "local:1"),
+                        json.dumps(document["content"], sort_keys=True),
+                        now,
+                    ),
+                )
+            if accepted:
+                _record_acceptance(connection, accepted)
+    except sqlite3.IntegrityError as exc:
+        raise BunkerDatabaseError(
+            f"Project key {project['key']} already exists in this Bunker."
+        ) from exc
+    return get_bunker(bunker_id)
+
+
 def create_project(
     bunker_id: str,
     *,
@@ -1464,33 +1781,14 @@ def create_project(
     parent_id: str | None = None,
     description: str = "",
 ) -> dict[str, Any]:
-    bunker_id = _id(bunker_id, "Bunker")
-    project_id = str(uuid.uuid4())
-    project_key = _project_key(key)
-    project_name = _clean_name(name, "project")
-    parent = _id(parent_id, "parent project") if parent_id else None
-    now = _now()
-    try:
-        with _database(bunker_id) as connection:
-            if parent and connection.execute(
-                "SELECT 1 FROM projects WHERE id = ? AND bunker_id = ?",
-                (parent, bunker_id),
-            ).fetchone() is None:
-                raise BunkerDatabaseError("Choose a parent project from this Bunker.")
-            connection.execute(
-                """
-                INSERT INTO projects(
-                    id, bunker_id, parent_id, key, name, description, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (project_id, bunker_id, parent, project_key, project_name, description, now, now),
-            )
-            _copy_project_config(connection, bunker_id, project_id)
-    except sqlite3.IntegrityError as exc:
+    proposal = propose_project(
+        bunker_id, key=key, name=name, parent_id=parent_id, description=description
+    )
+    if proposal["mode"] == "remote":
         raise BunkerDatabaseError(
-            f"Project key {project_key} already exists in this Bunker."
-        ) from exc
-    return get_bunker(bunker_id)
+            "This Bunker is shared. Add projects through the application so the service can accept them."
+        )
+    return apply_project_change(bunker_id, proposal)
 
 
 def _git_root(raw: str) -> Path:
@@ -1572,17 +1870,7 @@ def _repository_rows(
 
 
 def _repository_revision(rows: Iterable[Mapping[str, Any]]) -> str:
-    shared = [
-        {
-            "id": str(row.get("id") or ""),
-            "name": str(row.get("name") or ""),
-            "canonical_remote": str(row.get("canonical_remote") or ""),
-            "default_branch": str(row.get("default_branch") or ""),
-        }
-        for row in rows
-    ]
-    raw = json.dumps(shared, sort_keys=True, separators=(",", ":"))
-    return "repositories:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return remote.repository_list_revision(list(rows))
 
 
 def _project_repository_configuration(
@@ -1611,14 +1899,14 @@ def _repository_branch(raw: Any) -> str:
     return value
 
 
-def replace_repository_bindings(
+def propose_repository_bindings(
     bunker_id: str,
     *,
     project_id: str,
     expected_revision: str,
     repositories: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Replace one Project's shared repository allowlist.
+    """Validate one Project's complete shared repository allowlist without writing.
 
     Local checkout paths are deliberately excluded from this mutation and its
     revision. They belong to the current device, while the binding list is
@@ -1634,66 +1922,103 @@ def replace_repository_bindings(
         scope_type, scope_id, bunker = _config_scope(connection, bunker_id, project_id)
         if scope_type != "project" or scope_id != project_id:
             raise BunkerDatabaseError("Choose a project from this Bunker.")
+        mode = str(bunker.get("mode") or "local")
         permission = _config_permission(connection, bunker)
         if not permission["can_write"]:
             raise BunkerDatabaseError(str(permission["reason"]))
+        current_rows = _repository_rows(connection, project_id)
+    current_revision = _repository_revision(current_rows)
+    if not expected_revision or expected_revision != current_revision:
+        raise BunkerDatabaseError(
+            "Project repositories changed after this editor opened. Reload them and review the latest revision."
+        )
+    current = {str(row["id"]): row for row in current_rows}
+    normalized: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    seen_remotes: set[str] = set()
+    for raw in repositories:
+        if not isinstance(raw, Mapping):
+            raise BunkerDatabaseError("Each Project repository must be one row.")
+        raw_id = str(raw.get("id") or "").strip()
+        repository_id = _id(raw_id, "repository") if raw_id else str(uuid.uuid4())
+        if repository_id in seen_ids:
+            raise BunkerDatabaseError("A Project repository row appears more than once.")
+        if raw_id and repository_id not in current:
+            raise BunkerDatabaseError(
+                "A Project repository changed after this editor opened. Reload it and retry."
+            )
+        identity = canonical_remote(str(raw.get("canonical_remote") or ""))
+        if not identity:
+            raise BunkerDatabaseError(
+                "Enter an allowed Git remote, such as github.com/owner/repository."
+            )
+        if identity in seen_remotes:
+            raise BunkerDatabaseError(
+                f"The allowed remote {identity} appears more than once in this Project."
+            )
+        existing = current.get(repository_id)
+        if (
+            existing
+            and existing.get("local_path")
+            and identity != str(existing.get("canonical_remote") or "")
+        ):
+            raise BunkerDatabaseError(
+                "Disconnect this computer's checkout before changing its allowed remote."
+            )
+        normalized.append(
+            {
+                "id": repository_id,
+                "name": _clean_name(raw.get("name"), "repository"),
+                "canonical_remote": identity,
+                "default_branch": _repository_branch(raw.get("default_branch")),
+            }
+        )
+        seen_ids.add(repository_id)
+        seen_remotes.add(identity)
+    removed = set(current) - seen_ids
+    if any(current[value].get("local_path") for value in removed):
+        raise BunkerDatabaseError(
+            "Disconnect this computer's checkout before removing its allowed repository."
+        )
+    revision = _repository_revision(normalized)
+    change = remote.change_record(
+        key=uuid.uuid4().hex,
+        kind="repository-bindings",
+        record_id=project_id,
+        expected_revision=current_revision,
+        revision=revision,
+        payload=[{**row, "project_id": project_id} for row in normalized],
+    )
+    return {
+        "mode": mode,
+        "project_id": project_id,
+        "expected_revision": current_revision,
+        "revision": revision,
+        "rows": normalized,
+        "removed": sorted(removed),
+        "change": change,
+    }
+
+
+def apply_repository_bindings_change(
+    bunker_id: str,
+    proposal: Mapping[str, Any],
+    *,
+    accepted: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write a proposed allowlist. Shared Bunkers require service acceptance."""
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = _id(proposal.get("project_id"), "project")
+    with _database(bunker_id) as connection:
+        _require_acceptance(_mode(connection, bunker_id), accepted)
         connection.execute("BEGIN IMMEDIATE")
         current_rows = _repository_rows(connection, project_id)
-        current_revision = _repository_revision(current_rows)
-        if not expected_revision or expected_revision != current_revision:
+        if _repository_revision(current_rows) != str(proposal.get("expected_revision") or ""):
             raise BunkerDatabaseError(
                 "Project repositories changed after this editor opened. Reload them and review the latest revision."
             )
-        current = {str(row["id"]): row for row in current_rows}
-        normalized: list[dict[str, str]] = []
-        seen_ids: set[str] = set()
-        seen_remotes: set[str] = set()
-        for raw in repositories:
-            if not isinstance(raw, Mapping):
-                raise BunkerDatabaseError("Each Project repository must be one row.")
-            raw_id = str(raw.get("id") or "").strip()
-            repository_id = _id(raw_id, "repository") if raw_id else str(uuid.uuid4())
-            if repository_id in seen_ids:
-                raise BunkerDatabaseError("A Project repository row appears more than once.")
-            if raw_id and repository_id not in current:
-                raise BunkerDatabaseError(
-                    "A Project repository changed after this editor opened. Reload it and retry."
-                )
-            identity = canonical_remote(str(raw.get("canonical_remote") or ""))
-            if not identity:
-                raise BunkerDatabaseError(
-                    "Enter an allowed Git remote, such as github.com/owner/repository."
-                )
-            if identity in seen_remotes:
-                raise BunkerDatabaseError(
-                    f"The allowed remote {identity} appears more than once in this Project."
-                )
-            existing = current.get(repository_id)
-            if (
-                existing
-                and existing.get("local_path")
-                and identity != str(existing.get("canonical_remote") or "")
-            ):
-                raise BunkerDatabaseError(
-                    "Disconnect this computer's checkout before changing its allowed remote."
-                )
-            normalized.append(
-                {
-                    "id": repository_id,
-                    "name": _clean_name(raw.get("name"), "repository"),
-                    "canonical_remote": identity,
-                    "default_branch": _repository_branch(raw.get("default_branch")),
-                }
-            )
-            seen_ids.add(repository_id)
-            seen_remotes.add(identity)
-        removed = set(current) - seen_ids
-        if any(current[value].get("local_path") for value in removed):
-            raise BunkerDatabaseError(
-                "Disconnect this computer's checkout before removing its allowed repository."
-            )
         now = _now()
-        for value in normalized:
+        for value in proposal["rows"]:
             connection.execute(
                 """
                 INSERT INTO repository_bindings(
@@ -1711,13 +2036,37 @@ def replace_repository_bindings(
                     value["canonical_remote"], value["default_branch"], now, now,
                 ),
             )
+        removed = [str(value) for value in proposal.get("removed") or []]
         if removed:
             placeholders = ",".join("?" for _ in removed)
             connection.execute(
                 f"DELETE FROM repository_bindings WHERE project_id = ? AND id IN ({placeholders})",
-                (project_id, *sorted(removed)),
+                (project_id, *removed),
             )
+        if accepted:
+            _record_acceptance(connection, accepted)
     return get_configuration(bunker_id, project_id=project_id)
+
+
+def replace_repository_bindings(
+    bunker_id: str,
+    *,
+    project_id: str,
+    expected_revision: str,
+    repositories: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Replace one Project's shared repository allowlist on a local Bunker."""
+    proposal = propose_repository_bindings(
+        bunker_id,
+        project_id=project_id,
+        expected_revision=expected_revision,
+        repositories=repositories,
+    )
+    if proposal["mode"] == "remote":
+        raise BunkerDatabaseError(
+            "This Bunker is shared. Publish repositories through the application so the service can accept them."
+        )
+    return apply_repository_bindings_change(bunker_id, proposal)
 
 
 def _fetch_repository(root: Path) -> None:
@@ -1885,6 +2234,170 @@ def _attach_import_repository(
             (binding_id, str(root), now, now),
         )
     return binding_id
+
+
+def local_publication(bunker_id: str) -> dict[str, Any]:
+    """Everything a service needs to host this Bunker. Device paths never leave."""
+    bunker_id = _id(bunker_id, "Bunker")
+    with _database(bunker_id) as connection:
+        bunker = connection.execute(
+            "SELECT id, name, mode FROM bunker WHERE id = ?", (bunker_id,)
+        ).fetchone()
+        if bunker is None:
+            raise BunkerDatabaseError("That Bunker is not available on this device.")
+        projects = _project_rows(connection)
+        bindings = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT id, project_id, name, canonical_remote, default_branch, created_at, updated_at
+                FROM repository_bindings ORDER BY name COLLATE NOCASE, id
+                """
+            ).fetchall()
+        ]
+        documents = [
+            {
+                "scope_type": str(row["scope_type"]),
+                "scope_id": str(row["scope_id"]),
+                "kind": str(row["kind"]),
+                "revision": str(row["revision"]),
+                "content": _payload_object(row["content_json"]),
+                "updated_at": str(row["updated_at"]),
+            }
+            for row in connection.execute(
+                "SELECT scope_type, scope_id, kind, revision, content_json, updated_at FROM config_documents"
+            ).fetchall()
+        ]
+        tickets = [
+            {
+                "id": str(row["id"]),
+                "project_id": str(row["project_id"]),
+                "payload": _payload_object(row["payload_json"]),
+                "source_kind": str(row["source_kind"] or ""),
+                "source_reference": str(row["source_reference"] or ""),
+                "updated_at": str(row["updated_at"] or ""),
+            }
+            for row in connection.execute(
+                "SELECT id, project_id, payload_json, source_kind, source_reference, updated_at FROM tickets"
+            ).fetchall()
+        ]
+        reports = [
+            {
+                "ticket_id": str(row["ticket_id"]),
+                "scope": str(row["scope"]),
+                "repository_id": str(row["repository_id"] or ""),
+                "content": str(row["content"] or ""),
+                "updated_at": str(row["updated_at"] or ""),
+            }
+            for row in connection.execute(
+                "SELECT ticket_id, scope, repository_id, content, updated_at FROM reports"
+            ).fetchall()
+        ]
+    return {
+        "bunker": {"id": str(bunker["id"]), "name": str(bunker["name"])},
+        "projects": [
+            {
+                "id": str(row["id"]),
+                "parent_id": str(row.get("parent_id") or ""),
+                "key": str(row["key"]),
+                "name": str(row["name"]),
+                "description": str(row.get("description") or ""),
+                "position": int(row.get("position") or 0),
+                "created_at": str(row.get("created_at") or ""),
+                "updated_at": str(row.get("updated_at") or ""),
+            }
+            for row in projects
+        ],
+        "repository_bindings": bindings,
+        "config_documents": documents,
+        "tickets": tickets,
+        "reports": reports,
+    }
+
+
+def _replace_members(connection: sqlite3.Connection, members: Iterable[Mapping[str, Any]]) -> None:
+    connection.execute("DELETE FROM members")
+    now = _now()
+    for value in members:
+        member_id = _id(value.get("id"), "member")
+        member_capabilities = value.get("capabilities") or []
+        if not isinstance(member_capabilities, list) or any(
+            not isinstance(item, str) for item in member_capabilities
+        ):
+            raise BunkerDatabaseError(
+                "The remote snapshot contains invalid member capabilities."
+            )
+        connection.execute(
+            """
+            INSERT INTO members(
+                id, display_name, email, role, state,
+                capabilities_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                member_id,
+                str(value.get("display_name") or value.get("name") or ""),
+                str(value.get("email") or ""),
+                str(value.get("role") or ""),
+                str(value.get("state") or "active"),
+                json.dumps(member_capabilities, sort_keys=True),
+                str(value.get("updated_at") or now),
+            ),
+        )
+
+
+def share_bunker(
+    bunker_id: str,
+    *,
+    server_url: str,
+    snapshot: remote.RemoteSnapshot,
+    credential_reference: str,
+) -> dict[str, Any]:
+    """Turn a local Bunker into the owner's replica of its published copy."""
+    bunker_id = _id(bunker_id, "Bunker")
+    server = remote.normalize_server_url(server_url)
+    remote_id = _id(snapshot.bunker.get("id"), "remote Bunker")
+    reference = _id(credential_reference, "credential reference")
+    member_id = _id(snapshot.current_member_id, "enrolled member")
+    if _remote_registered(server, remote_id, exclude_bunker_id=bunker_id):
+        raise BunkerDatabaseError("That remote Bunker is already connected on this device.")
+    with _database(bunker_id) as connection:
+        if _mode(connection, bunker_id) != "local":
+            raise BunkerDatabaseError("This Bunker is already shared.")
+        now = _now()
+        connection.execute(
+            "UPDATE bunker SET mode = 'remote', updated_at = ? WHERE id = ?", (now, bunker_id)
+        )
+        connection.execute("DELETE FROM remote_connection")
+        connection.execute(
+            """
+            INSERT INTO remote_connection(
+                singleton, server_url, remote_bunker_id, state,
+                credential_reference, config_revision, sync_cursor, last_synced_at,
+                current_member_id, capabilities_json
+            ) VALUES (1, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                server,
+                remote_id,
+                reference,
+                snapshot.revision,
+                snapshot.cursor,
+                now,
+                member_id,
+                json.dumps(list(snapshot.capabilities), sort_keys=True),
+            ),
+        )
+        _replace_members(connection, snapshot.members)
+    with _registry() as registry:
+        registry.execute(
+            """
+            UPDATE bunkers SET mode = 'remote', remote_server = ?, remote_bunker_id = ?
+            WHERE id = ?
+            """,
+            (server, remote_id, bunker_id),
+        )
+    return get_bunker(bunker_id)
 
 
 def configure_remote(

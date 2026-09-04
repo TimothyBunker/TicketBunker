@@ -9,6 +9,69 @@ The current client contract is `/api/v1`. JSON responses are bounded to 8 MiB.
 Production origins require HTTPS; plain HTTP is accepted only for localhost
 development.
 
+## Roles and capabilities
+
+Every service uses the same membership vocabulary, defined in
+`ticketbunker/remote.py`:
+
+| Role | Capabilities |
+|---|---|
+| `owner` | `tickets:read`, `tickets:write`, `config:read`, `config:write`, `bunker:share`, `members:invite`, `members:manage` |
+| `member` | `tickets:read`, `tickets:write`, `config:read` |
+
+The user who publishes a Bunker is its owner. An invitation carries the role it
+grants. The service enforces capabilities on every request; a client's cached
+copy only decides what its editor offers.
+
+`GET /api/v1/capabilities` returns protocol facts and the optional features a
+service supports. The reference service advertises `setup-token`,
+`invitation-credentials`, `invitations`, `members`, and `changes`.
+
+## Setup and publication
+
+A fresh reference service prints a one-time owner setup token. Claiming it
+creates the first user and returns that user's credential:
+
+`POST /api/v1/setup`
+
+```json
+{"setup_token": "one-time-value", "profile": {"display_name": "Tim", "email": "tim@example.test"}}
+```
+
+```json
+{"ok": true, "user": {"id": "user-1", "display_name": "Tim", "email": "tim@example.test"}, "credential": "bearer-value"}
+```
+
+The client stores the credential behind a machine-local reference and never
+writes it into a Bunker database. A second claim, or a wrong token, fails with
+`setup_complete` or `setup_token_invalid`.
+
+`POST /api/v1/bunkers` (bearer required) publishes a local Bunker. The body is
+the complete local publication: `bunker` (`id` is a suggestion, `name`),
+`projects`, `repository_bindings` (shared fields only, never device paths),
+`config_documents`, `tickets`, and `reports`. The service validates the whole
+document, assigns the Bunker identity, makes the caller its owner, and returns
+the same `snapshot` shape as enrollment. Bunker-scope configuration documents
+are re-addressed to the assigned Bunker id.
+
+## Invitations
+
+`POST /api/v1/bunkers/{bunker_id}/invitations` (requires `members:invite`)
+
+```json
+{"role": "member", "expires_in": 604800}
+```
+
+```json
+{"ok": true, "invitation": {"id": "inv-1", "role": "member", "token": "one-time-value", "expires_at": "2026-09-11T00:00:00+00:00"}}
+```
+
+The raw token appears only in this response; the client composes the
+`ticketbunker://join` link from its known server origin. `GET` on the same path
+lists invitations with `state` `pending`, `redeemed`, `revoked`, or `expired`
+and never includes tokens. `DELETE /api/v1/bunkers/{bunker_id}/invitations/{id}`
+revokes a pending invitation.
+
 ## Authentication and enrollment
 
 Source-repository access is not TicketBunker authentication. A clone, source
@@ -24,11 +87,12 @@ The desktop parses it locally and displays only `server` and `bunker`. The
 one-time value never appears in application state or child-process arguments.
 It is sent only during enrollment.
 
-Before redemption, the native application authenticates the user with the
-selected service and stores the resulting credential in the operating-system
-vault. The HTTP adapter receives the credential only as an ephemeral bearer,
-plus its machine-local vault reference. The service returns the authorized
-snapshot; it never returns or invents a device credential reference.
+Before or during redemption the client obtains a credential for the selected
+service and stores it behind a machine-local reference (today a mode-0600 file
+in the application data home; an operating-system vault backend may replace it).
+The HTTP adapter receives the credential only as an ephemeral bearer plus that
+reference. A service may return a credential *value* when it creates the member
+at redemption; it never returns or invents a device credential *reference*.
 
 `POST /api/v1/invitations/redeem`
 
@@ -39,8 +103,12 @@ snapshot; it never returns or invents a device credential reference.
 }
 ```
 
-The request requires the authenticated user's bearer credential. A successful
-response is:
+The request carries the authenticated user's bearer credential. A service that
+advertises `invitation-credentials` also accepts an unauthenticated redemption
+with a `profile` (`display_name`, `email`); it then creates the member, issues
+their credential, and returns it beside the snapshot as `credential`. A service
+without that feature answers `401` and the client tells the user to sign in
+first. A successful response is:
 
 ```json
 {
@@ -105,18 +173,36 @@ Returns the authorized snapshot or bounded changes after a known cursor. Every
 request checks current membership and capabilities. Revocation takes effect at
 this boundary even if an older local replica still exists offline.
 
-`POST /api/v1/bunkers/{bunker_id}/changes`
+`GET /api/v1/bunkers/{bunker_id}/members` returns the active members with
+roles and capabilities to any member.
+
+`POST /api/v1/bunkers/{bunker_id}/changes` (requires `config:write`)
 
 ```json
 {
   "cursor": "change-104",
-  "changes": []
+  "changes": [
+    {
+      "key": "3f9c…",
+      "kind": "config-document",
+      "record_id": "bunker:engineering:ticket-fields",
+      "expected_revision": "local:1",
+      "revision": "shared:0f1e2d3c4b5a",
+      "payload": {"scope_type": "bunker", "scope_id": "engineering", "kind": "ticket-fields", "content": {"fields": []}}
+    }
+  ]
 }
 ```
 
-Each change carries an idempotency key, record identity, expected revision, and
-typed payload. The service applies the accepted set transactionally and returns
-the new cursor and per-change results. Revision conflicts are explicit; the
+Change kinds are `project` (payload: the project row, `expected_revision`
+empty for creation), `config-document` (payload: scope, kind, content), and
+`repository-bindings` (record id: the project id; payload: the complete list;
+revisions are the content-derived digest both sides compute). Each change
+carries an idempotency `key`, a record identity, the expected revision, and the
+revision the client proposes. The service applies the whole set transactionally
+and returns `results` (per key: `ok`, `revision`, and `replayed` when the key
+was seen before), the new `revision`, and the new `cursor`. A conflict returns
+`409` with `revision_conflict` or `project_key_taken` and applies nothing; the
 service never asks the client to merge database files.
 
 Configuration changes replace one complete `ticket-fields` or `integrations`
@@ -139,12 +225,21 @@ Project repositories without assigning the ticket itself to one repository.
 
 ## Stable failures
 
-- `401`: authentication is missing or expired;
-- `403`: the member lacks the required capability;
-- `404`: the Bunker or invitation is unavailable to this user;
-- `409`: an expected revision or cursor conflicts;
+- `401`: authentication is missing or expired (`authentication_required`,
+  `setup_token_invalid`);
+- `403`: the member lacks the required capability (`capability_required`);
+- `404`: the Bunker or invitation is unavailable to this user
+  (`bunker_unavailable`, `invitation_invalid`);
+- `409`: an expected revision conflicts, or setup was already completed
+  (`revision_conflict`, `project_key_taken`, `setup_complete`);
+- `410`: the invitation was used, revoked, or expired (`invitation_used`,
+  `invitation_revoked`, `invitation_expired`);
+- `413`: the request exceeds the 8 MiB bound;
 - `429`: bounded retry is appropriate;
 - other failures: no local accepted state is discarded.
+
+Every failure body is `{"ok": false, "code": "...", "message": "..."}`. Clients
+map the stable `code` to their own next action and ignore the message text.
 
 Response bodies may carry host diagnostics, but the desktop renders only the
 stable category and next action. Raw server output, database errors, bearer

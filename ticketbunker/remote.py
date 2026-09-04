@@ -21,6 +21,102 @@ INVITE_SCHEME = "ticketbunker"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 INVITE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
+# Membership vocabulary shared by every compatible service (DESIGN.md §6).
+ROLE_OWNER = "owner"
+ROLE_MEMBER = "member"
+ROLES = (ROLE_OWNER, ROLE_MEMBER)
+ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    ROLE_OWNER: (
+        "tickets:read",
+        "tickets:write",
+        "config:read",
+        "config:write",
+        "bunker:share",
+        "members:invite",
+        "members:manage",
+    ),
+    ROLE_MEMBER: ("tickets:read", "tickets:write", "config:read"),
+}
+CHANGE_KINDS = ("project", "repository-bindings", "config-document")
+DEFAULT_INVITATION_SECONDS = 7 * 24 * 60 * 60
+MAX_INVITATION_SECONDS = 90 * 24 * 60 * 60
+
+
+def normalize_role(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value not in ROLES:
+        raise RemoteContractError("Choose the owner or member role.")
+    return value
+
+
+def capabilities_for(role: Any) -> tuple[str, ...]:
+    return ROLE_CAPABILITIES.get(str(role or "").strip().lower(), ())
+
+
+def repository_list_revision(rows: Any) -> str:
+    """Content-derived revision of one Project's shared repository allowlist.
+
+    Clients and services compute the same digest from the same shared fields,
+    so a whole-list replacement can be revision-checked without either side
+    storing a separate counter. Device paths are never part of it.
+    """
+    import hashlib
+
+    shared = sorted(
+        (
+            {
+                "id": str(row.get("id") or ""),
+                "name": str(row.get("name") or ""),
+                "canonical_remote": str(row.get("canonical_remote") or ""),
+                "default_branch": str(row.get("default_branch") or ""),
+            }
+            for row in rows
+        ),
+        key=lambda item: (item["name"].casefold(), item["canonical_remote"], item["id"]),
+    )
+    raw = json.dumps(shared, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "repositories:" + hashlib.sha256(raw).hexdigest()[:24]
+
+
+def change_record(
+    *,
+    key: str,
+    kind: str,
+    record_id: str,
+    expected_revision: str,
+    revision: str,
+    payload: Mapping[str, Any] | list[Any],
+) -> dict[str, Any]:
+    """One typed, idempotent, revision-checked change for the service."""
+    if kind not in CHANGE_KINDS:
+        raise RemoteContractError("That change kind is not part of the service contract.")
+    return {
+        "key": str(key),
+        "kind": kind,
+        "record_id": str(record_id),
+        "expected_revision": str(expected_revision or ""),
+        "revision": str(revision),
+        "payload": payload,
+    }
+
+
+# Stable service failure codes render as TicketBunker's own next actions. Raw
+# server text never reaches a user.
+_CODE_MESSAGES = {
+    "setup_token_invalid": "That setup token is not valid. Copy the token printed by tb serve, or reset it with tb serve --reset-setup-token.",
+    "setup_complete": "This server already has an owner. Ask that owner for an invitation instead of using a setup token.",
+    "profile_required": "Enter your name and email in Settings before joining or sharing a Bunker.",
+    "invitation_invalid": "That invitation is not valid for this server. Ask the Bunker owner for a new one.",
+    "invitation_expired": "That invitation expired. Ask the Bunker owner for a new one.",
+    "invitation_revoked": "That invitation was revoked. Ask the Bunker owner for a new one.",
+    "invitation_used": "That invitation was already used. Ask the Bunker owner for a new one.",
+    "already_member": "You already belong to this Bunker on this server.",
+    "capability_required": "Only the Bunker owner can do that on this server.",
+    "revision_conflict": "The shared Bunker changed elsewhere. Reload it and retry.",
+    "project_key_taken": "That project key already exists in the shared Bunker.",
+    "bunker_invalid": "The Bunker could not be published because its content did not validate.",
+}
+
 
 class RemoteContractError(ValueError):
     """A safe, user-facing remote-contract rejection."""
@@ -118,10 +214,17 @@ class RemoteSnapshot:
 
 @dataclass(frozen=True)
 class Enrollment:
-    """Authenticated enrollment result returned by a remote adapter."""
+    """Authenticated enrollment result returned by a remote adapter.
+
+    ``issued_credential`` is set only when the service creates the member's
+    credential at redemption (the reference service's invitation-credential
+    feature). The application stores it in the machine-local credential store
+    and replaces it with a reference before any Bunker database sees it.
+    """
 
     snapshot: RemoteSnapshot
     credential_reference: str
+    issued_credential: str = ""
 
 
 class RemoteAdapter(Protocol):
@@ -129,7 +232,9 @@ class RemoteAdapter(Protocol):
 
     def inspect(self, invitation: JoinInvitation) -> Mapping[str, Any]: ...
 
-    def enroll(self, invitation: JoinInvitation) -> Enrollment: ...
+    def enroll(
+        self, invitation: JoinInvitation, profile: Mapping[str, str] | None = None
+    ) -> Enrollment: ...
 
     def pull(self, bunker_id: str, cursor: str) -> RemoteSnapshot: ...
 
@@ -180,7 +285,16 @@ class HTTPRemoteAdapter:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
-            if exc.code == 401:
+            code = ""
+            try:
+                body = json.loads(exc.read(64 * 1024).decode("utf-8"))
+                if isinstance(body, dict) and isinstance(body.get("code"), str):
+                    code = body["code"]
+            except (ValueError, OSError, AttributeError):
+                code = ""
+            if code in _CODE_MESSAGES:
+                detail = _CODE_MESSAGES[code]
+            elif exc.code == 401:
                 detail = "Sign in to this TicketBunker server, then retry."
             elif exc.code == 403:
                 detail = "This server did not authorize that Bunker action."
@@ -192,7 +306,9 @@ class HTTPRemoteAdapter:
                 detail = "The TicketBunker server is busy. Wait briefly, then retry."
             else:
                 detail = "The TicketBunker server could not complete that action."
-            raise RemoteContractError(detail) from exc
+            error = RemoteContractError(detail)
+            error.code = code or f"http_{exc.code}"  # type: ignore[attr-defined]
+            raise error from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise RemoteContractError(
                 f"TicketBunker could not reach {self.server}. Check the address and network, then retry."
@@ -223,24 +339,109 @@ class HTTPRemoteAdapter:
             {"bunker_id": invitation.bunker_id, "invite": invitation.token},
         )
 
-    def enroll(self, invitation: JoinInvitation) -> Enrollment:
+    def enroll(
+        self, invitation: JoinInvitation, profile: Mapping[str, str] | None = None
+    ) -> Enrollment:
         if invitation.server != self.server:
             raise RemoteContractError("The invitation belongs to a different server.")
-        if not self.bearer or not self.credential_reference:
-            raise RemoteContractError(
-                "Sign in to this TicketBunker server before joining the Bunker."
-            )
-        value = self._request(
-            "POST",
-            "/invitations/redeem",
-            {"bunker_id": invitation.bunker_id, "invite": invitation.token},
-        )
+        body: dict[str, Any] = {
+            "bunker_id": invitation.bunker_id,
+            "invite": invitation.token,
+        }
+        if self.bearer:
+            if not self.credential_reference:
+                raise RemoteContractError(
+                    "Sign in to this TicketBunker server before joining the Bunker."
+                )
+        else:
+            if not profile or not str(profile.get("display_name") or "").strip():
+                raise RemoteContractError(
+                    "Enter your name and email in Settings before joining a Bunker."
+                )
+            body["profile"] = _profile_payload(profile)
+        value = self._request("POST", "/invitations/redeem", body)
         snapshot_value = value.get("snapshot")
         if not isinstance(snapshot_value, dict):
             raise RemoteContractError(
                 "The TicketBunker server did not complete authenticated enrollment."
             )
-        return Enrollment(_snapshot(snapshot_value), self.credential_reference)
+        issued = str(value.get("credential") or "") if not self.bearer else ""
+        if not self.bearer and not issued:
+            raise RemoteContractError(
+                "This server requires sign-in before joining. Sign in to it, then retry."
+            )
+        return Enrollment(
+            _snapshot(snapshot_value), self.credential_reference, issued_credential=issued
+        )
+
+    def setup(self, setup_token: str, profile: Mapping[str, str]) -> dict[str, Any]:
+        """Claim a fresh reference service with its one-time owner setup token."""
+        token = str(setup_token or "").strip()
+        if not token:
+            raise RemoteContractError(
+                "Paste the setup token printed by tb serve to claim this server."
+            )
+        value = self._request(
+            "POST", "/setup", {"setup_token": token, "profile": _profile_payload(profile)}
+        )
+        credential = str(value.get("credential") or "")
+        user = value.get("user")
+        if not credential or not isinstance(user, dict):
+            raise RemoteContractError("The TicketBunker server did not complete owner setup.")
+        return {"credential": credential, "user": user}
+
+    def publish(self, payload: Mapping[str, Any]) -> RemoteSnapshot:
+        """Publish a local Bunker; the authenticated user becomes its owner."""
+        self._require_signed_in("share a Bunker")
+        value = self._request("POST", "/bunkers", dict(payload))
+        snapshot_value = value.get("snapshot")
+        if not isinstance(snapshot_value, dict):
+            raise RemoteContractError("The TicketBunker server did not publish the Bunker.")
+        return _snapshot(snapshot_value)
+
+    def create_invitation(
+        self, bunker_id: str, *, role: str = ROLE_MEMBER, expires_in: int = DEFAULT_INVITATION_SECONDS
+    ) -> dict[str, Any]:
+        self._require_signed_in("invite members")
+        value = self._request(
+            "POST",
+            f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/invitations",
+            {"role": normalize_role(role), "expires_in": int(expires_in)},
+        )
+        invitation = value.get("invitation")
+        if not isinstance(invitation, dict) or not str(invitation.get("token") or ""):
+            raise RemoteContractError("The TicketBunker server did not create an invitation.")
+        return dict(invitation)
+
+    def list_invitations(self, bunker_id: str) -> tuple[Mapping[str, Any], ...]:
+        self._require_signed_in("view invitations")
+        value = self._request(
+            "GET", f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/invitations"
+        )
+        return _objects(value.get("invitations", []), "invitations")
+
+    def revoke_invitation(self, bunker_id: str, invitation_id: str) -> None:
+        self._require_signed_in("revoke invitations")
+        if not INVITE_ID_RE.fullmatch(str(invitation_id or "")):
+            raise RemoteContractError("Choose an invitation to revoke.")
+        self._request(
+            "DELETE",
+            f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/invitations/"
+            f"{urllib.parse.quote(invitation_id, safe='')}",
+        )
+
+    def members(self, bunker_id: str) -> tuple[Mapping[str, Any], ...]:
+        self._require_signed_in("view members")
+        value = self._request(
+            "GET", f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/members"
+        )
+        return _objects(value.get("members", []), "members")
+
+    def _require_signed_in(self, action: str) -> None:
+        if not self.bearer:
+            raise RemoteContractError(
+                f"Sign in to {self.server} before you {action}."
+            )
 
     def pull(self, bunker_id: str, cursor: str) -> RemoteSnapshot:
         query = urllib.parse.urlencode({"after": cursor}) if cursor else ""
@@ -258,6 +459,16 @@ class HTTPRemoteAdapter:
             f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/changes",
             {"cursor": cursor, "changes": list(changes)},
         )
+
+
+def _profile_payload(profile: Mapping[str, str]) -> dict[str, str]:
+    display_name = str(profile.get("display_name") or profile.get("name") or "").strip()
+    email = str(profile.get("email") or "").strip()
+    if not display_name:
+        raise RemoteContractError(
+            "Enter your name and email in Settings before using a TicketBunker server."
+        )
+    return {"display_name": display_name[:120], "email": email[:254]}
 
 
 def _objects(value: Any, name: str) -> tuple[Mapping[str, Any], ...]:
@@ -303,6 +514,16 @@ def _snapshot(value: Mapping[str, Any]) -> RemoteSnapshot:
 
 __all__ = [
     "API_VERSION",
+    "CHANGE_KINDS",
+    "DEFAULT_INVITATION_SECONDS",
+    "ROLE_CAPABILITIES",
+    "ROLE_MEMBER",
+    "ROLE_OWNER",
+    "ROLES",
+    "capabilities_for",
+    "change_record",
+    "normalize_role",
+    "repository_list_revision",
     "Enrollment",
     "HTTPRemoteAdapter",
     "JoinInvitation",

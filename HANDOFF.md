@@ -83,6 +83,19 @@ exercise unless a live boundary is explicitly called out.
   Selecting a Project shows its subprojects, then the ticket catalog. Project
   Configure opens to an indexed Repositories table with shared allowlist fields
   and per-device Connect/Disconnect actions.
+- Sharing exists end to end against the reference service. `tb serve`
+  (`ticketbunker/service/`) is a stdlib-only HTTP service over one SQLite file
+  that implements `/api/v1`: one-time owner setup token, publish, invitations
+  (issue, list, revoke; single use; roles), redeem with credential issuance,
+  members, snapshots, and all-or-nothing revision-checked typed changes.
+  **Share Bunker** publishes a local Bunker and makes the user its owner;
+  **Members** lists members and gives owners invitation links; **Join** takes
+  only a link. Owners keep configuring after sharing: `propose_*` validates,
+  the service accepts, then `apply_*_change` writes locally. Members see a
+  read-only editor. Credentials live only in the mode-0600 machine-local store
+  (`ticketbunker/credentials.py`); Bunker databases hold references.
+  `tests/test_service.py` and `SharedBunkerTests` in `tests/test_application.py`
+  drive the owner and member flows against the in-process service.
 - Existing companion-backed projects appear in a separate Migration section.
   **Import copy** reads legacy locator/config/ticket/report material into a new
   local Bunker, records its digest and counts, and does not modify the source or
@@ -467,12 +480,14 @@ exercise intentionally does not run an agent report.
 1. Move the ticket, report, observation, ledger, configuration, search, and
    coworker handlers from legacy companion paths to the per-Bunker database,
    preserving their typed gates and viewer behavior.
-2. Implement a compatible reference remote service (or deploy against the
-   selected team service) for login, invitation issuance/redemption, capability
-   checks, snapshots, idempotent changes, and conflict testing. The client
-   protocol is present; there is intentionally no direct database fallback.
-3. Replace pending-auth manual service setup with the complete native login and
-   OS-vault credential-reference flow.
+2. Extend the reference service and app with join requests and owner
+   approval, member management (roles, removal), deploy recipes for platforms
+   that provide HTTPS and a persistent disk, and ticket/report synchronisation
+   (pull/push through the existing adapter). Give each Project its tracker
+   source (provider and board identity) so "Sync tickets" is a Project action
+   that travels in the join snapshot.
+3. Add an OS-vault backend behind the credential reference store and native
+   sign-in for services that require authentication before redemption.
 4. Add signed/versioned JSON and markdown export/import for local-only and
    air-gapped Bunkers, then verify round trips from SQLite and a remote replica.
 5. Remove legacy companion publication only after parity and verified imports;
@@ -503,6 +518,8 @@ exercise intentionally does not run an agent report.
 | Design authority | `DESIGN.md` |
 | Bunker SQLite domain | `ticketbunker/bunkerdb.py` |
 | Remote service protocol | `ticketbunker/remote.py` |
+| Reference service | `ticketbunker/service/storage.py`, `server.py`; `tb serve` |
+| Machine-local credentials | `ticketbunker/credentials.py` |
 | Desktop/API action registry | `ticketbunker/application.py` |
 | Legacy layout | `ticketbunker/layout.py` |
 | Shared commands | `ticketbunker/commands.py`, `ticketcommands.py` |

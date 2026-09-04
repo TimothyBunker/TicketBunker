@@ -173,8 +173,27 @@ The desktop launcher is the primary onboarding path:
 4. In a Project, **Configure → Repositories** publishes allowed Git remotes.
    **Connect** accepts only a matching checkout, fetches `origin`, and then saves
    that computer's path.
-5. At Bunker level, **Connect remote** records the one optional remote-service relationship; it
-   never accepts a database connection string.
+5. At Bunker level, **Share Bunker** publishes the Bunker to a TicketBunker
+   service you run and makes you its owner. **Members** then lists members and,
+   for owners, creates single-use invitation links and revokes pending ones.
+   Nothing accepts a database connection string.
+
+### Sharing with a small team
+
+You do not need a database server. Run the reference service on any machine
+you control:
+
+```sh
+tb serve --data ~/ticketbunker-service.sqlite3
+```
+
+It prints its address and a one-time owner setup token. In the app, open the
+Bunker, choose **Share Bunker**, and paste both. The service keeps one SQLite
+file; back it up by copying it. TicketBunker apps require HTTPS except on
+localhost, so run the service behind a platform or proxy that terminates TLS
+(`--host 0.0.0.0`), or pass `--certfile` and `--keyfile`. Larger teams may
+implement the same `docs/remote-service-contract.md` on their own
+infrastructure; the app does not change.
 
 Existing companion-Git projects appear under **Migration** with **Import copy**.
 Import is read-only with respect to both source and companion repositories and

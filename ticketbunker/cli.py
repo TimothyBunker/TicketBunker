@@ -1937,6 +1937,66 @@ def cmd_application_browser_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the reference TicketBunker service (DESIGN.md §3.20)."""
+    from . import platform_services
+    from .service import server as service_server
+    from .service import storage as service_storage
+
+    data = (
+        Path(args.data).expanduser().resolve()
+        if args.data
+        else platform_services.current().data_home() / "service" / "service.sqlite3"
+    )
+    store = service_storage.ServiceStore(data)
+    store.initialize()
+    token = store.issue_setup_token(force=bool(args.reset_setup_token))
+    try:
+        server = service_server.serve(
+            store,
+            host=args.host,
+            port=args.port,
+            certfile=args.certfile,
+            keyfile=args.keyfile,
+        )
+    except OSError as exc:
+        print(
+            f"cannot listen on {args.host}:{args.port}: {exc.strerror or exc}",
+            file=sys.stderr,
+        )
+        return 1
+    host, port = server.server_address[:2]
+    print(f"TicketBunker service listening on {server.origin}")
+    print(f"data: {data}")
+    if token:
+        print()
+        print("Owner setup token (shown once):")
+        print(f"  {token}")
+        print()
+        print("In TicketBunker, open the Bunker you want to share, choose Share Bunker,")
+        print("and paste this server address and token. The token stops working after")
+        print("its first use; run tb serve --reset-setup-token to print another.")
+    else:
+        state = store.setup_state()
+        if state["setup_completed"]:
+            print("Owner setup is complete. Members join with invitations from a Bunker owner.")
+        else:
+            print("A setup token was already printed. Use it, or run")
+            print("tb serve --reset-setup-token to print a new one.")
+    if not server.tls and str(host) not in {"127.0.0.1", "localhost", "::1"}:
+        print()
+        print("Note: TicketBunker apps require HTTPS except on localhost. Run this service")
+        print("behind your platform's TLS proxy or pass --certfile and --keyfile.")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
 def cmd_application_command(args: argparse.Namespace) -> int:
     if args.application_command not in app_worker.DESKTOP_ACTIONS:
         print("error: command is not available to the desktop shell", file=sys.stderr)
@@ -2319,6 +2379,21 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--foreground", action="store_true", help="run the browser viewer in this terminal")
     s.set_defaults(open=True, browser=False)
     s.set_defaults(fn=cmd_view)
+
+    s = sub.add_parser(
+        "serve",
+        help="run the reference TicketBunker service that hosts shared Bunkers",
+    )
+    s.add_argument("--data", default=None,
+                   help="service database file (default: inside the application data home)")
+    s.add_argument("--host", default="127.0.0.1",
+                   help="listen address (default: 127.0.0.1; use 0.0.0.0 behind a TLS proxy)")
+    s.add_argument("--port", type=int, default=8480, help="listen port (default: 8480)")
+    s.add_argument("--certfile", default=None, help="serve HTTPS directly with this certificate")
+    s.add_argument("--keyfile", default=None, help="private key for --certfile")
+    s.add_argument("--reset-setup-token", action="store_true",
+                   help="print a new one-time owner setup token, replacing any earlier one")
+    s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("_viewer-worker", help=argparse.SUPPRESS)
     s.add_argument("--repo", required=True)

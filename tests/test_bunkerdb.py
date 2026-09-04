@@ -623,8 +623,12 @@ class RemoteContractTests(unittest.TestCase):
         )
         adapter = remote.HTTPRemoteAdapter(invitation.server)
 
-        with self.assertRaisesRegex(remote.RemoteContractError, "Sign in"):
+        # Without a credential the adapter needs a profile for the service's
+        # invitation-credential feature; it never sends an anonymous request.
+        with self.assertRaisesRegex(remote.RemoteContractError, "name and email"):
             adapter.enroll(invitation)
+        with self.assertRaisesRegex(remote.RemoteContractError, "Sign in"):
+            remote.HTTPRemoteAdapter(invitation.server, bearer="token").enroll(invitation)
 
 
 if __name__ == "__main__":

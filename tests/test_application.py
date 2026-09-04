@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import threading
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
-from ticketbunker import agent_runtime, application, bunkerdb, commands, config
+from ticketbunker import agent_runtime, application, bunkerdb, commands, config, credentials
+from ticketbunker.service import server as service_server
+from ticketbunker.service import storage as service_storage
 
 
 class ApplicationStateTests(unittest.TestCase):
@@ -481,3 +486,231 @@ class ApplicationStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedBunkerTests(unittest.TestCase):
+    """The owner and member flows against the in-process reference service."""
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name).resolve()
+        self.store = service_storage.ServiceStore(self.root / "service" / "service.sqlite3")
+        self.store.initialize()
+        self.setup_token = self.store.issue_setup_token()
+        self.server = service_server.serve(self.store, host="127.0.0.1", port=0, quiet=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.origin = self.server.origin
+        self.context = commands.CommandContext(self.root, transport="desktop")
+        self.patches: list[Any] = []
+
+    def tearDown(self) -> None:
+        self._stop_patches()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        self.tempdir.cleanup()
+
+    def _stop_patches(self) -> None:
+        while self.patches:
+            self.patches.pop().stop()
+
+    def as_user(self, name: str) -> None:
+        """Switch to another computer: its own settings file and data home."""
+        self._stop_patches()
+        home = self.root / "computers" / name
+        home.mkdir(parents=True, exist_ok=True)
+        settings = home / ".tbconfig"
+        for patch in (
+            mock.patch.object(config, "GLOBAL_CONFIG", settings),
+            mock.patch.dict(os.environ, {"TB_DATA_HOME": str(home / "data")}),
+        ):
+            patch.start()
+            self.patches.append(patch)
+        if not settings.exists():
+            self.dispatch(
+                "application.profile.update",
+                {"name": name.title(), "email": f"{name}@example.test", "branch_user": name},
+            )
+
+    def dispatch(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return commands.dispatch(action, payload, self.context)
+
+    def test_owner_shares_invites_and_publishes_through_the_service(self) -> None:
+        self.as_user("tim")
+        created = self.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "ECS", "project_name": "Entity Component System"},
+        )["bunker"]
+        project_id = created["projects"][0]["id"]
+        configuration = self.dispatch(
+            "application.bunker.configuration.get",
+            {"bunker_id": created["id"], "project_id": project_id},
+        )
+        self.dispatch(
+            "application.bunker.repository.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": project_id,
+                "expected_revision": configuration["repositories"]["revision"],
+                "repositories": [
+                    {"name": "Coal", "canonical_remote": "github.com/example/coal", "default_branch": "main"}
+                ],
+            },
+        )
+
+        with self.assertRaises(commands.CommandRejected) as missing:
+            self.dispatch(
+                "application.bunker.share", {"bunker_id": created["id"], "server_url": self.origin}
+            )
+        self.assertEqual(missing.exception.code, "service_setup_required")
+
+        shared = self.dispatch(
+            "application.bunker.share",
+            {"bunker_id": created["id"], "server_url": self.origin, "setup_token": self.setup_token},
+        )["bunker"]
+
+        self.assertEqual(shared["mode"], "remote")
+        self.assertEqual(shared["remote"]["server_url"], self.origin)
+        self.assertTrue(shared["sharing"]["is_owner"])
+        self.assertTrue(shared["sharing"]["can_invite"])
+        self.assertEqual(shared["membership"]["role"], "owner")
+        credential_path = credentials.store_path()
+        self.assertTrue(credential_path.is_file())
+        self.assertEqual(stat.S_IMODE(credential_path.stat().st_mode), 0o600)
+        owner_secret = credentials.resolve(credentials.find(self.origin))
+        self.assertTrue(owner_secret)
+        self.assertNotIn(owner_secret, json.dumps(shared))
+        self.assertNotIn(owner_secret, json.dumps(application.state()))
+        self.assertNotIn(owner_secret, bunkerdb.database_path(created["id"]).read_bytes().decode("latin-1"))
+
+        with self.assertRaises(commands.CommandRejected) as again:
+            self.dispatch(
+                "application.bunker.share",
+                {"bunker_id": created["id"], "server_url": self.origin, "setup_token": "x"},
+            )
+        self.assertEqual(again.exception.code, "bunker_already_shared")
+
+        # The owner keeps configuring; every shared change is accepted by the
+        # service before it is written locally.
+        bunker_config = self.dispatch(
+            "application.bunker.configuration.get", {"bunker_id": created["id"]}
+        )
+        self.assertTrue(bunker_config["permission"]["can_write"])
+        fields = bunker_config["documents"]["ticket-fields"]
+        updated = self.dispatch(
+            "application.bunker.configuration.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": "",
+                "kind": "ticket-fields",
+                "expected_revision": fields["revision"],
+                "content": fields["content"],
+            },
+        )
+        self.assertTrue(updated["documents"]["ticket-fields"]["revision"].startswith("shared:"))
+        with self.assertRaises(commands.CommandRejected) as stale:
+            self.dispatch(
+                "application.bunker.configuration.replace",
+                {
+                    "bunker_id": created["id"],
+                    "project_id": "",
+                    "kind": "ticket-fields",
+                    "expected_revision": fields["revision"],
+                    "content": fields["content"],
+                },
+            )
+        self.assertIn("Reload", stale.exception.message)
+        added = self.dispatch(
+            "application.bunker.project.create",
+            {"bunker_id": created["id"], "key": "REN", "name": "Rendering"},
+        )["bunker"]
+        self.assertEqual({item["key"] for item in added["projects"]}, {"ECS", "REN"})
+        render_id = next(item["id"] for item in added["projects"] if item["key"] == "REN")
+        render_config = self.dispatch(
+            "application.bunker.configuration.get",
+            {"bunker_id": created["id"], "project_id": render_id},
+        )
+        self.assertEqual(
+            render_config["documents"]["ticket-fields"]["content"], fields["content"]
+        )
+        self.dispatch(
+            "application.bunker.repository.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": render_id,
+                "expected_revision": render_config["repositories"]["revision"],
+                "repositories": [{"name": "Flux", "canonical_remote": "github.com/example/flux"}],
+            },
+        )
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-5")
+
+        invitation = self.dispatch(
+            "application.bunker.invitation.create", {"bunker_id": created["id"]}
+        )["invitation"]
+        self.assertTrue(invitation["link"].startswith("ticketbunker://join?"))
+        self.assertEqual(invitation["role"], "member")
+        listed = self.dispatch("application.bunker.invitations", {"bunker_id": created["id"]})
+        self.assertEqual([item["state"] for item in listed["invitations"]], ["pending"])
+        self.assertNotIn(invitation["link"], json.dumps(listed))
+
+        # A member joins from another computer and lands fully configured.
+        self.as_user("ada")
+        joined = self.dispatch("application.bunker.join", {"invitation": invitation["link"]})["bunker"]
+        self.assertEqual(joined["mode"], "remote")
+        self.assertEqual(joined["sharing"]["role"], "member")
+        self.assertFalse(joined["sharing"]["can_invite"])
+        self.assertFalse(joined["sharing"]["can_share"])
+        self.assertEqual({item["key"] for item in joined["projects"]}, {"ECS", "REN"})
+        repositories = {item["name"]: item for item in joined["repositories"]}
+        self.assertEqual(set(repositories), {"Coal", "Flux"})
+        self.assertIsNone(repositories["Coal"]["local_path"])
+        member_config = self.dispatch(
+            "application.bunker.configuration.get", {"bunker_id": joined["id"]}
+        )
+        self.assertFalse(member_config["permission"]["can_write"])
+        self.assertEqual(
+            member_config["documents"]["ticket-fields"]["revision"],
+            updated["documents"]["ticket-fields"]["revision"],
+        )
+        with self.assertRaises(commands.CommandRejected) as forbidden:
+            self.dispatch(
+                "application.bunker.configuration.replace",
+                {
+                    "bunker_id": joined["id"],
+                    "project_id": "",
+                    "kind": "ticket-fields",
+                    "expected_revision": member_config["documents"]["ticket-fields"]["revision"],
+                    "content": fields["content"],
+                },
+            )
+        self.assertIn("only a Bunker owner", forbidden.exception.message)
+        with self.assertRaises(commands.CommandRejected) as cannot_invite:
+            self.dispatch("application.bunker.invitation.create", {"bunker_id": joined["id"]})
+        self.assertIn("Only the Bunker owner", cannot_invite.exception.message)
+        members = self.dispatch("application.bunker.members", {"bunker_id": joined["id"]})
+        self.assertEqual(sorted(item["role"] for item in members["members"]), ["member", "owner"])
+        member_secret = credentials.resolve(credentials.find(self.origin))
+        self.assertTrue(member_secret)
+        self.assertNotEqual(member_secret, owner_secret)
+
+        # The link was single use.
+        self.as_user("eve")
+        with self.assertRaises(commands.CommandRejected) as reused:
+            self.dispatch("application.bunker.join", {"invitation": invitation["link"]})
+        self.assertIn("already used", reused.exception.message)
+
+        # Only the owner revokes invitations.
+        self.as_user("tim")
+        second = self.dispatch(
+            "application.bunker.invitation.create", {"bunker_id": created["id"]}
+        )["invitation"]
+        revoked = self.dispatch(
+            "application.bunker.invitation.revoke",
+            {"bunker_id": created["id"], "invitation_id": second["id"]},
+        )["invitations"]
+        self.assertEqual({item["id"]: item["state"] for item in revoked}[second["id"]], "revoked")
+        self.assertEqual(
+            sorted(item["role"] for item in self.dispatch("application.bunker.members", {"bunker_id": created["id"]})["members"]),
+            ["member", "owner"],
+        )

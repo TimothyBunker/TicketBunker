@@ -30,8 +30,12 @@ directory picker, avoiding unrelated `dconf` warning floods. macOS remains in
 the release matrix but needs hardware verification.
 
 Opening the app without `--repo` lands on Bunkers. Create makes a local SQLite
-Bunker and first Project without touching Git. Join validates an invitation and
-requires authenticated service enrollment before installing a replica. The
+Bunker and first Project without touching Git. Join takes one invitation link,
+enrolls through the service, stores only a credential reference locally, and
+installs a replica with its Projects and setup already configured. Share Bunker
+publishes a local Bunker to a `tb serve` instance (or any compatible service)
+and makes the current user its owner; Members lists members and lets owners
+create and revoke invitation links. The
 selected Project's Configure view owns an indexed allowed-repository table;
 connecting a local checkout validates and fetches its `origin` without writing
 discovery or authority state into it. Legacy companion data appears only as a
@@ -52,8 +56,8 @@ capability.
 
 A Bunker page lists its Projects with repository and ticket counts; the ticket
 catalog lives inside a selected Project, after that Project's subprojects. Only
-the Bunker header exposes remote-service connectivity. Projects never show a
-database or remote-service connection action. Their Repositories tab separates
+the Bunker header exposes service connectivity (Share Bunker, then Members).
+Projects never show a database or remote-service connection action. Their Repositories tab separates
 shared canonical remotes from the current computer's local checkout mappings.
 
 Agent setup starts the verified Pi runtime in constrained RPC mode with only

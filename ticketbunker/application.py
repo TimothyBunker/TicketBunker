@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from . import (
@@ -18,12 +18,14 @@ from . import (
     bunkerdb,
     commands,
     config,
+    credentials,
     platform_services,
     project,
     release_updates,
     remote,
     truth,
 )
+from urllib.parse import urlencode
 
 
 _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -437,13 +439,18 @@ def command_bunker_create(
 def command_bunker_project_create(
     _context: commands.CommandContext, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    bunker = _bunker_result(
-        bunkerdb.create_project,
-        str(payload.get("bunker_id") or ""),
+    bunker_id = str(payload.get("bunker_id") or "")
+    proposal = _bunker_result(
+        bunkerdb.propose_project,
+        bunker_id,
         key=str(payload.get("key") or ""),
         name=str(payload.get("name") or ""),
         parent_id=str(payload.get("parent_id") or "") or None,
         description=str(payload.get("description") or ""),
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    bunker = _bunker_result(
+        bunkerdb.apply_project_change, bunker_id, proposal, accepted=accepted
     )
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
 
@@ -478,13 +485,18 @@ def command_bunker_configuration_replace(
         raise commands.CommandRejected(
             "configuration_content_invalid", "Configuration content must be one object."
         )
-    return _bunker_result(
-        bunkerdb.replace_configuration,
-        str(payload.get("bunker_id") or ""),
+    bunker_id = str(payload.get("bunker_id") or "")
+    proposal = _bunker_result(
+        bunkerdb.propose_configuration,
+        bunker_id,
         project_id=str(payload.get("project_id") or "") or None,
         kind=str(payload.get("kind") or ""),
         expected_revision=str(payload.get("expected_revision") or ""),
         content=content,
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    return _bunker_result(
+        bunkerdb.apply_configuration_change, bunker_id, proposal, accepted=accepted
     )
 
 
@@ -588,12 +600,17 @@ def command_bunker_repository_replace(
         raise commands.CommandRejected(
             "repositories_invalid", "Project repositories must be a list."
         )
-    configuration = _bunker_result(
-        bunkerdb.replace_repository_bindings,
-        str(payload.get("bunker_id") or ""),
+    bunker_id = str(payload.get("bunker_id") or "")
+    proposal = _bunker_result(
+        bunkerdb.propose_repository_bindings,
+        bunker_id,
         project_id=str(payload.get("project_id") or ""),
         expected_revision=str(payload.get("expected_revision") or ""),
         repositories=repositories,
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    configuration = _bunker_result(
+        bunkerdb.apply_repository_bindings_change, bunker_id, proposal, accepted=accepted
     )
     return {
         "configuration": configuration,
@@ -650,14 +667,174 @@ def command_bunker_join(
     invitation = _bunker_result(
         remote.JoinInvitation.parse, str(payload.get("invitation") or "")
     )
-    adapter = remote.HTTPRemoteAdapter(
-        invitation.server,
-        bearer=str(payload.get("authorization") or ""),
-        credential_reference=str(payload.get("credential_reference") or ""),
+    reference = str(payload.get("credential_reference") or "") or credentials.find(
+        invitation.server
     )
-    enrollment = _bunker_result(adapter.enroll, invitation)
+    bearer = str(payload.get("authorization") or "") or (
+        credentials.resolve(reference) if reference else ""
+    )
+    adapter = remote.HTTPRemoteAdapter(
+        invitation.server, bearer=bearer, credential_reference=reference if bearer else ""
+    )
+    profile = None if bearer else _service_profile()
+    enrollment = _bunker_result(adapter.enroll, invitation, profile)
+    if enrollment.issued_credential:
+        reference = credentials.store(invitation.server, enrollment.issued_credential)
+        enrollment = remote.Enrollment(enrollment.snapshot, reference)
     bunker = _bunker_result(bunkerdb.create_replica, invitation, enrollment)
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
+def _service_profile() -> dict[str, str]:
+    profile = _profile(config.load())
+    if not profile["complete"]:
+        raise commands.CommandRejected(
+            "profile_required",
+            "Enter your name and email in Settings before using a TicketBunker server.",
+        )
+    return {"display_name": profile["name"], "email": profile["email"]}
+
+
+def _remote_adapter(bunker_id: str) -> tuple[remote.HTTPRemoteAdapter, dict[str, Any]]:
+    connection = _bunker_result(bunkerdb.remote_connection, bunker_id)
+    reference = str(connection.get("credential_reference") or "")
+    bearer = credentials.resolve(reference) if reference else ""
+    server = str(connection["server_url"])
+    if not bearer:
+        raise commands.CommandRejected(
+            "service_signin_required",
+            f"This computer no longer holds a credential for {server}. Join the Bunker again from a new invitation.",
+        )
+    return (
+        remote.HTTPRemoteAdapter(server, bearer=bearer, credential_reference=reference),
+        connection,
+    )
+
+
+def _publish_changes(bunker_id: str, proposal: Mapping[str, Any]) -> dict[str, Any]:
+    """Send a proposal's typed changes to the service; return its acceptance."""
+    changes = proposal.get("changes") or [proposal["change"]]
+    adapter, connection = _remote_adapter(bunker_id)
+    result = _bunker_result(
+        adapter.push,
+        str(connection["remote_bunker_id"]),
+        str(connection.get("sync_cursor") or ""),
+        tuple(changes),
+    )
+    return {
+        "cursor": str(result.get("cursor") or ""),
+        "revision": str(result.get("revision") or ""),
+    }
+
+
+def _invitation_link(server: str, bunker_id: str, token: str) -> str:
+    query = urlencode({"server": server, "bunker": bunker_id, "invite": token})
+    return f"{remote.INVITE_SCHEME}://join?{query}"
+
+
+@commands.register("application.bunker.share")
+def command_bunker_share(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Publish a local Bunker to a service and become its owner."""
+    bunker_id = str(payload.get("bunker_id") or "")
+    server = _bunker_result(remote.normalize_server_url, str(payload.get("server_url") or ""))
+    bunker = _bunker_result(bunkerdb.get_bunker, bunker_id)
+    if str(bunker.get("mode") or "local") != "local":
+        raise commands.CommandRejected(
+            "bunker_already_shared", "This Bunker is already shared. Invite members from Members."
+        )
+    profile = _service_profile()
+    setup_token = str(payload.get("setup_token") or "").strip()
+    reference = credentials.find(server)
+    if setup_token:
+        result = _bunker_result(remote.HTTPRemoteAdapter(server).setup, setup_token, profile)
+        reference = credentials.store(server, str(result["credential"]))
+    elif not reference:
+        raise commands.CommandRejected(
+            "service_setup_required",
+            "Paste the setup token printed by tb serve, or join this server from an invitation first.",
+        )
+    adapter = remote.HTTPRemoteAdapter(
+        server, bearer=credentials.resolve(reference), credential_reference=reference
+    )
+    publication = _bunker_result(bunkerdb.local_publication, bunker_id)
+    snapshot = _bunker_result(adapter.publish, publication)
+    shared = _bunker_result(
+        bunkerdb.share_bunker,
+        bunker_id,
+        server_url=server,
+        snapshot=snapshot,
+        credential_reference=reference,
+    )
+    return {"bunker": shared, "bunkers": bunkerdb.list_bunkers()}
+
+
+@commands.register("application.bunker.invitation.create")
+def command_bunker_invitation_create(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker_id = str(payload.get("bunker_id") or "")
+    adapter, connection = _remote_adapter(bunker_id)
+    role = str(payload.get("role") or remote.ROLE_MEMBER)
+    try:
+        expires_in = int(payload.get("expires_in") or remote.DEFAULT_INVITATION_SECONDS)
+    except (TypeError, ValueError) as exc:
+        raise commands.CommandRejected("invitation_expiry_invalid", "Choose a valid expiry.") from exc
+    invitation = _bunker_result(
+        adapter.create_invitation,
+        str(connection["remote_bunker_id"]),
+        role=role,
+        expires_in=expires_in,
+    )
+    link = _invitation_link(
+        str(connection["server_url"]), str(connection["remote_bunker_id"]), str(invitation["token"])
+    )
+    return {
+        "invitation": {
+            "id": str(invitation.get("id") or ""),
+            "role": str(invitation.get("role") or role),
+            "expires_at": str(invitation.get("expires_at") or ""),
+            "link": link,
+        },
+        "invitations": _bunker_result(adapter.list_invitations, str(connection["remote_bunker_id"])),
+    }
+
+
+@commands.register("application.bunker.invitations")
+def command_bunker_invitations(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    adapter, connection = _remote_adapter(str(payload.get("bunker_id") or ""))
+    return {
+        "invitations": _bunker_result(adapter.list_invitations, str(connection["remote_bunker_id"]))
+    }
+
+
+@commands.register("application.bunker.invitation.revoke")
+def command_bunker_invitation_revoke(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    adapter, connection = _remote_adapter(str(payload.get("bunker_id") or ""))
+    _bunker_result(
+        adapter.revoke_invitation,
+        str(connection["remote_bunker_id"]),
+        str(payload.get("invitation_id") or ""),
+    )
+    return {
+        "invitations": _bunker_result(adapter.list_invitations, str(connection["remote_bunker_id"]))
+    }
+
+
+@commands.register("application.bunker.members")
+def command_bunker_members(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    bunker_id = str(payload.get("bunker_id") or "")
+    adapter, connection = _remote_adapter(bunker_id)
+    members = _bunker_result(adapter.members, str(connection["remote_bunker_id"]))
+    bunker = _bunker_result(bunkerdb.get_bunker, bunker_id)
+    return {"members": list(members), "sharing": bunker.get("sharing", {})}
 
 
 @commands.register("application.bunker.import.companion")

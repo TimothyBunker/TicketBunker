@@ -136,16 +136,47 @@ local Bunker database ↔ authenticated TicketBunker service ↔ host-owned data
 ```
 
 The local connection record contains only the service origin, remote Bunker ID,
-replica identity, configuration revision, sync cursor, state, and a reference to
-an OS-vault credential. It never contains raw credentials or a database
-connection string. A host may use SQLite, PostgreSQL, or another transactional
-engine; clients cannot observe or depend on that choice.
+replica identity, configuration revision, sync cursor, state, and a credential
+reference. It never contains raw credentials or a database connection string.
+The reference is resolved by the machine-local credential store
+(`ticketbunker/credentials.py`), a mode-0600 JSON file in the application data
+home that hands the HTTP adapter an ephemeral bearer; an operating-system vault
+backend can replace that file without changing the reference or any Bunker
+record. A host may use SQLite, PostgreSQL, or another transactional engine;
+clients cannot observe or depend on that choice.
+
+**Membership has two roles.** A Bunker **owner** holds every capability:
+`bunker:share`, `members:invite`, `members:manage`, and `config:write` in
+addition to reading and writing tickets. A **member** reads and writes tickets
+and reads configuration. Creating a local Bunker makes the device user its
+owner, publishing it keeps that ownership, and an invitation carries the role
+it grants. Only owners see or use service settings, invitations, and shared
+configuration publication. The role and capability vocabulary lives in
+`ticketbunker/remote.py`; every compatible service enforces it on its own side,
+and a cached capability only decides what the editor offers.
+
+**Sharing is the owner's inverse of joining.** A local Bunker is published to a
+chosen service with **Share Bunker**: the app signs in (with the one-time owner
+setup token a fresh reference service prints, or a credential this computer
+already holds for that server), sends the complete local publication (Projects,
+repository allowlists without device paths, configuration documents, tickets,
+and reports), and turns the local database into the owner's replica of the
+published copy. Ownership, revision, and sync cursor come back from the
+service. From then on every shared mutation is proposed locally, sent to the
+service as typed, idempotent, revision-checked changes, and written locally
+only after the service accepts it. `propose_*` validates without writing and
+`apply_*_change` refuses a shared write that carries no acceptance, so a
+replica cannot self-elevate even if its cached capabilities say it may.
 
 Joining is server-first and authorization-first:
 
-1. The user opens a short-lived invitation or selects a known server.
+1. The user pastes a short-lived invitation link from a Bunker owner.
 2. The app displays the exact service origin and remote Bunker identity.
-3. The service authenticates the user and authorizes membership.
+3. The service authenticates the user and authorizes membership. A service
+   that advertises `invitation-credentials` may create the member and their
+   credential at redemption from the machine-local profile; the issued
+   credential goes straight into the credential store and only its reference
+   reaches the Bunker database. A service that requires prior sign-in says so.
 4. Only after enrollment succeeds does TicketBunker create the local database.
 5. The first authenticated snapshot supplies the Bunker configuration, Project
    hierarchy, repository identities, tickets, reports, capabilities, revision,
@@ -945,8 +976,11 @@ is a launcher/transport concern rather than a new Bunker or repository type.
 domain identifiers and typed services, not through client-visible filesystem
 paths. `bunkerdb.py` owns the SQLite schema and transactions; `application.py`
 owns the shared action registry; `remote.py` owns the versioned service
-protocol. `layout.py` remains the sole authority for legacy import paths and
-runtime artifacts that still need a filesystem representation.
+protocol and the role/capability vocabulary. `layout.py` remains the sole
+authority for legacy import paths and runtime artifacts that still need a
+filesystem representation. The reference service under `ticketbunker/service/`
+is the only other SQL boundary in the package: it stores host-owned data that
+no client ever sees, behind the same contract any other host implements.
 
 **The root is Bunker-relative, not Git-relative.** Creating a Bunker requires a
 name and a first Project, but no repository. Attaching a repository is a later,
@@ -1419,11 +1453,19 @@ action.
 
 **Create Bunker** asks only for a Bunker name and first Project key/name. It
 creates one local SQLite database without touching a repository. **Join
-Bunker** accepts a bounded invitation, displays its service and Bunker identity,
-and exposes **Authenticate and join** only as the explicit network step. The
-service response supplies membership, capabilities, configuration, Project
-tree, ticket snapshot, revision, and sync cursor before the app installs the
-replica.
+Bunker** asks only for an invitation link; it never shows raw authorization or
+credential fields. The service response supplies membership, capabilities,
+configuration, Project tree, repository allowlists, ticket snapshot, reports,
+revision, and sync cursor before the app installs the replica, so a new member
+lands with every Project already configured.
+
+**Share Bunker** appears only on a local Bunker's page. It asks for the server
+address and, on a fresh reference service, the one-time setup token printed by
+`tb serve`; a computer that already holds a credential for that server needs
+only the address. Publication makes the current user the owner. Once shared,
+**Members** replaces it: everyone sees the member list with roles; owners also
+create invitation links (one use, seven days by default), copy them, see
+pending invitations, and revoke them. There is no hand-edited service record.
 
 A selected Bunker lists its Projects rather than tickets; the ticket catalog
 appears only inside a selected Project, beneath that Project's subprojects.
@@ -1432,9 +1474,9 @@ The selected Project's **Configure → Repositories** table is the only reposito
 surface. A configurator publishes canonical allowed remotes and base branches;
 each user maps a row to a checkout with **Connect**. The picker normalizes the
 working-tree root, validates its `origin` against that row, fetches remote refs,
-and saves only the device path. **Connect remote** appears only at Bunker scope
-and records a service relationship, never a database connection string. A
-separate Migration section lists legacy companion-backed projects and offers
+and saves only the device path. Service connectivity lives only at Bunker scope
+through Share Bunker and Members; nothing accepts a database connection string.
+A separate Migration section lists legacy companion-backed projects and offers
 **Import copy**. That operation is read-only with respect to both source and
 companion repositories and records its import digest.
 
@@ -1444,10 +1486,12 @@ the revision loaded by the editor and replaces the complete draft atomically.
 GitHub, GitLab, and Jira are prefilled templates; custom integrations use the
 same matrix. Project creation copies and pins the current Bunker field and
 integration documents, so later default changes affect only later Projects.
-Local Bunkers allow device-local publication. Remote replicas are read-only in
-the local command handler even when a cached capability says `config:write`;
-only an authenticated remote service transaction may authorize and distribute
-shared configuration.
+Local Bunkers publish on the device. On a shared Bunker the editor is writable
+only for a member whose live capability includes `config:write`, and each
+publish (fields, integrations, repository allowlists, new Projects with their
+pinned documents) is sent to the service first and written locally only after
+the service accepts it; members without that capability see a read-only editor
+that names the owner as the next action.
 
 On Linux, the shell respects an explicitly selected GSettings backend. When no
 backend was selected and the advertised session D-Bus socket is absent, as in
@@ -1467,6 +1511,49 @@ guidance, but teams own their service, database, credentials, access rules, and
 remote deployment.
 Browser mode remains an explicit accessibility, diagnostics, server, and
 air-gapped fallback rather than a lesser command path.
+
+### 3.20 Reference service
+
+`tb serve` is TicketBunker's own answer to "where does shared data live" for a
+team without operators. It is one stdlib-only process that owns one SQLite
+file and implements the complete `/api/v1` contract in
+`docs/remote-service-contract.md`. Nobody installs or administers a database
+engine; backups are a copy of that file. The data store is
+`ticketbunker/service/storage.py`, the transport is
+`ticketbunker/service/server.py`, and neither is reachable through any client
+path except the versioned HTTP contract.
+
+The tiers are chosen by what a team already has:
+
+- **Solo.** A local Bunker and no service.
+- **Small team, zero operations.** `tb serve` on any machine the team controls
+  or on a platform that hands out HTTPS and a persistent disk. The service binds
+  to localhost by default; a deployment passes `--host 0.0.0.0` behind its TLS
+  proxy or `--certfile`/`--keyfile` to terminate TLS itself. Clients still
+  refuse plain HTTP anywhere except localhost.
+- **Larger organisation.** The same contract on the team's own infrastructure,
+  engine, and identity provider; the desktop application does not change.
+
+First start prints a one-time **owner setup token** and the address to paste
+into Share Bunker. Claiming the token creates the first user and their
+credential; `--reset-setup-token` prints a new one for an operator with disk
+access. Publishing a Bunker makes the publisher its owner. Invitations are
+issued only by members holding `members:invite`, are single use, expire, can
+be revoked, and carry the role they grant. Redeeming one on this service
+creates the member and issues their credential (`invitation-credentials`), so
+a small team needs no separate accounts system; a larger deployment may
+require sign-in before redemption instead. Bearer and invitation tokens are
+stored only as SHA-256 digests. Snapshots and changes are scoped to active
+members, and a non-member learns nothing about whether a Bunker exists.
+
+Typed changes are applied all or nothing with per-record revision checks and
+idempotency keys: a replayed key returns the earlier result, a stale expected
+revision returns `409` with the stable code the client renders as a next
+action, and a duplicate project key is reported as such. Repository allowlists
+use the content-derived revision that both client and service compute from the
+same shared fields, so neither side keeps a separate counter. Join requests,
+membership management, deploy recipes, and ticket/report synchronisation are
+the next slices on this boundary.
 
 ## 4. Ordering & atomicity principles
 
@@ -1517,6 +1604,10 @@ action registry and cannot invent parallel behavior:
 - A local-only Bunker is accessible to its device user. A remote Bunker service
   authenticates users, enrolls replicas, and authorizes every query/mutation by
   Bunker capability before returning shared data.
+- Roles are owner and member. Owners alone hold `bunker:share`,
+  `members:invite`, `members:manage`, and `config:write`; the service enforces
+  those capabilities on every request, and the application only mirrors them
+  when deciding what to offer.
 - Source Git access and Bunker membership are independent checks. Cloning a
   repository, knowing its remote URL, or possessing a stale invitation grants
   no ticket, report, configuration, or membership access.

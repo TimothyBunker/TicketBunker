@@ -69,20 +69,96 @@ describe("Bunker and Project boundaries", () => {
     });
   });
 
-  it("keeps remote database controls at Bunker level", () => {
+  it("keeps sharing controls at Bunker level", () => {
     const { rerender } = render(
       <BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
 
-    expect(screen.queryByRole("button", { name: "Connect remote" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Share Bunker" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Members" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Attach repository" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add subproject" })).toBeInTheDocument();
 
     rerender(
       <BunkerHub state={state} selection={{ bunkerId: bunker.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
-    expect(screen.getByRole("button", { name: "Connect remote" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share Bunker" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Members" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Attach repository" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share Bunker" }));
+    expect(screen.getByLabelText("Server address")).toBeInTheDocument();
+    expect(screen.getByLabelText("Setup token")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish and share" })).toBeInTheDocument();
+  });
+
+  it("gives a shared Bunker's owner Members with invitation links", async () => {
+    const shared = {
+      ...bunker,
+      mode: "remote" as const,
+      remote: { server_url: "https://tickets.example.test", remote_bunker_id: "engineering", state: "ready" },
+      sharing: { state: "ready", role: "owner", is_owner: true, can_share: false, can_invite: true, can_manage_members: true, server: "https://tickets.example.test" },
+    };
+    const members = [{ id: "tim", display_name: "Tim Bunker", email: "tim@example.test", role: "owner", state: "active" }];
+    const invitation = { id: "inv-1", role: "member", state: "pending", created_at: "", created_by: "Tim Bunker", expires_at: "2026-09-11T00:00:00+00:00" };
+    transport.command.mockImplementation((action: string) => {
+      if (action === "application.bunker.members") return Promise.resolve({ members, sharing: shared.sharing });
+      if (action === "application.bunker.invitations") return Promise.resolve({ invitations: [] });
+      if (action === "application.bunker.invitation.create") {
+        return Promise.resolve({
+          invitation: { ...invitation, link: "ticketbunker://join?server=https%3A%2F%2Ftickets.example.test&bunker=engineering&invite=one-use" },
+          invitations: [invitation],
+        });
+      }
+      throw new Error(`Unexpected command ${action}`);
+    });
+
+    render(
+      <BunkerHub state={{ ...state, bunkers: [shared] }} selection={{ bunkerId: shared.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Share Bunker" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Shared on tickets.example.test/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    expect(await screen.findByText("Tim Bunker")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Create invitation" }));
+    expect(await screen.findByText(/ticketbunker:\/\/join\?/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+    expect(transport.command).toHaveBeenCalledWith("application.bunker.invitation.create", { bunker_id: shared.id, role: "member" });
+  });
+
+  it("shows members without invitation controls to a member", async () => {
+    const replica = {
+      ...bunker,
+      mode: "remote" as const,
+      remote: { server_url: "https://tickets.example.test", remote_bunker_id: "engineering", state: "ready" },
+      sharing: { state: "ready", role: "member", is_owner: false, can_share: false, can_invite: false, can_manage_members: false, server: "https://tickets.example.test" },
+    };
+    transport.command.mockImplementation((action: string) => {
+      if (action === "application.bunker.members") {
+        return Promise.resolve({ members: [{ id: "tim", display_name: "Tim Bunker", email: "", role: "owner", state: "active" }], sharing: replica.sharing });
+      }
+      throw new Error(`Unexpected command ${action}`);
+    });
+
+    render(
+      <BunkerHub state={{ ...state, bunkers: [replica] }} selection={{ bunkerId: replica.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    expect(await screen.findByText("Tim Bunker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create invitation" })).not.toBeInTheDocument();
+    expect(transport.command).not.toHaveBeenCalledWith("application.bunker.invitations", expect.anything());
+  });
+
+  it("joins from one invitation link without raw credentials", () => {
+    render(
+      <BunkerHub state={state} selection={null} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+    expect(screen.getByLabelText("Invitation link")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Authorization/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Credential reference/)).not.toBeInTheDocument();
   });
 
   it("lists Projects at Bunker scope and tickets only inside a Project", async () => {

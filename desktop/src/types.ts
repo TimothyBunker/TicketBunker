@@ -31,6 +31,16 @@ export type Bunker = {
     state: string;
     last_synced_at?: string;
   } | null;
+  membership?: { id: string; display_name: string; email?: string; role: string; state?: string } | null;
+  sharing?: {
+    state: string;
+    role: string;
+    is_owner: boolean;
+    can_share: boolean;
+    can_invite: boolean;
+    can_manage_members: boolean;
+    server: string;
+  };
   projects: Project[];
   repositories: Repository[];
   project_count: number;
@@ -175,4 +185,21 @@ export type ConfigurationState = {
       content: { providers: Record<string, Integration> };
     };
   };
+};
+
+export type Member = {
+  id: string;
+  display_name: string;
+  email: string;
+  role: string;
+  state: string;
+};
+
+export type Invitation = {
+  id: string;
+  role: string;
+  state: string;
+  created_at: string;
+  created_by: string;
+  expires_at: string;
 };

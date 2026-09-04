@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ConfigurationPanel from "./ConfigurationPanel";
 import { command } from "./transport";
-import type { AppState, Bunker, Project, TicketPage, TicketReference } from "./types";
+import type { AppState, Bunker, Invitation, Member, Project, TicketPage, TicketReference } from "./types";
 import { relativeTime } from "./report";
 
 type Selection = { bunkerId: string; projectId?: string };
@@ -38,10 +38,102 @@ function remoteLabel(bunker: Bunker) {
   if (!bunker.remote) return "Local";
   try {
     const host = new URL(bunker.remote.server_url).host;
-    return bunker.remote.state === "ready" ? host : `${host} needs attention`;
+    return bunker.remote.state === "ready" ? `Shared on ${host}` : `${host} needs attention`;
   } catch {
-    return "Remote needs attention";
+    return "Shared service needs attention";
   }
+}
+
+function roleLabel(role: string) {
+  return role ? role[0].toUpperCase() + role.slice(1) : "";
+}
+
+function MembersPanel({
+  bunker,
+  onClose,
+  notify,
+}: {
+  bunker: Bunker;
+  onClose: () => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [members, setMembers] = useState<Member[] | null>(null);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [canInvite, setCanInvite] = useState(Boolean(bunker.sharing?.can_invite));
+  const [role, setRole] = useState("member");
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setError("");
+    command<{ members: Member[]; sharing?: Bunker["sharing"] }>("application.bunker.members", { bunker_id: bunker.id })
+      .then((value) => {
+        if (!active) return;
+        setMembers(value.members);
+        const invite = Boolean(value.sharing?.can_invite);
+        setCanInvite(invite);
+        if (invite) {
+          return command<{ invitations: Invitation[] }>("application.bunker.invitations", { bunker_id: bunker.id })
+            .then((listed) => active && setInvitations(listed.invitations));
+        }
+        return undefined;
+      })
+      .catch((reason) => active && setError(String(reason)));
+    return () => { active = false; };
+  }, [bunker.id]);
+
+  async function invite() {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{ invitation: { link: string }; invitations: Invitation[] }>("application.bunker.invitation.create", { bunker_id: bunker.id, role });
+      setLink(value.invitation.link);
+      setInvitations(value.invitations);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      notify("Invitation link copied");
+    } catch {
+      notify("Copy was unavailable; select the link above and copy it.", true);
+    }
+  }
+  async function revoke(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{ invitations: Invitation[] }>("application.bunker.invitation.revoke", { bunker_id: bunker.id, invitation_id: id });
+      setInvitations(value.invitations);
+      notify("Invitation revoked");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const pending = invitations.filter((value) => value.state === "pending");
+  return (
+    <aside className="action-drawer members-drawer" aria-label="Members">
+      <header><h2>Members</h2><button className="icon-control" onClick={onClose} aria-label="Close">←</button></header>
+      <p className="drawer-copy">{remoteLabel(bunker)}. {canInvite ? "Only Bunker owners can invite members or change shared setup." : "Ask a Bunker owner to invite people or change shared setup."}</p>
+      {error && <div className="inline-error">{error}</div>}
+      {!members && !error && <div className="ticket-loading">Loading members</div>}
+      {members && <ul className="members-list">{members.map((member) => <li key={member.id}><span><strong>{member.display_name}</strong>{member.email && <small>{member.email}</small>}</span><span className="role-chip">{roleLabel(member.role)}</span></li>)}</ul>}
+      {canInvite && <section className="invite-section">
+        <h3>Invite</h3>
+        <div className="invite-controls"><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}><option value="member">Member</option><option value="owner">Owner</option></select></label><button className="primary" disabled={busy} onClick={invite}>Create invitation</button></div>
+        {link && <div className="invitation-link"><p>Send this link. It works once and expires in seven days.</p><code>{link}</code><button onClick={copyLink}>Copy link</button></div>}
+        {pending.length > 0 && <ul className="invitations-list">{pending.map((value) => <li key={value.id}><span><strong>{roleLabel(value.role)} invitation</strong><small>Expires {relativeTime(value.expires_at) === "just now" ? "soon" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(Date.parse(value.expires_at))}</small></span><button className="danger-control" disabled={busy} onClick={() => revoke(value.id)}>Revoke</button></li>)}</ul>}
+      </section>}
+    </aside>
+  );
 }
 
 function count(value: number, singular: string, plural: string) {
@@ -213,7 +305,7 @@ function TicketCatalog({
   );
 }
 
-type ActionMode = "" | "create" | "join" | "project" | "remote" | "config";
+type ActionMode = "" | "create" | "join" | "project" | "share" | "members" | "config";
 
 function ActionPanel({
   mode,
@@ -234,7 +326,7 @@ function ActionPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!mode || mode === "config") return null;
+  if (!mode || mode === "config" || mode === "members") return null;
 
   async function submit(action: string, payload: Record<string, unknown>, success: string) {
     setBusy(true);
@@ -264,11 +356,11 @@ function ActionPanel({
         { ...values, bunker_id: bunker.id, parent_id: project?.id || values.parent_id || "" },
         `Added ${values.name}`,
       );
-    } else if (mode === "remote" && bunker) {
+    } else if (mode === "share" && bunker) {
       await submit(
-        "application.bunker.remote.configure",
+        "application.bunker.share",
         { ...values, bunker_id: bunker.id },
-        "Remote relationship saved",
+        `${bunker.name} is shared. Invite people from Members.`,
       );
     }
   }
@@ -307,10 +399,12 @@ function ActionForm({
     create: "Create Bunker",
     join: "Join Bunker",
     project: project ? "Add subproject" : "Add project",
-    remote: "Connect remote service",
+    share: "Share Bunker",
+    members: "Members",
     config: "Configuration",
     "": "",
   }[mode];
+  const submitLabel = { create: "Create Bunker", join: "Join Bunker", project: title, share: "Publish and share", members: "", config: "", "": "" }[mode];
   return (
     <aside className="action-drawer" aria-label={title}>
       <header><h2>{title}</h2><button className="icon-control" onClick={onClose} aria-label="Close">←</button></header>
@@ -321,9 +415,14 @@ function ActionForm({
           <label>First project name<input name="project_name" placeholder="Entity Component System" required /></label>
         </>}
         {mode === "join" && <>
-          <label>Invitation<input name="invitation" type="password" autoFocus required /></label>
-          <label>Authorization, if requested<input name="authorization" type="password" autoComplete="off" /></label>
-          <label>Credential reference<input name="credential_reference" placeholder="System credential store reference" /></label>
+          <p className="drawer-copy">Paste the link a Bunker owner sent you. TicketBunker signs this computer in to their server and installs a copy of the Bunker with its projects and setup already configured.</p>
+          <label>Invitation link<input name="invitation" type="password" placeholder="ticketbunker://join?…" autoComplete="off" autoFocus required /></label>
+        </>}
+        {mode === "share" && <>
+          <p className="drawer-copy">Publish this Bunker to a TicketBunker service you run. You become its owner; members join with invitation links. Run <code>tb serve</code> on a machine you control to get a server address and a one-time setup token.</p>
+          <label>Server address<input name="server_url" type="url" placeholder="https://tickets.example.com" autoFocus required /></label>
+          <label>Setup token<input name="setup_token" type="password" autoComplete="off" placeholder="Printed once by tb serve" /></label>
+          <small className="field-note">Leave the token empty if this computer already joined a Bunker on that server.</small>
         </>}
         {mode === "project" && <>
           {project
@@ -333,14 +432,8 @@ function ActionForm({
           <label>Project name<input name="name" required /></label>
           <label>Description<textarea name="description" rows={3} /></label>
         </>}
-        {mode === "remote" && <>
-          <p className="drawer-copy">TicketBunker connects to a service API, not directly to its database.</p>
-          <label>Server<input name="server_url" type="url" defaultValue={bunker?.remote?.server_url || ""} placeholder="https://tickets.example.com" required /></label>
-          <label>Remote Bunker ID<input name="remote_bunker_id" defaultValue={bunker?.remote?.remote_bunker_id || ""} required /></label>
-          <label>Credential reference<input name="credential_reference" /></label>
-        </>}
         {error && <div className="inline-error">{error}</div>}
-        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Working…" : title}</button></div>
+        <div className="form-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}>{busy ? "Working…" : submitLabel}</button></div>
       </form>
     </aside>
   );
@@ -424,7 +517,7 @@ export default function BunkerHub({
             <div className="bunker-overview">
               {state.bunkers.map((value) => (
                 <button key={value.id} onClick={() => onSelection({ bunkerId: value.id })}>
-                  <span><strong>{value.name}</strong><small><i className={value.remote?.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(value)}</small></span>
+                  <span><strong>{value.name}</strong><small><i className={!value.remote || value.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(value)}{value.remote && value.sharing?.role ? ` · ${roleLabel(value.sharing.role)}` : ""}</small></span>
                   <span className="bunker-counts">{count(value.project_count, "project", "projects")} · {count(value.repository_count, "repository", "repositories")} · {count(value.ticket_count, "ticket", "tickets")}</span>
                 </button>
               ))}
@@ -438,16 +531,16 @@ export default function BunkerHub({
             <div>
               <button className="breadcrumb" onClick={() => onSelection(null)}>Bunkers</button>
               <h1>{bunker.name}</h1>
-              <p className="bunker-meta"><i className={bunker.remote?.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
+              <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
             </div>
             <div className="header-actions">
               <button onClick={() => setAction("config")}>Configure</button>
-              <button onClick={() => setAction("remote")}>{bunker.remote ? "Remote" : "Connect remote"}</button>
+              {bunker.remote ? <button onClick={() => setAction("members")}>Members</button> : <button onClick={() => setAction("share")}>Share Bunker</button>}
               <button className="primary" onClick={() => setAction("project")}>Add project</button>
             </div>
           </header>
           <ProjectCatalog bunker={bunker} projects={bunker.projects} title="Projects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />
-          <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}</p>}</details>
+          <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}{bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}</p>}</details>
         </>}
 
         {bunker && project && <>
@@ -470,6 +563,7 @@ export default function BunkerHub({
         </>}
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
+      {action === "members" && bunker && <MembersPanel bunker={bunker} onClose={() => setAction("")} notify={notify} />}
       {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} onClose={() => setAction("")} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} notify={notify} />}
     </div>
   );
