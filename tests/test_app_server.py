@@ -117,3 +117,58 @@ class StandaloneBrowserServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrowserPresenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.server = app_server.serve(self.root, 0, launch_id="presence")
+
+    def tearDown(self) -> None:
+        self.server.server_close()
+        self.temporary.cleanup()
+
+    def test_hidden_tab_throttling_does_not_stop_the_server(self) -> None:
+        start = self.server._started_at
+        self.server.note_session("tab-one-abcdefgh")
+
+        # A hidden tab may heartbeat only once a minute; the session must survive
+        # well beyond that, and the old thirty-second window must be gone.
+        self.assertEqual(self.server.idle_reason(start + 45), "")
+        self.assertEqual(self.server.idle_reason(start + 100), "")
+        self.assertEqual(self.server.idle_reason(start + 170), "")
+        expiry = start + app_server.SESSION_TTL_SECONDS + 5
+        self.assertEqual(self.server.idle_reason(expiry), "")  # grace after expiry
+        self.assertEqual(
+            self.server.idle_reason(expiry + app_server.CLOSE_GRACE_SECONDS),
+            "no browser tab reported in for 3 minutes",
+        )
+
+    def test_closing_the_last_tab_stops_after_a_short_grace(self) -> None:
+        start = self.server._started_at
+        self.server.note_session("tab-one-abcdefgh")
+        self.server.note_session("tab-one-abcdefgh", closed=True)
+
+        self.assertEqual(self.server.idle_reason(start + 1), "")
+        self.assertEqual(
+            self.server.idle_reason(start + app_server.CLOSE_GRACE_SECONDS + 1),
+            "the last browser tab closed",
+        )
+
+    def test_a_returning_tab_revives_presence(self) -> None:
+        start = self.server._started_at
+        self.server.note_session("tab-one-abcdefgh")
+        self.server._sessions["tab-one-abcdefgh"] = start - app_server.SESSION_TTL_SECONDS
+        self.assertEqual(self.server.idle_reason(start + 1), "")  # inside the grace window
+        self.server.note_session("tab-one-abcdefgh")
+        self.assertEqual(self.server.idle_reason(start + 60), "")
+
+    def test_no_tab_at_all_stops_after_the_first_tab_timeout(self) -> None:
+        start = self.server._started_at
+        self.assertEqual(self.server.idle_reason(start + 30), "")
+        self.assertEqual(
+            self.server.idle_reason(start + app_server.FIRST_TAB_TIMEOUT_SECONDS),
+            "no browser tab opened within 60 seconds",
+        )
+

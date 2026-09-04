@@ -26,19 +26,42 @@ const browserToken = () => {
 const browserSession = globalThis.crypto?.randomUUID?.().replaceAll("-", "") ||
   `browser${Date.now()}${Math.random().toString(16).slice(2)}`;
 
+export const OFFLINE_MESSAGE = "TicketBunker's local service is not running. Start it again, then reload this page.";
+
+let offline = false;
+
+function setOffline(value: boolean) {
+  if (offline === value) return;
+  offline = value;
+  window.dispatchEvent(new CustomEvent("ticketbunker-service", { detail: { offline: value } }));
+}
+
+function isNetworkFailure(reason: unknown): boolean {
+  return reason instanceof TypeError;
+}
+
 async function session(closed = false) {
   if (isNative() || !browserToken()) return;
-  await fetch("/api/session", {
-    method: "POST",
-    keepalive: closed,
-    headers: { "Content-Type": "application/json", "X-TicketBunker-Token": browserToken() },
-    body: JSON.stringify({ session: browserSession, closed }),
-  }).catch(() => undefined);
+  try {
+    await fetch("/api/session", {
+      method: "POST",
+      keepalive: closed,
+      headers: { "Content-Type": "application/json", "X-TicketBunker-Token": browserToken() },
+      body: JSON.stringify({ session: browserSession, closed }),
+    });
+    if (!closed) setOffline(false);
+  } catch (reason) {
+    if (!closed && isNetworkFailure(reason)) setOffline(true);
+  }
 }
 
 if (!isNative() && browserToken()) {
   window.setInterval(() => session(), 10_000);
   window.addEventListener("pagehide", () => session(true));
+  // Browsers throttle timers in hidden tabs; announce presence as soon as the
+  // page is visible or focused again instead of waiting for the next tick.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) session(); });
+  window.addEventListener("focus", () => session());
 }
 
 export async function bootstrap(): Promise<AppState> {
@@ -46,7 +69,16 @@ export async function bootstrap(): Promise<AppState> {
     return window.__TAURI__.core.invoke<AppState>("desktop_state");
   }
   await session();
-  const response = await fetch("/api/bootstrap", { credentials: "same-origin" });
+  let response: Response;
+  try {
+    response = await fetch("/api/bootstrap", { credentials: "same-origin" });
+  } catch (reason) {
+    if (isNetworkFailure(reason)) {
+      setOffline(true);
+      throw new Error(OFFLINE_MESSAGE);
+    }
+    throw reason;
+  }
   const value = (await response.json()) as AppState & { ok?: boolean; message?: string };
   if (!response.ok || value.ok === false) throw new Error(value.message || "TicketBunker could not open.");
   if (value.launch) value.launch.route = `${window.location.pathname}${window.location.search}`;
@@ -65,15 +97,25 @@ export async function command<T>(
       projectRoot: projectRoot || null,
     });
   }
-  const response = await fetch("/api/action", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      "X-TicketBunker-Token": browserToken(),
-    },
-    body: JSON.stringify({ action, payload, project_root: projectRoot || null }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/action", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-TicketBunker-Token": browserToken(),
+      },
+      body: JSON.stringify({ action, payload, project_root: projectRoot || null }),
+    });
+  } catch (reason) {
+    if (isNetworkFailure(reason)) {
+      setOffline(true);
+      throw new Error(OFFLINE_MESSAGE);
+    }
+    throw reason;
+  }
+  setOffline(false);
   const value = (await response.json()) as T & { ok?: boolean; message?: string };
   if (!response.ok || value.ok === false) {
     throw new Error(value.message || "TicketBunker could not complete that action.");

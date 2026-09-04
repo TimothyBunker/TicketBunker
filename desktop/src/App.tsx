@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BunkerHub from "./BunkerHub";
 import TicketWorkspace from "./TicketWorkspace";
-import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal } from "./transport";
+import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal, OFFLINE_MESSAGE } from "./transport";
 import type { AppState, SourceDraft, TicketReference } from "./types";
 
 type Notice = { message: string; error: boolean } | null;
@@ -325,11 +325,18 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [directEditor, setDirectEditor] = useState<{ root: string; draft: SourceDraft } | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [offline, setOffline] = useState(false);
   const handledLaunch = useRef("");
 
   const notify = useCallback((message: string, error = false) => {
     setNotice({ message, error });
     window.setTimeout(() => setNotice(null), 5000);
+  }, []);
+
+  useEffect(() => {
+    const listener = (event: Event) => setOffline(Boolean((event as CustomEvent<{ offline: boolean }>).detail?.offline));
+    window.addEventListener("ticketbunker-service", listener);
+    return () => window.removeEventListener("ticketbunker-service", listener);
   }, []);
 
   const openRepository = useCallback((path: string) => {
@@ -401,6 +408,7 @@ export default function App() {
     <>
       {directEditor ? <DirectEditor projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} /> : <BunkerHub state={state} selection={selection} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} />}
       {settings && <Settings state={state} onState={setState} onClose={() => setSettings(false)} initialTab={!state.agent.decided ? "agent" : "local"} />}
+      {offline && <div className="service-banner" role="alert"><span>{OFFLINE_MESSAGE}</span><button onClick={() => window.location.reload()}>Reload</button></div>}
       {notice && <div className={notice.error ? "toast error" : "toast"} role="status">{notice.message}</div>}
     </>
   );

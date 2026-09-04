@@ -290,6 +290,13 @@ new Bunkers.
   action after an ambiguous transport break. Browser actions cross a per-launch
   CSRF-protected `/api/action` transport into the same allowlist and handlers.
   The legacy Python renderer remains compatibility code only.
+- Browser-fallback presence tolerates hidden-tab timer throttling (three-minute
+  session life, re-announce on visibility/focus), the worker prints why it
+  stopped, and a stopped service shows one banner with the fix instead of
+  silent `ERR_CONNECTION_REFUSED` failures. `tb view` still requires a legacy
+  `.tb/` or locator; a repository attached only through a Bunker must be opened
+  with `_app-browser-worker --repo PATH` until `tb view` learns Bunker
+  attachments.
 - `tb view` prefers that app when installed and returns immediately;
   `tb view --browser` explicitly selects the detached shared-UI browser fallback.
   If no app is installed, browser mode remains the automatic fallback. Its

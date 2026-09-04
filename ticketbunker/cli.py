@@ -1934,6 +1934,11 @@ def cmd_application_browser_worker(args: argparse.Namespace) -> int:
         pass
     finally:
         server.server_close()
+    if server.stop_reason:
+        print(
+            f"TicketBunker stopped: {server.stop_reason}. Run the command again to reopen it.",
+            flush=True,
+        )
     return 0
 
 

@@ -25,6 +25,12 @@ from . import __version__, app_worker
 ASSET_ROOT = Path(__file__).resolve().parent / "app_assets"
 MAX_BODY_BYTES = app_worker.MAX_REQUEST_BYTES
 SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
+# The page heartbeats every ten seconds while visible. Browsers throttle timers
+# in hidden or covered tabs to as little as once a minute, so a session stays
+# alive well past that before it is treated as gone.
+SESSION_TTL_SECONDS = 180
+CLOSE_GRACE_SECONDS = 3
+FIRST_TAB_TIMEOUT_SECONDS = 60
 
 
 class AppServer(ThreadingHTTPServer):
@@ -39,8 +45,10 @@ class AppServer(ThreadingHTTPServer):
         self._started_at = time.monotonic()
         self._saw_session = False
         self._empty_since: float | None = None
+        self._empty_reason = ""
         self._active_requests = 0
         self._monitor_stop = threading.Event()
+        self.stop_reason = ""
         super().__init__(address, AppHandler)
 
     def process_request_thread(self, request: object, client_address: object) -> None:
@@ -63,30 +71,46 @@ class AppServer(ThreadingHTTPServer):
                 self._saw_session = True
             if self._sessions:
                 self._empty_since = None
+                self._empty_reason = ""
             elif self._saw_session and self._empty_since is None:
                 self._empty_since = time.monotonic()
+                self._empty_reason = "the last browser tab closed"
+
+    def idle_reason(self, now: float | None = None) -> str:
+        """Why the server should stop now, or an empty string to keep serving."""
+        moment = time.monotonic() if now is None else now
+        with self._presence_lock:
+            expired = [
+                key for key, seen in self._sessions.items()
+                if moment - seen >= SESSION_TTL_SECONDS
+            ]
+            for key in expired:
+                del self._sessions[key]
+            if self._saw_session and not self._sessions and self._empty_since is None:
+                self._empty_since = moment
+                self._empty_reason = (
+                    f"no browser tab reported in for {SESSION_TTL_SECONDS // 60} minutes"
+                    if expired
+                    else "the last browser tab closed"
+                )
+            if self._active_requests:
+                return ""
+            if (
+                self._saw_session
+                and not self._sessions
+                and self._empty_since is not None
+                and moment - self._empty_since >= CLOSE_GRACE_SECONDS
+            ):
+                return self._empty_reason or "the last browser tab closed"
+            if not self._saw_session and moment - self._started_at >= FIRST_TAB_TIMEOUT_SECONDS:
+                return f"no browser tab opened within {FIRST_TAB_TIMEOUT_SECONDS} seconds"
+        return ""
 
     def _monitor_idle(self) -> None:
         while not self._monitor_stop.wait(1):
-            now = time.monotonic()
-            with self._presence_lock:
-                self._sessions = {
-                    key: seen for key, seen in self._sessions.items() if now - seen < 30
-                }
-                if self._saw_session and not self._sessions and self._empty_since is None:
-                    self._empty_since = now
-                stop = (
-                    self._saw_session
-                    and not self._sessions
-                    and self._empty_since is not None
-                    and now - self._empty_since >= 3
-                    and self._active_requests == 0
-                ) or (
-                    not self._saw_session
-                    and now - self._started_at >= 60
-                    and self._active_requests == 0
-                )
-            if stop:
+            reason = self.idle_reason()
+            if reason:
+                self.stop_reason = reason
                 self.shutdown()
                 return
 

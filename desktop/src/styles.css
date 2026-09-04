@@ -345,6 +345,8 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .invitation-link button { justify-self: start; }
 .field-note { color: var(--muted); font-size: 10px; font-weight: 500; }
 .drawer-copy code { font-size: .9em; }
+.service-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 40; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 16px; color: #5a2a2a; background: #fbe9e7; border-bottom: 1px solid #f0c9c4; font-size: 12px; font-weight: 640; }
+.service-banner button { min-height: 28px; padding: 0 10px; font-size: 11px; }
 .bunker-meta { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; color: var(--muted); font-size: 11px; }
 .breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .breadcrumbs .breadcrumb + .breadcrumb::before { content: "\203A"; margin-right: 4px; color: #a3adbb; }

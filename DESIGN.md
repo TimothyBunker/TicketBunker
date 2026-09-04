@@ -596,7 +596,12 @@ loopback browser fallback. `--browser` explicitly selects that fallback,
 `--foreground` retains its attached diagnostic mode,
 and `--no-open` starts only its local service. Per-page presence and close
 signals keep the browser fallback alive across navigation and stop it shortly
-after the final tab closes; stale sessions expire.
+after the final tab closes. Presence tolerates browser timer throttling: a
+hidden or covered tab may heartbeat only once a minute, so a session lives
+three minutes without one, a tab re-announces itself the moment it is visible
+or focused again, and the worker prints why it stopped. If the service is gone
+anyway, the page shows one banner naming the fix instead of silent request
+failures.
 
 The viewer checks shared truth at a human-scale cadence and pauses Git-backed
 polling while a text entry has focus or the page is hidden. Direct user actions
