@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { chooseGitDirectory, command } from "./transport";
-import type { Bunker, ConfigurationState, Integration, Project, Repository, TicketField } from "./types";
+import type { Bunker, ConfigurationState, Integration, Project, Repository, TicketField, TrackerSource } from "./types";
 
 const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", "user", "enum", "tags", "url"];
+const EMPTY_TRACKER: TrackerSource = { provider: "github", kind: "project", owner: "", number: 0, repository: "", include_comments: true };
+export type ConfigurationTab = "repositories" | "tracker" | "fields" | "integrations";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -14,18 +16,23 @@ export default function ConfigurationPanel({
   onClose,
   onBunker,
   notify,
+  trackers,
+  initialTab,
 }: {
   bunker: Bunker;
   project?: Project;
   onClose: () => void;
   onBunker: (bunker: Bunker) => void;
   notify: (message: string, error?: boolean) => void;
+  trackers?: Record<string, boolean>;
+  initialTab?: ConfigurationTab;
 }) {
   const [state, setState] = useState<ConfigurationState | null>(null);
   const [fields, setFields] = useState<TicketField[]>([]);
   const [providers, setProviders] = useState<Record<string, Integration>>({});
   const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [tab, setTab] = useState<"repositories" | "fields" | "integrations">(project ? "repositories" : "fields");
+  const [tracker, setTracker] = useState<TrackerSource>(EMPTY_TRACKER);
+  const [tab, setTab] = useState<ConfigurationTab>(initialTab || (project ? "repositories" : "fields"));
   const [provider, setProvider] = useState("github");
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState("");
@@ -37,13 +44,14 @@ export default function ConfigurationPanel({
     const next = clone(value.documents.integrations?.content.providers || {});
     setProviders(next);
     setRepositories(clone(value.repositories.items || []));
+    setTracker(clone(value.documents["tracker-source"]?.content || EMPTY_TRACKER));
     setProvider((current) => current in next ? current : Object.keys(next)[0] || "");
   }
 
   useEffect(() => {
     let active = true;
     setError("");
-    setTab(project ? "repositories" : "fields");
+    setTab(initialTab || (project ? "repositories" : "fields"));
     command<ConfigurationState>("application.bunker.configuration.get", {
       bunker_id: bunker.id,
       project_id: project?.id || "",
@@ -73,6 +81,29 @@ export default function ConfigurationPanel({
       });
       applyConfiguration(value);
       notify(kind === "ticket-fields" ? "Ticket fields published" : "Integration mappings published");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishTracker() {
+    if (!state || !project) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<ConfigurationState>("application.bunker.configuration.replace", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+        kind: "tracker-source",
+        expected_revision: state.documents["tracker-source"]?.revision || "",
+        content: tracker,
+      });
+      applyConfiguration(value);
+      const refreshed = await command<{ bunker: Bunker }>("application.bunker.get", { bunker_id: bunker.id });
+      onBunker(refreshed.bunker);
+      notify("Tracker saved. Use Sync tickets on the Project page.");
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -203,6 +234,7 @@ export default function ConfigurationPanel({
       </header>
       <nav>
         {project && <button className={tab === "repositories" ? "selected" : ""} onClick={() => setTab("repositories")}>Repositories</button>}
+        {project && <button className={tab === "tracker" ? "selected" : ""} onClick={() => setTab("tracker")}>Tracker</button>}
         <button className={tab === "fields" ? "selected" : ""} onClick={() => setTab("fields")}>Ticket fields</button>
         <button className={tab === "integrations" ? "selected" : ""} onClick={() => setTab("integrations")}>Integrations</button>
       </nav>
@@ -232,6 +264,23 @@ export default function ConfigurationPanel({
           {repositories.length === 0 && <div className="repository-empty">No repositories allowed</div>}
         </div>
         <button disabled={!canWrite} onClick={() => setRepositories((values) => [...values, { id: "", project_id: project.id, name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>
+      </section>}
+
+      {state && project && tab === "tracker" && <section className="config-surface">
+        <div className="config-heading">
+          <div><h3>Tracker</h3><p>The agile board this Project mirrors. Sync tickets pulls from it.</p></div>
+          <button className="primary" disabled={!canWrite || busy} onClick={publishTracker}>{busy ? "Saving…" : "Save tracker"}</button>
+        </div>
+        <div className="tracker-form">
+          <label>Provider<select aria-label="Tracker provider" value={tracker.provider} disabled={!canWrite} onChange={(event) => setTracker({ ...tracker, provider: event.target.value })}><option value="github">GitHub</option><option value="gitlab" disabled>GitLab (soon)</option><option value="jira" disabled>Jira (soon)</option></select></label>
+          <label>Source<select aria-label="Tracker source" value={tracker.kind} disabled={!canWrite} onChange={(event) => setTracker({ ...tracker, kind: event.target.value })}><option value="project">Project board</option><option value="issues">Repository issues</option></select></label>
+          <label>Owner<input value={tracker.owner} disabled={!canWrite} placeholder="user or organization" onChange={(event) => setTracker({ ...tracker, owner: event.target.value })} /></label>
+          {tracker.kind === "project"
+            ? <label>Project number<input type="number" min={1} value={tracker.number || ""} disabled={!canWrite} placeholder="8" onChange={(event) => setTracker({ ...tracker, number: Number(event.target.value) || 0 })} /></label>
+            : <label>Repository<input value={tracker.repository} disabled={!canWrite} placeholder="repository name" onChange={(event) => setTracker({ ...tracker, repository: event.target.value })} /></label>}
+          <label className="check"><input type="checkbox" checked={tracker.include_comments} disabled={!canWrite} onChange={(event) => setTracker({ ...tracker, include_comments: event.target.checked })} />Include comments</label>
+        </div>
+        <p className="tracker-token">{trackers?.[tracker.provider] ? "A GitHub token is connected on this computer." : "No GitHub token on this computer yet. Add one in Settings → Trackers before syncing."}</p>
       </section>}
 
       {state && tab === "fields" && <section className="config-surface">

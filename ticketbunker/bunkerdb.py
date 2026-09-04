@@ -594,6 +594,7 @@ def _project_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def _project_tree(
     rows: Iterable[Mapping[str, Any]],
     ticket_counts: Mapping[str, int] | None = None,
+    trackers: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Nest Project rows and give each node its ticket count.
 
@@ -601,11 +602,13 @@ def _project_tree(
     ticket catalog shows when that Project is selected (``_project_scope``).
     """
     counts = dict(ticket_counts or {})
+    sources = dict(trackers or {})
     nodes = {
         str(row["id"]): {
             **dict(row),
             "children": [],
             "ticket_count": int(counts.get(str(row["id"]), 0)),
+            "tracker": dict(sources[str(row["id"])]) if str(row["id"]) in sources else None,
         }
         for row in rows
     }
@@ -660,6 +663,15 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
             "SELECT project_id, COUNT(*) AS total FROM tickets GROUP BY project_id"
         ).fetchall()
     }
+    trackers = {
+        str(item["scope_id"]): _payload_object(item["content_json"])
+        for item in connection.execute(
+            """
+            SELECT scope_id, content_json FROM config_documents
+            WHERE scope_type = 'project' AND kind = 'tracker-source'
+            """
+        ).fetchall()
+    }
     remote_value = dict(connection_row) if connection_row else None
     membership = None
     if remote_value is not None:
@@ -692,7 +704,7 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "remote": remote_value,
         "membership": membership,
         "sharing": _sharing(str(row["mode"]), remote_value, membership),
-        "projects": _project_tree(projects, ticket_counts),
+        "projects": _project_tree(projects, ticket_counts, trackers),
         "project_count": len(projects),
         "repositories": repositories,
         "repository_count": len(repositories),
@@ -917,7 +929,7 @@ def get_configuration(
             SELECT kind, revision, content_json, updated_at
             FROM config_documents
             WHERE scope_type = ? AND scope_id = ?
-              AND kind IN ('ticket-fields', 'integrations')
+              AND kind IN ('ticket-fields', 'integrations', 'tracker-source')
             ORDER BY kind
             """,
             (scope_type, scope_id),
@@ -1061,14 +1073,16 @@ def propose_configuration(
     """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
-    if document_kind not in {"ticket-fields", "integrations"}:
-        raise BunkerDatabaseError("Choose Ticket fields or Integrations to publish.")
+    if document_kind not in {"ticket-fields", "integrations", "tracker-source"}:
+        raise BunkerDatabaseError("Choose Ticket fields, Integrations, or Tracker to publish.")
     if not isinstance(content, Mapping):
         raise BunkerDatabaseError("Configuration content must be one object.")
     with _database(bunker_id) as connection:
         scope_type, scope_id, bunker = _config_scope(
             connection, bunker_id, project_id
         )
+        if document_kind == "tracker-source" and scope_type != "project":
+            raise BunkerDatabaseError("A tracker belongs to one Project, not to Bunker defaults.")
         mode = str(bunker.get("mode") or "local")
         permission = _config_permission(connection, bunker)
         if not permission["can_write"]:
@@ -1080,14 +1094,21 @@ def propose_configuration(
             """,
             (scope_type, scope_id, document_kind),
         ).fetchone()
-        if current is None:
+        if current is None and document_kind != "tracker-source":
             raise BunkerDatabaseError("That configuration document is missing. Reopen the editor.")
-        current_revision = str(current["revision"])
-        if not expected_revision or expected_revision != current_revision:
+        current_revision = str(current["revision"]) if current is not None else ""
+        if current is None:
+            if str(expected_revision or ""):
+                raise BunkerDatabaseError(
+                    "Configuration changed after this editor opened. Reload it and review the latest revision."
+                )
+        elif not expected_revision or expected_revision != current_revision:
             raise BunkerDatabaseError(
                 "Configuration changed after this editor opened. Reload it and review the latest revision."
             )
-        if document_kind == "ticket-fields":
+        if document_kind == "tracker-source":
+            normalized = _validated_tracker_source(content)
+        elif document_kind == "ticket-fields":
             normalized = _validated_ticket_fields(content)
             available = {str(value["key"]) for value in normalized["fields"]}
             integration_row = connection.execute(
@@ -1146,7 +1167,7 @@ def propose_configuration(
         raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         if len(raw.encode("utf-8")) > 1024 * 1024:
             raise BunkerDatabaseError("That configuration document is too large.")
-        revision = _next_revision(current_revision, mode)
+        revision = _next_revision(current_revision or "local:0", mode)
         remote_scope = _remote_scope_id(connection, scope_type, scope_id, mode)
     change = remote.change_record(
         key=uuid.uuid4().hex,
@@ -1185,22 +1206,42 @@ def apply_configuration_change(
     raw = json.dumps(proposal["content"], sort_keys=True, separators=(",", ":"))
     with _database(bunker_id) as connection:
         _require_acceptance(_mode(connection, bunker_id), accepted)
-        changed = connection.execute(
-            """
-            UPDATE config_documents
-            SET revision = ?, content_json = ?, updated_at = ?
-            WHERE scope_type = ? AND scope_id = ? AND kind = ? AND revision = ?
-            """,
-            (
-                str(proposal["revision"]),
-                raw,
-                _now(),
-                str(proposal["scope_type"]),
-                str(proposal["scope_id"]),
-                str(proposal["kind"]),
-                str(proposal["expected_revision"]),
-            ),
-        ).rowcount
+        if not str(proposal.get("expected_revision") or ""):
+            try:
+                changed = connection.execute(
+                    """
+                    INSERT INTO config_documents(
+                        scope_type, scope_id, kind, revision, content_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(proposal["scope_type"]),
+                        str(proposal["scope_id"]),
+                        str(proposal["kind"]),
+                        str(proposal["revision"]),
+                        raw,
+                        _now(),
+                    ),
+                ).rowcount
+            except sqlite3.IntegrityError:
+                changed = 0
+        else:
+            changed = connection.execute(
+                """
+                UPDATE config_documents
+                SET revision = ?, content_json = ?, updated_at = ?
+                WHERE scope_type = ? AND scope_id = ? AND kind = ? AND revision = ?
+                """,
+                (
+                    str(proposal["revision"]),
+                    raw,
+                    _now(),
+                    str(proposal["scope_type"]),
+                    str(proposal["scope_id"]),
+                    str(proposal["kind"]),
+                    str(proposal["expected_revision"]),
+                ),
+            ).rowcount
         if not changed:
             raise BunkerDatabaseError(
                 "Configuration changed after this editor opened. Reload it and review the latest revision."
@@ -1231,6 +1272,59 @@ def replace_configuration(
             "This Bunker is shared. Publish configuration through the application so the service can accept it."
         )
     return apply_configuration_change(bunker_id, proposal)
+
+
+TRACKER_PROVIDERS = {"github": "GitHub"}
+TRACKER_KINDS = {"project": "Project board", "issues": "Repository issues"}
+_GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+def _validated_tracker_source(content: Mapping[str, Any]) -> dict[str, Any]:
+    """One Project's tracker board: which agile source its tickets come from."""
+    provider = str(content.get("provider") or "").strip().lower()
+    if provider not in TRACKER_PROVIDERS:
+        raise BunkerDatabaseError(
+            "Choose a supported tracker. This version syncs GitHub; GitLab and Jira follow."
+        )
+    kind = str(content.get("kind") or "").strip().lower()
+    if kind not in TRACKER_KINDS:
+        raise BunkerDatabaseError("Choose a Project board or a repository's issues.")
+    owner = str(content.get("owner") or "").strip()
+    if not _GITHUB_OWNER_RE.fullmatch(owner):
+        raise BunkerDatabaseError("Enter the GitHub user or organization that owns the board.")
+    number = 0
+    repository = ""
+    if kind == "project":
+        try:
+            number = int(content.get("number") or 0)
+        except (TypeError, ValueError) as exc:
+            raise BunkerDatabaseError("Enter the GitHub Project number, such as 8.") from exc
+        if number <= 0:
+            raise BunkerDatabaseError("Enter the GitHub Project number, such as 8.")
+    else:
+        repository = str(content.get("repository") or "").strip()
+        if "/" in repository:
+            repository = repository.split("/")[-1]
+        if not _GITHUB_REPO_RE.fullmatch(repository):
+            raise BunkerDatabaseError("Enter the repository name whose issues to sync.")
+    return {
+        "provider": provider,
+        "kind": kind,
+        "owner": owner,
+        "number": number,
+        "repository": repository,
+        "include_comments": bool(content.get("include_comments", True)),
+    }
+
+
+def tracker_summary(source: Mapping[str, Any] | None) -> str:
+    if not source:
+        return ""
+    label = TRACKER_PROVIDERS.get(str(source.get("provider") or ""), str(source.get("provider") or ""))
+    if str(source.get("kind")) == "project":
+        return f"{label} Project #{source.get('number')} · {source.get('owner')}"
+    return f"{label} issues · {source.get('owner')}/{source.get('repository')}"
 
 
 _CLOSED_STATUSES = {
@@ -2234,6 +2328,237 @@ def _attach_import_repository(
             (binding_id, str(root), now, now),
         )
     return binding_id
+
+
+def project_record(bunker_id: str, project_id: str) -> dict[str, Any]:
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = _id(project_id, "project")
+    with _database(bunker_id) as connection:
+        row = connection.execute(
+            """
+            SELECT id, parent_id, key, name, description FROM projects
+            WHERE id = ? AND bunker_id = ?
+            """,
+            (project_id, bunker_id),
+        ).fetchone()
+    if row is None:
+        raise BunkerDatabaseError("Choose a project from this Bunker.")
+    return dict(row)
+
+
+def _ticket_revision(raw: str) -> str:
+    import hashlib
+
+    return "t:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def propose_ticket_sync(
+    bunker_id: str,
+    *,
+    project_id: str,
+    tickets: Iterable[Mapping[str, Any]],
+    source_kind: str,
+) -> dict[str, Any]:
+    """Compare tracker tickets with the Project's copies without writing.
+
+    Each ticket becomes created, updated, or unchanged by comparing canonical
+    payload JSON. Shared Bunkers send the created/updated set as ``ticket``
+    changes before the same rows are written locally.
+    """
+    bunker_id = _id(bunker_id, "Bunker")
+    project_id = _id(project_id, "project")
+    kind = str(source_kind or "manual")[:64]
+    items = list(tickets)
+    if len(items) > 5000:
+        raise BunkerDatabaseError("A sync may carry at most 5000 tickets.")
+    with _database(bunker_id) as connection:
+        mode = _mode(connection, bunker_id)
+        project_row = connection.execute(
+            "SELECT key FROM projects WHERE id = ? AND bunker_id = ?", (project_id, bunker_id)
+        ).fetchone()
+        if project_row is None:
+            raise BunkerDatabaseError("Choose a project from this Bunker.")
+        project_key = str(project_row["key"])
+        # Ids stay stable through the tracker's own identity. A first sync may
+        # find its natural id taken by another source (two repositories on one
+        # board share issue numbers); that ticket gets the next free number and
+        # keeps it on every later sync.
+        existing_ids: set[str] = set()
+        identity_to_id: dict[str, str] = {}
+        id_to_identity: dict[str, str] = {}
+        highest = 0
+        number_pattern = re.compile(rf"^{re.escape(project_key)}-(\d+)$")
+        for row in connection.execute("SELECT id, project_id, payload_json FROM tickets").fetchall():
+            existing_id = str(row["id"])
+            existing_ids.add(existing_id)
+            match = number_pattern.fullmatch(existing_id)
+            if match:
+                highest = max(highest, int(match.group(1)))
+            metadata = _payload_object(row["payload_json"]).get("metadata")
+            identity = (
+                str(metadata.get("source_identity") or "") if isinstance(metadata, Mapping) else ""
+            )
+            if identity and str(row["project_id"]) == project_id:
+                identity_to_id[identity] = existing_id
+                id_to_identity[existing_id] = identity
+        rows: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        changes: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def priority(value: Any) -> int:
+            """Known identities first, then deliberate title keys, then numbers."""
+            if not isinstance(value, Mapping):
+                return 3
+            metadata_value = value.get("metadata")
+            metadata_value = metadata_value if isinstance(metadata_value, Mapping) else {}
+            if str(metadata_value.get("source_identity") or "") in identity_to_id:
+                return 0
+            return 1 if str(metadata_value.get("id_origin") or "") == "title" else 2
+
+        for value in sorted(items, key=priority):
+            if not isinstance(value, Mapping):
+                raise BunkerDatabaseError("Each synced ticket must be one object.")
+            requested = _id(value.get("id"), "ticket")
+            metadata_value = value.get("metadata")
+            identity = (
+                str(metadata_value.get("source_identity") or "")
+                if isinstance(metadata_value, Mapping)
+                else ""
+            )
+            if identity and identity in identity_to_id:
+                ticket_id = identity_to_id[identity]
+            else:
+                claimed_by_other = requested in seen or (
+                    requested in existing_ids
+                    and identity
+                    and id_to_identity.get(requested, "")
+                    and id_to_identity.get(requested) != identity
+                )
+                ticket_id = requested
+                if claimed_by_other:
+                    candidate = highest + 1
+                    while f"{project_key}-{candidate}" in existing_ids or f"{project_key}-{candidate}" in seen:
+                        candidate += 1
+                    ticket_id = f"{project_key}-{candidate}"
+                    highest = candidate
+                elif number_pattern.fullmatch(ticket_id):
+                    highest = max(highest, int(number_pattern.fullmatch(ticket_id).group(1)))
+                if identity:
+                    identity_to_id[identity] = ticket_id
+                    id_to_identity[ticket_id] = identity
+            if ticket_id in seen:
+                raise BunkerDatabaseError(
+                    f"Two tracker items map to {ticket_id}. Give those issues distinct keys."
+                )
+            seen.add(ticket_id)
+            payload = {key: item for key, item in dict(value).items() if key != "id"}
+            payload = {"id": ticket_id, **payload}
+            if "key" in payload:
+                payload["key"] = ticket_id
+            raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            if len(raw.encode("utf-8")) > 2 * 1024 * 1024:
+                raise BunkerDatabaseError(f"Ticket {ticket_id} is too large to store.")
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+            reference = str(metadata.get("source_url") or "")[:512]
+            existing = connection.execute(
+                "SELECT project_id, payload_json FROM tickets WHERE id = ?", (ticket_id,)
+            ).fetchone()
+            if existing is not None and str(existing["project_id"]) != project_id:
+                raise BunkerDatabaseError(
+                    f"Ticket {ticket_id} already belongs to another Project in this Bunker."
+                )
+            current_raw = ""
+            if existing is not None:
+                current_raw = json.dumps(
+                    _payload_object(existing["payload_json"]), sort_keys=True, separators=(",", ":")
+                )
+            if existing is None:
+                action = "created"
+            elif current_raw == raw:
+                action = "unchanged"
+            else:
+                action = "updated"
+            results.append({"ticket": ticket_id, "action": action})
+            if action == "unchanged":
+                continue
+            rows.append(
+                {
+                    "id": ticket_id,
+                    "project_id": project_id,
+                    "payload": payload,
+                    "source_kind": kind,
+                    "source_reference": reference,
+                }
+            )
+            changes.append(
+                remote.change_record(
+                    key=uuid.uuid4().hex,
+                    kind="ticket",
+                    record_id=ticket_id,
+                    expected_revision=_ticket_revision(current_raw) if existing is not None else "",
+                    revision=_ticket_revision(raw),
+                    payload=rows[-1],
+                )
+            )
+    return {
+        "mode": mode,
+        "project_id": project_id,
+        "results": results,
+        "rows": rows,
+        "changes": changes,
+    }
+
+
+def apply_ticket_sync_change(
+    bunker_id: str,
+    proposal: Mapping[str, Any],
+    *,
+    accepted: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write the created/updated tickets. Shared Bunkers require acceptance."""
+    bunker_id = _id(bunker_id, "Bunker")
+    rows = list(proposal.get("rows") or [])
+    with _database(bunker_id) as connection:
+        if rows:
+            _require_acceptance(_mode(connection, bunker_id), accepted)
+        now = _now()
+        for row in rows:
+            payload = row["payload"]
+            updated = str(
+                (payload.get("metadata") or {}).get("source_updated")
+                if isinstance(payload.get("metadata"), Mapping)
+                else ""
+            ) or now
+            connection.execute(
+                """
+                INSERT INTO tickets(id, project_id, payload_json, source_kind, source_reference, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id = excluded.project_id,
+                    payload_json = excluded.payload_json,
+                    source_kind = excluded.source_kind,
+                    source_reference = excluded.source_reference,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(row["id"]),
+                    str(row["project_id"]),
+                    json.dumps(payload, sort_keys=True),
+                    str(row["source_kind"]),
+                    str(row["source_reference"]),
+                    updated,
+                ),
+            )
+        if accepted:
+            _record_acceptance(connection, accepted)
+    results = list(proposal.get("results") or [])
+    return {
+        "tickets": results,
+        "created": sum(item["action"] == "created" for item in results),
+        "updated": sum(item["action"] == "updated" for item in results),
+        "unchanged": sum(item["action"] == "unchanged" for item in results),
+    }
 
 
 def local_publication(bunker_id: str) -> dict[str, Any]:

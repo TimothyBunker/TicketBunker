@@ -382,7 +382,9 @@ def ensure_runtime(reporter: Callable[[str], None] | None = None) -> Runtime:
                 str(entry["url"]),
                 headers={"User-Agent": "TicketBunker runtime installer"},
             )
-            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, archive.open("wb") as output:
+            with urllib.request.urlopen(
+                request, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=platform_services.https_context()
+            ) as response, archive.open("wb") as output:
                 shutil.copyfileobj(response, output)
             actual = _sha256(archive)
             if actual != str(entry["sha256"]):

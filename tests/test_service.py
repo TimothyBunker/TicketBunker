@@ -312,6 +312,50 @@ class ReferenceServiceTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual([item["kind"] for item in after["changes"]], ["project", "repository-bindings"])
 
+    def test_members_may_publish_tickets_but_not_configuration(self) -> None:
+        owner, _ = self.owner()
+        bunker_id = str(owner.publish(publication()).bunker["id"])
+        member = self.adapter(self.adapter().enroll(
+            self.invitation_link(bunker_id, owner.create_invitation(bunker_id)["token"]),
+            {"display_name": "Ada"},
+        ).issued_credential)
+        ticket = remote.change_record(
+            key="ticket-1",
+            kind="ticket",
+            record_id="ECS-7",
+            expected_revision="",
+            revision="t:first",
+            payload={
+                "id": "ECS-7",
+                "project_id": "ecs",
+                "payload": {"id": "ECS-7", "title": "Seven", "status": "todo"},
+                "source_kind": "github",
+                "source_reference": "https://github.com/example/coal/issues/7",
+            },
+        )
+
+        accepted = member.push(bunker_id, "change-0", (ticket,))
+
+        self.assertEqual(accepted["results"][0]["revision"], "t:first")
+        latest = owner.pull(bunker_id, "")
+        self.assertIn("ECS-7", {item["id"] for item in latest.tickets})
+        stale = remote.change_record(
+            key="ticket-2", kind="ticket", record_id="ECS-7",
+            expected_revision="", revision="t:second", payload=ticket["payload"],
+        )
+        with self.assertRaises(remote.RemoteContractError) as conflict:
+            owner.push(bunker_id, "change-1", (stale,))
+        self.assertIn("Sync again", str(conflict.exception))
+        mixed = remote.change_record(
+            key="config-1", kind="config-document",
+            record_id=f"bunker:{bunker_id}:ticket-fields", expected_revision="local:1",
+            revision="shared:x",
+            payload={"scope_type": "bunker", "scope_id": bunker_id, "kind": "ticket-fields", "content": {"fields": []}},
+        )
+        with self.assertRaises(remote.RemoteContractError) as forbidden:
+            member.push(bunker_id, "change-1", (ticket, mixed))
+        self.assertIn("Only the Bunker owner", str(forbidden.exception))
+
     def test_transport_bounds_bodies_and_hides_internal_detail(self) -> None:
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
         connection.putrequest("POST", "/api/v1/setup")

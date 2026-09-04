@@ -96,6 +96,15 @@ exercise unless a live boundary is explicitly called out.
   (`ticketbunker/credentials.py`); Bunker databases hold references.
   `tests/test_service.py` and `SharedBunkerTests` in `tests/test_application.py`
   drive the owner and member flows against the in-process service.
+- Each Project can own a `tracker-source` document (GitHub Project board or
+  repository issues). Settings → Trackers connects a token to this computer
+  through `credentials.update`; **Sync tickets** (`application.project.sync`)
+  reads the board with `integrations/github.py` (`collect_entries`,
+  `build_tickets`), keys issues by Project key plus issue number when titles
+  carry none, and upserts tickets through `propose_ticket_sync` /
+  `apply_ticket_sync_change`. Shared Bunkers send `ticket` changes (members
+  hold `tickets:write`) before writing locally. `TrackerSyncTests` and the
+  shared-Bunker test cover it with the GitHub transport mocked.
 - Existing companion-backed projects appear in a separate Migration section.
   **Import copy** reads legacy locator/config/ticket/report material into a new
   local Bunker, records its digest and counts, and does not modify the source or
@@ -490,9 +499,9 @@ exercise intentionally does not run an agent report.
 2. Extend the reference service and app with join requests and owner
    approval, member management (roles, removal), deploy recipes for platforms
    that provide HTTPS and a persistent disk, and ticket/report synchronisation
-   (pull/push through the existing adapter). Give each Project its tracker
-   source (provider and board identity) so "Sync tickets" is a Project action
-   that travels in the join snapshot.
+   (pull through the existing adapter so members receive the owner's later
+   syncs). Add GitLab and Jira transports behind the same tracker source, and
+   a per-device "last synced" fact on the Project page.
 3. Add an OS-vault backend behind the credential reference store and native
    sign-in for services that require authentication before redemption.
 4. Add signed/versioned JSON and markdown export/import for local-only and

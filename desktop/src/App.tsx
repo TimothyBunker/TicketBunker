@@ -91,6 +91,7 @@ function DirectEditor({
 }
 
 type Provider = { id: string; name: string; models: Array<{ id: string; name: string }>; methods: string[] };
+const TRACKER_LABELS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", jira: "Jira" };
 
 function AgentSetup({
   state,
@@ -246,9 +247,9 @@ function Settings({
   state: AppState;
   onState: (value: AppState) => void;
   onClose: () => void;
-  initialTab?: "local" | "agent" | "system";
+  initialTab?: "local" | "agent" | "trackers" | "system";
 }) {
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState<"local" | "agent" | "trackers" | "system">(initialTab);
   const [message, setMessage] = useState("");
   const [checkingRelease, setCheckingRelease] = useState(false);
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -267,6 +268,19 @@ function Settings({
     try {
       await command("local.editor.update", { ...values, editor_mode: "builtin", tab_size: Number(values.tab_size), line_wrap: values.line_wrap === "on", trim_trailing_whitespace: values.trim_trailing_whitespace === "on", ensure_final_newline: values.ensure_final_newline === "on" });
       setMessage("Saved");
+    } catch (reason) {
+      setMessage(String(reason));
+    }
+  }
+  async function saveToken(provider: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const token = String(new FormData(form).get("token") || "");
+    try {
+      const result = await command<{ credentials: Record<string, boolean> }>("credentials.update", { provider, token });
+      onState({ ...state, trackers: result.credentials });
+      form.reset();
+      setMessage(`${TRACKER_LABELS[provider] || provider} token saved on this computer`);
     } catch (reason) {
       setMessage(String(reason));
     }
@@ -297,10 +311,23 @@ function Settings({
   return (
     <aside className="settings-drawer">
       <header><div><p className="eyebrow">This computer</p><h2>Settings</h2></div><button className="icon-control" onClick={onClose} aria-label="Close settings">←</button></header>
-      <nav><button className={tab === "local" ? "selected" : ""} onClick={() => setTab("local")}>Local</button><button onClick={() => setTab("agent")}>Agent</button><button className={tab === "system" ? "selected" : ""} onClick={() => setTab("system")}>System</button></nav>
+      <nav><button className={tab === "local" ? "selected" : ""} onClick={() => setTab("local")}>Local</button><button onClick={() => setTab("agent")}>Agent</button><button className={tab === "trackers" ? "selected" : ""} onClick={() => setTab("trackers")}>Trackers</button><button className={tab === "system" ? "selected" : ""} onClick={() => setTab("system")}>System</button></nav>
       {tab === "local" && <div className="settings-content">
         <form onSubmit={saveProfile}><h3>Identity</h3><label>Name<input name="name" defaultValue={state.profile.name} required /></label><label>Email<input name="email" type="email" defaultValue={state.profile.email} required /></label><label>Branch name<input name="branch_user" defaultValue={state.profile.branch_user} required /></label><button className="primary">Save identity</button></form>
         <form onSubmit={saveEditor}><h3>Included editor</h3><label>Indentation<select name="indent_style"><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></label><label>Tab size<input name="tab_size" type="number" min="1" max="16" defaultValue="4" /></label><label className="check"><input name="line_wrap" type="checkbox" defaultChecked />Wrap long lines</label><label className="check"><input name="trim_trailing_whitespace" type="checkbox" />Trim trailing whitespace on save</label><label className="check"><input name="ensure_final_newline" type="checkbox" defaultChecked />Ensure final newline</label><button className="primary">Save editor settings</button></form>
+      </div>}
+      {tab === "trackers" && <div className="settings-content">
+        <div><h3>Trackers</h3><p className="settings-copy">Connect your agile app with a personal access token. Tokens stay in a private file on this computer and never sync. Each Project chooses its board under Configure → Tracker.</p></div>
+        {Object.entries(TRACKER_LABELS).map(([provider, label]) => {
+          const connected = Boolean(state.trackers?.[provider]);
+          return (
+            <form key={provider} onSubmit={(event) => saveToken(provider, event)}>
+              <div className="token-row"><i className={connected ? "state-dot ready" : "state-dot"} /><strong>{label}</strong><span>{connected ? "Connected" : "Not connected"}</span></div>
+              <label>{label} token<input name="token" type="password" autoComplete="off" placeholder={connected ? "Paste a new token to replace it" : "Paste a personal access token"} required /></label>
+              <button className="primary">{connected ? `Replace ${label} token` : `Connect ${label}`}</button>
+            </form>
+          );
+        })}
       </div>}
       {tab === "system" && <>
         <dl className="system-info">

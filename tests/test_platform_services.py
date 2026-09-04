@@ -164,3 +164,38 @@ class PlatformServicesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HttpsContextTests(unittest.TestCase):
+    def test_hosts_without_an_interpreter_bundle_use_the_system_bundle(self) -> None:
+        from ticketbunker import platform_services
+
+        services = platform_services.PlatformServices.detect(system="Darwin", machine="x86_64")
+        missing = platform_services.ssl.DefaultVerifyPaths(
+            None, None, "SSL_CERT_FILE", "/nonexistent/cert.pem", "SSL_CERT_DIR", "/nonexistent/certs"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "cert.pem"
+            bundle.write_text("placeholder", encoding="utf-8")
+            with mock.patch.object(platform_services.ssl, "get_default_verify_paths", return_value=missing):
+                with mock.patch.object(platform_services.PlatformServices, "ca_bundle_candidates", return_value=(str(bundle),)):
+                    with mock.patch.object(platform_services.ssl.SSLContext, "load_verify_locations") as load:
+                        context = services.https_context()
+            load.assert_called_once_with(cafile=str(bundle))
+        self.assertEqual(context.verify_mode, platform_services.ssl.CERT_REQUIRED)
+
+    def test_hosts_with_an_interpreter_bundle_keep_the_default_context(self) -> None:
+        from ticketbunker import platform_services
+
+        services = platform_services.PlatformServices.detect(system="Darwin", machine="arm64")
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "cert.pem"
+            bundle.write_text("placeholder", encoding="utf-8")
+            present = platform_services.ssl.DefaultVerifyPaths(
+                str(bundle), None, "SSL_CERT_FILE", str(bundle), "SSL_CERT_DIR", "/nonexistent"
+            )
+            with mock.patch.object(platform_services.ssl, "get_default_verify_paths", return_value=present):
+                with mock.patch.object(platform_services.ssl.SSLContext, "load_verify_locations") as load:
+                    services.https_context()
+        load.assert_not_called()
+

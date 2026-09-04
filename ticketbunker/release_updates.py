@@ -133,7 +133,11 @@ def state(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def _download_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    from . import platform_services
+
+    with urllib.request.urlopen(
+        request, timeout=timeout, context=platform_services.https_context()
+    ) as response:
         declared = response.headers.get("Content-Length")
         if declared and int(declared) > MAX_RELEASE_BYTES:
             raise ReleaseCheckError("The release response was too large.")

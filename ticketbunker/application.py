@@ -21,6 +21,7 @@ from . import (
     credentials,
     platform_services,
     project,
+    projectconfig,
     release_updates,
     remote,
     truth,
@@ -235,6 +236,7 @@ def state() -> dict[str, Any]:
         },
         "release": release_updates.state(settings),
         "profile": _profile(settings),
+        "trackers": projectconfig.credential_state(),
         "bunkers": bunkerdb.list_bunkers(),
         # Companion-Git registrations remain visible only as migration input.
         # New desktop onboarding does not use this list as its control plane.
@@ -711,19 +713,105 @@ def _remote_adapter(bunker_id: str) -> tuple[remote.HTTPRemoteAdapter, dict[str,
     )
 
 
-def _publish_changes(bunker_id: str, proposal: Mapping[str, Any]) -> dict[str, Any]:
+def _publish_changes(bunker_id: str, proposal: Mapping[str, Any]) -> dict[str, Any] | None:
     """Send a proposal's typed changes to the service; return its acceptance."""
-    changes = proposal.get("changes") or [proposal["change"]]
+    changes = list(proposal.get("changes") or ([proposal["change"]] if proposal.get("change") else []))
+    if not changes:
+        return None
     adapter, connection = _remote_adapter(bunker_id)
+    cursor = str(connection.get("sync_cursor") or "")
+    acceptance = {"cursor": cursor, "revision": ""}
+    for start in range(0, len(changes), remote.MAX_CHANGE_BATCH):
+        result = _bunker_result(
+            adapter.push,
+            str(connection["remote_bunker_id"]),
+            cursor,
+            tuple(changes[start : start + remote.MAX_CHANGE_BATCH]),
+        )
+        cursor = str(result.get("cursor") or cursor)
+        acceptance = {"cursor": cursor, "revision": str(result.get("revision") or "")}
+    return acceptance
+
+
+@commands.register("credentials.state")
+def command_credentials_state(
+    _context: commands.CommandContext, _payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Which tracker tokens exist on this computer. Values are never returned."""
+    return {
+        "credentials": projectconfig.credential_state(),
+        "credentials_file": str(projectconfig.credential_file()),
+    }
+
+
+@commands.register("application.project.sync")
+def command_project_sync(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Pull one Project's tracker board into its tickets."""
+    from .integrations import github
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    project_id = str(payload.get("project_id") or "")
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id)
+    document = configuration["documents"].get("tracker-source")
+    if not document:
+        raise commands.CommandRejected(
+            "tracker_required", "Connect a tracker in Configure → Tracker, then sync."
+        )
+    source = dict(document.get("content") or {})
+    provider = str(source.get("provider") or "")
+    if provider != "github":
+        raise commands.CommandRejected(
+            "tracker_unsupported",
+            "This version syncs GitHub. GitLab and Jira sync are coming.",
+        )
+    token = projectconfig.credential_value("github")
+    if not token:
+        raise commands.CommandRejected(
+            "tracker_token_required",
+            "Connect a GitHub token in Settings → Trackers, then sync again.",
+        )
+    include_comments = bool(source.get("include_comments", True))
+    try:
+        entries = github.collect_entries(source, token, include_comments=include_comments)
+    except (github.GitHubError, ValueError) as exc:
+        raise commands.CommandRejected(
+            "tracker_unreachable",
+            f"GitHub sync stopped: {exc}. Check the token in Settings → Trackers and the board in Configure → Tracker, then retry.",
+        ) from exc
+    record = _bunker_result(bunkerdb.project_record, bunker_id, project_id)
+    integrations = configuration["documents"].get("integrations", {})
+    providers = (integrations.get("content") or {}).get("providers") if isinstance(integrations, dict) else {}
+    github_settings = providers.get("github") if isinstance(providers, dict) else {}
+    mappings = github_settings.get("fields") if isinstance(github_settings, dict) else {}
+    try:
+        tickets = github.build_tickets(
+            entries,
+            mappings if isinstance(mappings, dict) else {},
+            project_key=str(record.get("key") or ""),
+            include_comments=include_comments,
+            bunker_ids=True,
+        )
+    except ValueError as exc:
+        raise commands.CommandRejected(
+            "tracker_ticket_invalid", f"GitHub sync stopped: {exc}."
+        ) from exc
+    proposal = _bunker_result(
+        bunkerdb.propose_ticket_sync,
+        bunker_id,
+        project_id=project_id,
+        tickets=tickets,
+        source_kind="github",
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
     result = _bunker_result(
-        adapter.push,
-        str(connection["remote_bunker_id"]),
-        str(connection.get("sync_cursor") or ""),
-        tuple(changes),
+        bunkerdb.apply_ticket_sync_change, bunker_id, proposal, accepted=accepted
     )
     return {
-        "cursor": str(result.get("cursor") or ""),
-        "revision": str(result.get("revision") or ""),
+        "sync": {**result, "provider": provider, "source": bunkerdb.tracker_summary(source)},
+        "bunker": bunkerdb.get_bunker(bunker_id),
+        "bunkers": bunkerdb.list_bunkers(),
     }
 
 

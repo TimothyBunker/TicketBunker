@@ -933,8 +933,29 @@ key, explicit branch assignments, repository binding, and mechanical timestamps
 remain locally owned. A semantically identical snapshot performs no write,
 adds no ticket-ledger event, and advances no local or remote revision.
 
+**A Project owns its tracker source.** Each Project may carry one shared,
+revisioned `tracker-source` document naming the agile board it mirrors: today
+a GitHub Project board or a repository's issues (owner, number or repository,
+whether to carry comments). It travels in the join snapshot, so a new member's
+Project already knows its board. **Sync tickets** on the Project page reads
+that source with the machine-local token, normalizes every item through the
+Project's field matrix, and upserts tickets into the Bunker database. A ticket
+id is a deliberate `KEY-n` prefix in the issue title when present, otherwise
+the Project key plus the issue number, so ordinary boards need no naming
+convention. Every synced ticket carries its tracker identity
+(`metadata.source_identity`), which keeps the id stable across syncs. When a
+board spans repositories and two items claim one id, deliberate title keys win,
+the other item receives the next free number once, and its identity keeps that
+number afterwards. On a shared Bunker the created and updated tickets are sent
+to the service as `ticket` changes (members hold `tickets:write`) before they
+are written locally; unchanged tickets produce no change at all.
+
+Tracker tokens are connected once per computer in Settings → Trackers and
+stored in the machine-local credential file; the app shows only whether a
+token exists. Nothing in a Bunker or its service ever carries a tracker token.
+
 Adapters remain thin stdlib transports under `ticketbunker/integrations/`; they
-fetch and normalize but cannot write around `ticket.sync`. `tb github` is the
+fetch and normalize but cannot write around the typed sync path. `tb github` is the
 first complete adapter: it reads one Issue or every Issue item in a GitHub
 Project, mirrors comments and Project fields, applies the project's published
 GitHub field matrix, then submits one typed batch. `--fixture` drives that exact
@@ -1485,9 +1506,16 @@ A separate Migration section lists legacy companion-backed projects and offers
 **Import copy**. That operation is read-only with respect to both source and
 companion repositories and records its import digest.
 
+A Project page names its tracker beneath the title and offers **Sync tickets**
+when one is connected, or **Connect tracker**, which opens Configure → Tracker.
+Settings → Trackers connects a GitHub, GitLab, or Jira token to this computer
+and shows only whether one is present; GitHub is the tracker this version can
+sync, and the others are listed so the token step is already familiar.
+
 **Configure** edits Bunker defaults or the selected Project snapshot. Ticket
-fields and integration matrices are whole revisioned documents: a publish uses
-the revision loaded by the editor and replaces the complete draft atomically.
+fields, integration matrices, and the Project's tracker source are whole
+revisioned documents: a publish uses the revision loaded by the editor and
+replaces the complete draft atomically.
 GitHub, GitLab, and Jira are prefilled templates; custom integrations use the
 same matrix. Project creation copies and pins the current Bunker field and
 integration documents, so later default changes affect only later Projects.

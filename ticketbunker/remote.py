@@ -37,7 +37,14 @@ ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
     ),
     ROLE_MEMBER: ("tickets:read", "tickets:write", "config:read"),
 }
-CHANGE_KINDS = ("project", "repository-bindings", "config-document")
+CHANGE_KINDS = ("project", "repository-bindings", "config-document", "ticket")
+CHANGE_CAPABILITIES = {
+    "project": "config:write",
+    "repository-bindings": "config:write",
+    "config-document": "config:write",
+    "ticket": "tickets:write",
+}
+MAX_CHANGE_BATCH = 200
 DEFAULT_INVITATION_SECONDS = 7 * 24 * 60 * 60
 MAX_INVITATION_SECONDS = 90 * 24 * 60 * 60
 
@@ -115,6 +122,7 @@ _CODE_MESSAGES = {
     "revision_conflict": "The shared Bunker changed elsewhere. Reload it and retry.",
     "project_key_taken": "That project key already exists in the shared Bunker.",
     "bunker_invalid": "The Bunker could not be published because its content did not validate.",
+    "ticket_conflict": "Those tickets changed on the shared Bunker. Sync again.",
 }
 
 
@@ -282,7 +290,11 @@ class HTTPRemoteAdapter:
             method=method,
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            from . import platform_services
+
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=platform_services.https_context()
+            ) as response:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as exc:
             code = ""
@@ -514,7 +526,9 @@ def _snapshot(value: Mapping[str, Any]) -> RemoteSnapshot:
 
 __all__ = [
     "API_VERSION",
+    "CHANGE_CAPABILITIES",
     "CHANGE_KINDS",
+    "MAX_CHANGE_BATCH",
     "DEFAULT_INVITATION_SECONDS",
     "ROLE_CAPABILITIES",
     "ROLE_MEMBER",

@@ -10,7 +10,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .. import commands, project, projectconfig
+from typing import Mapping
+
+from .. import commands, platform_services, project, projectconfig
 
 
 API = "https://api.github.com"
@@ -33,7 +35,9 @@ def _request_json(url: str, token: str | None, payload: dict | None = None) -> A
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(
+            request, timeout=30, context=platform_services.https_context()
+        ) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         try:
@@ -221,13 +225,19 @@ def normalize_issue(
     comments: list[dict[str, Any]] | None = None,
     project_item: dict[str, Any] | None = None,
     ticket_id: str | None = None,
+    default_id: str | None = None,
 ) -> dict[str, Any]:
-    """Translate a complete GitHub snapshot without writing any TicketBunker data."""
+    """Translate a complete GitHub snapshot without writing any TicketBunker data.
+
+    The ticket id comes from an explicit override, then a PROJECT-123 key in
+    the issue title, then ``default_id`` (a Project key plus the issue number),
+    so ordinary boards whose titles carry no key still map deterministically.
+    """
     if issue.get("pull_request"):
         raise ValueError("the GitHub URL is a pull request, not a ticket issue")
     source_title = str(issue.get("title") or "").strip()
     match = TICKET_RE.search(source_title)
-    resolved_id = ticket_id or (match.group(0) if match else None)
+    resolved_id = ticket_id or (match.group(0) if match else None) or default_id
     if not resolved_id:
         raise ValueError("cannot infer a PROJECT-123 ticket ID from the issue title; pass --ticket-id")
     title = re.sub(
@@ -378,6 +388,118 @@ def _fixture_entries(path: Path) -> list[dict[str, Any]]:
     return normalized
 
 
+def fetch_repository_issues(owner: str, repo: str, token: str | None) -> list[dict[str, Any]]:
+    """Every issue in one repository, open and closed, without pull requests."""
+    issues: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        query = urllib.parse.urlencode({"state": "all", "per_page": 100, "page": page})
+        batch = _request_json(
+            f"{API}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/issues?{query}", token
+        )
+        if not isinstance(batch, list):
+            raise GitHubError("GitHub returned an unexpected issues payload")
+        issues.extend(
+            value for value in batch if isinstance(value, dict) and not value.get("pull_request")
+        )
+        if len(batch) < 100:
+            return issues
+        page += 1
+
+
+def collect_entries(
+    source: Mapping[str, Any], token: str | None, *, include_comments: bool = True
+) -> list[dict[str, Any]]:
+    """Read one configured tracker source (a Project board or a repository's issues)."""
+    kind = str(source.get("kind") or "").strip()
+    owner = str(source.get("owner") or "").strip()
+    if not owner:
+        raise GitHubError("the tracker source needs a GitHub owner")
+    if kind == "project":
+        try:
+            number = int(source.get("number") or 0)
+        except (TypeError, ValueError) as exc:
+            raise GitHubError("the tracker source needs a GitHub Project number") from exc
+        if number <= 0:
+            raise GitHubError("the tracker source needs a GitHub Project number")
+        if not token:
+            raise GitHubError("a GitHub token is required to read a GitHub Project")
+        entries = []
+        for item in fetch_project_items(owner, number, token):
+            issue_owner, repo, issue_number = parse_issue(str(item["issue_url"]))
+            issue = _request_json(f"{API}/repos/{issue_owner}/{repo}/issues/{issue_number}", token)
+            if not isinstance(issue, dict):
+                raise GitHubError(f"GitHub returned an unexpected issue payload for {item['issue_url']}")
+            comments = (
+                fetch_comments(issue_owner, repo, issue_number, token) if include_comments else []
+            )
+            entries.append({"issue": issue, "comments": comments, "project": item})
+        return entries
+    if kind == "issues":
+        repo = str(source.get("repository") or "").strip()
+        if not repo:
+            raise GitHubError("the tracker source needs a GitHub repository")
+        entries = []
+        for issue in fetch_repository_issues(owner, repo, token):
+            comments = (
+                fetch_comments(owner, repo, int(issue.get("number") or 0), token)
+                if include_comments and issue.get("number")
+                else []
+            )
+            entries.append({"issue": issue, "comments": comments, "project": None})
+        return entries
+    raise GitHubError("the tracker source must be a GitHub Project board or a repository's issues")
+
+
+def build_tickets(
+    entries: list[dict[str, Any]],
+    mappings: Mapping[str, str] | None,
+    *,
+    project_key: str = "",
+    include_comments: bool = True,
+    ticket_id: str | None = None,
+    bunker_ids: bool = False,
+) -> list[dict[str, Any]]:
+    """Normalize fetched entries into provider-neutral tickets (no writes).
+
+    With ``bunker_ids`` a title key counts only as a deliberate prefix matching
+    the Project key; otherwise the id is the Project key plus the issue number.
+    Every ticket also carries ``metadata.source_identity`` so the Bunker can
+    keep an id stable and resolve collisions between repositories on one
+    board. Legacy companion sync keeps the title-key convention its data was
+    created with.
+    """
+    tickets = []
+    for entry in entries:
+        issue = entry["issue"]
+        comments = entry.get("comments") if include_comments else []
+        project_item = entry.get("project")
+        number = issue.get("number")
+        default_id = f"{project_key}-{int(number)}" if project_key and number else None
+        explicit = ticket_id or entry.get("ticket_id")
+        if bunker_ids and project_key and not explicit:
+            prefix = re.match(
+                rf"^\s*({re.escape(project_key)}-\d+)\b", str(issue.get("title") or "")
+            )
+            explicit = prefix.group(1) if prefix else default_id
+        normalized = normalize_issue(
+            issue,
+            comments,
+            project_item,
+            explicit,
+            default_id=default_id,
+        )
+        if bunker_ids:
+            identity = issue.get("node_id") or issue.get("html_url")
+            if identity:
+                normalized["metadata"]["source_identity"] = f"github:{identity}"
+            normalized["metadata"]["id_origin"] = (
+                "title" if project_key and explicit and explicit != default_id else "number"
+            )
+        tickets.append(apply_mappings(normalized, issue, project_item, dict(mappings or {})))
+    return tickets
+
+
 def _live_entries(
     issue_ref: str | None,
     project_number: int | None,
@@ -441,20 +563,20 @@ def sync(
         raise GitHubError("--ticket-id can only override a single issue")
     github_settings = projectconfig.state(source_root)["mappings"]["providers"].get("github", {})
     mappings = github_settings.get("fields") if isinstance(github_settings, dict) else {}
-    tickets = []
     project_key = str(locator.get("project") or "")
-    for entry in entries:
-        issue = entry["issue"]
-        comments = entry.get("comments") if include_comments else []
-        project_item = entry.get("project")
-        normalized = normalize_issue(issue, comments, project_item, ticket_id or entry.get("ticket_id"))
-        normalized = apply_mappings(normalized, issue, project_item, mappings or {})
+    tickets = build_tickets(
+        entries,
+        mappings or {},
+        project_key=project_key,
+        include_comments=include_comments,
+        ticket_id=ticket_id,
+    )
+    for normalized in tickets:
         if project_key and not str(normalized["id"]).startswith(f"{project_key}-"):
             raise GitHubError(
                 f"GitHub ticket {normalized['id']} does not route to companion project {project_key}; "
                 "run the sync from the source repository configured for that project"
             )
-        tickets.append(normalized)
     result = commands.dispatch(
         "ticket.sync",
         {"tickets": tickets, "intake": "github", "publish": True},

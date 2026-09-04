@@ -1,3 +1,12 @@
+export type TrackerSource = {
+  provider: string;
+  kind: string;
+  owner: string;
+  number: number;
+  repository: string;
+  include_comments: boolean;
+};
+
 export type Project = {
   id: string;
   parent_id?: string | null;
@@ -6,6 +15,7 @@ export type Project = {
   description?: string;
   children?: Project[];
   ticket_count?: number;
+  tracker?: TrackerSource | null;
 };
 
 export type Repository = {
@@ -70,6 +80,7 @@ export type AppState = {
     data_home: string;
   };
   diagnostics?: { application?: string };
+  trackers?: Record<string, boolean>;
   release?: {
     current: string;
     latest: string;
@@ -184,8 +195,22 @@ export type ConfigurationState = {
       updated_at: string;
       content: { providers: Record<string, Integration> };
     };
+    "tracker-source"?: {
+      kind: "tracker-source";
+      revision: string;
+      updated_at: string;
+      content: TrackerSource;
+    };
   };
 };
+
+export function trackerSummary(tracker: TrackerSource | null | undefined): string {
+  if (!tracker) return "";
+  const label = tracker.provider === "github" ? "GitHub" : tracker.provider;
+  return tracker.kind === "project"
+    ? `${label} Project #${tracker.number} · ${tracker.owner}`
+    : `${label} issues · ${tracker.owner}/${tracker.repository}`;
+}
 
 export type Member = {
   id: string;

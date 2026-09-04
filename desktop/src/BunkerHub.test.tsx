@@ -151,6 +151,47 @@ describe("Bunker and Project boundaries", () => {
     expect(transport.command).not.toHaveBeenCalledWith("application.bunker.invitations", expect.anything());
   });
 
+  it("syncs a Project's tracker board from the Project page", async () => {
+    const tracked = { ...project, tracker: { provider: "github", kind: "project", owner: "example", number: 8, repository: "", include_comments: true } };
+    const withTracker = { ...bunker, projects: [tracked] };
+    const notify = vi.fn();
+    const onState = vi.fn();
+    transport.command.mockImplementation((action: string) => {
+      if (action === "application.ticket.list") {
+        return Promise.resolve({ tickets: [], total: 0, page: 1, page_size: 25, page_count: 0, facets: { statuses: [], assignees: [], reporters: [], labels: [] } });
+      }
+      if (action === "application.project.sync") {
+        return Promise.resolve({ sync: { created: 2, updated: 0, unchanged: 1, source: "GitHub Project #8 · example" }, bunkers: [withTracker] });
+      }
+      throw new Error(`Unexpected command ${action}`);
+    });
+
+    render(
+      <BunkerHub state={{ ...state, bunkers: [withTracker] }} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={notify} />,
+    );
+
+    expect(screen.getByText("GitHub Project #8 · example")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect tracker" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sync tickets" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.sync", { bunker_id: bunker.id, project_id: project.id }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith("Synced GitHub Project #8 · example: 2 new, 0 updated, 1 unchanged"));
+    expect(onState).toHaveBeenCalled();
+  });
+
+  it("offers Connect tracker and opens the Tracker tab when none is configured", async () => {
+    render(
+      <BunkerHub state={{ ...state, trackers: { github: false } }} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+
+    expect(screen.getByText("No tracker connected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect tracker" }));
+    expect(await screen.findByRole("heading", { name: "Tracker" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Tracker source")).toBeInTheDocument();
+    expect(screen.getByText(/No GitHub token on this computer yet/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save tracker" })).toBeInTheDocument();
+  });
+
   it("joins from one invitation link without raw credentials", () => {
     render(
       <BunkerHub state={state} selection={null} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,

@@ -202,6 +202,94 @@ class BunkerDatabaseTests(unittest.TestCase):
                 content={"fields": remaining},
             )
 
+    def test_tracker_source_is_a_project_document_created_on_first_publish(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="ECS")
+        project_id = created["projects"][0]["id"]
+        source = {"provider": "github", "kind": "project", "owner": "example", "number": "8"}
+
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "one Project"):
+            bunkerdb.replace_configuration(
+                created["id"], project_id=None, kind="tracker-source", expected_revision="", content=source
+            )
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "Project number"):
+            bunkerdb.replace_configuration(
+                created["id"], project_id=project_id, kind="tracker-source",
+                expected_revision="", content={**source, "number": 0},
+            )
+
+        published = bunkerdb.replace_configuration(
+            created["id"], project_id=project_id, kind="tracker-source",
+            expected_revision="", content=source,
+        )
+
+        document = published["documents"]["tracker-source"]
+        self.assertEqual(document["revision"], "local:1")
+        self.assertEqual(document["content"]["number"], 8)
+        self.assertTrue(document["content"]["include_comments"])
+        self.assertEqual(
+            bunkerdb.get_bunker(created["id"])["projects"][0]["tracker"]["owner"], "example"
+        )
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "changed after"):
+            bunkerdb.replace_configuration(
+                created["id"], project_id=project_id, kind="tracker-source",
+                expected_revision="", content=source,
+            )
+
+        updated = bunkerdb.replace_configuration(
+            created["id"], project_id=project_id, kind="tracker-source",
+            expected_revision="local:1",
+            content={"provider": "github", "kind": "issues", "owner": "example", "repository": "example/coal"},
+        )
+
+        content = updated["documents"]["tracker-source"]["content"]
+        self.assertEqual(updated["documents"]["tracker-source"]["revision"], "local:2")
+        self.assertEqual(content["repository"], "coal")
+        self.assertEqual(bunkerdb.tracker_summary(content), "GitHub issues · example/coal")
+        self.assertEqual(bunkerdb.tracker_summary(document["content"]), "GitHub Project #8 · example")
+
+    def test_ticket_sync_proposal_classifies_created_updated_and_unchanged(self) -> None:
+        created = bunkerdb.create_bunker("Engineering", project_key="ECS")
+        project_id = created["projects"][0]["id"]
+        ticket = {
+            "id": "ECS-1",
+            "title": "One",
+            "status": "todo",
+            "metadata": {"source_url": "https://github.com/example/voxel/issues/1"},
+        }
+
+        proposal = bunkerdb.propose_ticket_sync(
+            created["id"], project_id=project_id, tickets=[ticket], source_kind="github"
+        )
+        self.assertEqual(proposal["results"], [{"ticket": "ECS-1", "action": "created"}])
+        self.assertEqual(proposal["changes"][0]["expected_revision"], "")
+        self.assertEqual(proposal["rows"][0]["source_reference"], "https://github.com/example/voxel/issues/1")
+        first = bunkerdb.apply_ticket_sync_change(created["id"], proposal)
+        self.assertEqual((first["created"], first["updated"], first["unchanged"]), (1, 0, 0))
+
+        again = bunkerdb.propose_ticket_sync(
+            created["id"], project_id=project_id, tickets=[ticket], source_kind="github"
+        )
+        self.assertEqual(again["results"][0]["action"], "unchanged")
+        self.assertEqual(again["changes"], [])
+
+        changed = bunkerdb.propose_ticket_sync(
+            created["id"], project_id=project_id,
+            tickets=[{**ticket, "title": "One, renamed"}], source_kind="github",
+        )
+        self.assertEqual(changed["results"][0]["action"], "updated")
+        self.assertEqual(changed["changes"][0]["expected_revision"], proposal["changes"][0]["revision"])
+        bunkerdb.apply_ticket_sync_change(created["id"], changed)
+        listed = bunkerdb.list_tickets(created["id"], project_id=project_id)
+        self.assertEqual([item["title"] for item in listed["tickets"]], ["One, renamed"])
+        self.assertEqual(listed["tickets"][0]["source_kind"], "github")
+
+        other = bunkerdb.create_project(created["id"], key="OTHER", name="Other")
+        other_id = next(value["id"] for value in other["projects"] if value["key"] == "OTHER")
+        with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "another Project"):
+            bunkerdb.propose_ticket_sync(
+                created["id"], project_id=other_id, tickets=[ticket], source_kind="github"
+            )
+
     def test_remote_configuration_snapshot_cannot_authorize_its_own_write(self) -> None:
         created = bunkerdb.create_bunker("Engineering", project_key="SYS")
         bunkerdb.configure_remote(

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import ConfigurationPanel from "./ConfigurationPanel";
+import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
 import { command } from "./transport";
-import type { AppState, Bunker, Invitation, Member, Project, TicketPage, TicketReference } from "./types";
+import { trackerSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
 import { relativeTime } from "./report";
 
 type Selection = { bunkerId: string; projectId?: string };
@@ -184,10 +184,12 @@ function TicketCatalog({
   bunker,
   project,
   onTicket,
+  version = 0,
 }: {
   bunker: Bunker;
   project?: Project;
   onTicket: (ticket: TicketReference) => void;
+  version?: number;
 }) {
   const [page, setPage] = useState<TicketPage | null>(null);
   const [query, setQuery] = useState("");
@@ -225,7 +227,7 @@ function TicketCatalog({
     return () => {
       active = false;
     };
-  }, [bunker.id, project?.id, committedQuery, status, assignee, reporter, label, pageNumber]);
+  }, [bunker.id, project?.id, committedQuery, status, assignee, reporter, label, pageNumber, version]);
 
   const groups = useMemo(() => {
     const values = new Map<string, TicketReference[]>();
@@ -449,6 +451,9 @@ export default function BunkerHub({
   notify,
 }: Props) {
   const [action, setAction] = useState<ActionMode>("");
+  const [configTab, setConfigTab] = useState<ConfigurationTab | undefined>(undefined);
+  const [syncing, setSyncing] = useState(false);
+  const [catalogVersion, setCatalogVersion] = useState(0);
   const [importing, setImporting] = useState("");
   const bunker = state.bunkers.find((value) => value.id === selection?.bunkerId);
   const projects = bunker ? flatten(bunker.projects) : [];
@@ -473,6 +478,29 @@ export default function BunkerHub({
     } finally {
       setImporting("");
     }
+  }
+
+  async function syncTickets() {
+    if (!bunker || !project) return;
+    setSyncing(true);
+    try {
+      const result = await command<{ sync: { created: number; updated: number; unchanged: number; source: string }; bunkers: Bunker[] }>(
+        "application.project.sync",
+        { bunker_id: bunker.id, project_id: project.id },
+      );
+      onState({ ...state, bunkers: result.bunkers });
+      setCatalogVersion((value) => value + 1);
+      notify(`Synced ${result.sync.source}: ${result.sync.created} new, ${result.sync.updated} updated, ${result.sync.unchanged} unchanged`);
+    } catch (reason) {
+      notify(String(reason), true);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function openConfiguration(tab?: ConfigurationTab) {
+    setConfigTab(tab);
+    setAction("config");
   }
 
   return (
@@ -534,7 +562,7 @@ export default function BunkerHub({
               <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
             </div>
             <div className="header-actions">
-              <button onClick={() => setAction("config")}>Configure</button>
+              <button onClick={() => openConfiguration()}>Configure</button>
               {bunker.remote ? <button onClick={() => setAction("members")}>Members</button> : <button onClick={() => setAction("share")}>Share Bunker</button>}
               <button className="primary" onClick={() => setAction("project")}>Add project</button>
             </div>
@@ -552,19 +580,23 @@ export default function BunkerHub({
               </nav>
               <h1><span className="project-key">{project.key}</span>{project.name}</h1>
               {project.description && <p className="project-description">{project.description}</p>}
+              <p className="tracker-line">{project.tracker ? trackerSummary(project.tracker) : "No tracker connected"}</p>
             </div>
             <div className="header-actions">
-              <button onClick={() => setAction("config")}>Configure</button>
+              <button onClick={() => openConfiguration()}>Configure</button>
+              {project.tracker
+                ? <button disabled={syncing} onClick={syncTickets}>{syncing ? "Syncing…" : "Sync tickets"}</button>
+                : <button onClick={() => openConfiguration("tracker")}>Connect tracker</button>}
               <button className="primary" onClick={() => setAction("project")}>Add subproject</button>
             </div>
           </header>
           {(project.children || []).length > 0 && <ProjectCatalog bunker={bunker} projects={project.children || []} title="Subprojects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />}
-          <TicketCatalog bunker={bunker} project={project} onTicket={(ticket) => onTicket(bunker.id, ticket)} />
+          <TicketCatalog bunker={bunker} project={project} version={catalogVersion} onTicket={(ticket) => onTicket(bunker.id, ticket)} />
         </>}
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
       {action === "members" && bunker && <MembersPanel bunker={bunker} onClose={() => setAction("")} notify={notify} />}
-      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} onClose={() => setAction("")} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} notify={notify} />}
+      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} notify={notify} />}
     </div>
   );
 }

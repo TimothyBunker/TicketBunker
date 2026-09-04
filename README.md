@@ -178,6 +178,19 @@ The desktop launcher is the primary onboarding path:
    for owners, creates single-use invitation links and revokes pending ones.
    Nothing accepts a database connection string.
 
+### Bringing tickets in from your agile app
+
+1. In Settings → Trackers, paste a GitHub personal access token. It stays in a
+   private file on this computer.
+2. Open the Project, choose **Connect tracker**, and name the GitHub Project
+   board (owner and number) or repository whose issues it mirrors.
+3. Press **Sync tickets**. Issues arrive as tickets keyed by the Project key
+   and issue number unless their titles already carry a key. Syncing again
+   reports what was new, updated, or unchanged.
+
+GitLab and Jira tokens can be connected the same way; syncing those boards is
+the next step.
+
 ### Sharing with a small team
 
 You do not need a database server. Run the reference service on any machine

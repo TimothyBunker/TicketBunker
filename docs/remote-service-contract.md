@@ -195,9 +195,14 @@ roles and capabilities to any member.
 ```
 
 Change kinds are `project` (payload: the project row, `expected_revision`
-empty for creation), `config-document` (payload: scope, kind, content), and
+empty for creation), `config-document` (payload: scope, kind, content),
 `repository-bindings` (record id: the project id; payload: the complete list;
-revisions are the content-derived digest both sides compute). Each change
+revisions are the content-derived digest both sides compute), and `ticket`
+(record id: the ticket id; payload: `id`, `project_id`, `payload`,
+`source_kind`, `source_reference`; revisions are content digests). The first
+three require `config:write`; `ticket` requires `tickets:write`, so members
+may sync a Project's tracker while only owners change its setup. A batch that
+mixes kinds needs every capability involved. Each change
 carries an idempotency `key`, a record identity, the expected revision, and the
 revision the client proposes. The service applies the whole set transactionally
 and returns `results` (per key: `ok`, `revision`, and `replayed` when the key
@@ -231,7 +236,8 @@ Project repositories without assigning the ticket itself to one repository.
 - `404`: the Bunker or invitation is unavailable to this user
   (`bunker_unavailable`, `invitation_invalid`);
 - `409`: an expected revision conflicts, or setup was already completed
-  (`revision_conflict`, `project_key_taken`, `setup_complete`);
+  (`revision_conflict`, `project_key_taken`, `ticket_conflict`,
+  `setup_complete`);
 - `410`: the invitation was used, revoked, or expired (`invitation_used`,
   `invitation_revoked`, `invitation_expired`);
 - `413`: the request exceeds the 8 MiB bound;

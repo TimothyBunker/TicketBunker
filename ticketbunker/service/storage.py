@@ -708,7 +708,13 @@ class ServiceStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                self._require_member(connection, bunker_id, user_id, "config:write")
+                needed = {
+                    remote.CHANGE_CAPABILITIES.get(str(item.get("kind") or ""), "config:write")
+                    for item in items
+                    if isinstance(item, Mapping)
+                }
+                for capability in sorted(needed):
+                    self._require_member(connection, bunker_id, user_id, capability)
                 results = []
                 conflicts = []
                 for raw in items:
@@ -725,7 +731,7 @@ class ServiceStore:
                     try:
                         revision = self._apply_one(connection, bunker_id, raw)
                     except ServiceError as exc:
-                        if exc.code in {"revision_conflict", "project_key_taken"}:
+                        if exc.code in {"revision_conflict", "project_key_taken", "ticket_conflict"}:
                             conflicts.append({"key": key, "ok": False, "code": exc.code, "message": exc.message})
                             continue
                         raise
@@ -788,7 +794,39 @@ class ServiceStore:
             return self._apply_project(connection, bunker_id, record_id, expected, revision, payload, now)
         if kind == "config-document":
             return self._apply_config_document(connection, bunker_id, record_id, expected, revision, payload, now)
+        if kind == "ticket":
+            return self._apply_ticket(connection, bunker_id, record_id, expected, revision, payload, now)
         return self._apply_repository_bindings(connection, bunker_id, record_id, expected, revision, payload, now)
+
+    def _apply_ticket(
+        self, connection, bunker_id, record_id, expected, revision, payload, now
+    ) -> str:
+        if not isinstance(payload, Mapping):
+            raise ServiceError(400, "changes_invalid", "A ticket change needs a ticket object.")
+        project_id = _identifier(payload.get("project_id"), "ticket project")
+        if self._current_revision(connection, bunker_id, "project", project_id) == "":
+            raise ServiceError(409, "revision_conflict", "The ticket's project is missing.")
+        ticket_payload = payload.get("payload")
+        if not isinstance(ticket_payload, Mapping):
+            raise ServiceError(400, "changes_invalid", "A ticket change needs an object payload.")
+        if _identifier(payload.get("id"), "ticket") != record_id:
+            raise ServiceError(400, "changes_invalid", "The ticket record identity does not match its payload.")
+        current = self._current_revision(connection, bunker_id, "ticket", record_id)
+        if current != expected:
+            raise ServiceError(409, "ticket_conflict", "The ticket changed elsewhere.")
+        value = {
+            "id": record_id,
+            "project_id": project_id,
+            "payload": dict(ticket_payload),
+            "source_kind": str(payload.get("source_kind") or "remote")[:64],
+            "source_reference": str(payload.get("source_reference") or "")[:512],
+            "revision": revision,
+            "updated_at": now,
+        }
+        if len(json.dumps(value).encode("utf-8")) > 2 * 1024 * 1024:
+            raise ServiceError(400, "changes_invalid", "A ticket is too large.")
+        self._upsert(connection, bunker_id, "ticket", record_id, value, revision, now)
+        return revision
 
     def _current_revision(
         self, connection: sqlite3.Connection, bunker_id: str, kind: str, record_id: str

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from ticketbunker import agent_runtime, application, bunkerdb, commands, config, credentials
+from ticketbunker import agent_runtime, application, bunkerdb, commands, config, credentials, projectconfig
+from ticketbunker.integrations import github
 from ticketbunker.service import server as service_server
 from ticketbunker.service import storage as service_storage
 
@@ -700,6 +701,44 @@ class SharedBunkerTests(unittest.TestCase):
             self.dispatch("application.bunker.join", {"invitation": invitation["link"]})
         self.assertIn("already used", reused.exception.message)
 
+        # The owner connects the Project's tracker board and syncs it; every
+        # ticket is accepted by the service before it lands locally.
+        self.as_user("tim")
+        self.dispatch(
+            "application.bunker.configuration.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": project_id,
+                "kind": "tracker-source",
+                "expected_revision": "",
+                "content": {"provider": "github", "kind": "project", "owner": "example", "number": 8},
+            },
+        )
+        with mock.patch.dict(os.environ, {"GITHUB_ACCESS_TOKEN": "ghp_owner"}):
+            with mock.patch.object(github, "collect_entries", return_value=[github_entry(4), github_entry(5)]):
+                synced = self.dispatch(
+                    "application.project.sync", {"bunker_id": created["id"], "project_id": project_id}
+                )["sync"]
+        self.assertEqual(synced["created"], 2)
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-8")
+
+        # A member joining afterwards receives the tracker and its tickets, and
+        # may sync too because members hold tickets:write.
+        late_link = self.dispatch(
+            "application.bunker.invitation.create", {"bunker_id": created["id"]}
+        )["invitation"]["link"]
+        self.as_user("lin")
+        late = self.dispatch("application.bunker.join", {"invitation": late_link})["bunker"]
+        self.assertEqual(late["projects"][0]["tracker"]["number"], 8)
+        self.assertEqual(late["projects"][0]["ticket_count"], 2)
+        late_project = late["projects"][0]["id"]
+        with mock.patch.dict(os.environ, {"GITHUB_ACCESS_TOKEN": "ghp_member"}):
+            with mock.patch.object(github, "collect_entries", return_value=[github_entry(4), github_entry(5, "Done"), github_entry(6)]):
+                member_sync = self.dispatch(
+                    "application.project.sync", {"bunker_id": late["id"], "project_id": late_project}
+                )["sync"]
+        self.assertEqual((member_sync["created"], member_sync["updated"], member_sync["unchanged"]), (1, 1, 1))
+
         # Only the owner revokes invitations.
         self.as_user("tim")
         second = self.dispatch(
@@ -712,5 +751,158 @@ class SharedBunkerTests(unittest.TestCase):
         self.assertEqual({item["id"]: item["state"] for item in revoked}[second["id"]], "revoked")
         self.assertEqual(
             sorted(item["role"] for item in self.dispatch("application.bunker.members", {"bunker_id": created["id"]})["members"]),
-            ["member", "owner"],
+            ["member", "member", "owner"],
         )
+
+
+def github_entry(number: int, status: str = "Todo", *, keyed: bool = False) -> dict[str, Any]:
+    title = f"ECS-{number} Mock ticket {number}" if keyed else f"Mock ticket {number}"
+    return {
+        "issue": {
+            "node_id": f"I_{number}",
+            "number": number,
+            "title": title,
+            "body": f"Description {number}",
+            "state": "open",
+            "html_url": f"https://github.com/example/voxel/issues/{number}",
+            "created_at": "2026-08-20T12:00:00Z",
+            "updated_at": "2026-08-21T12:00:00Z",
+            "user": {"login": "Tim"},
+            "assignee": {"login": "Ada"},
+            "assignees": [{"login": "Ada"}],
+            "labels": [{"name": "ecs"}],
+        },
+        "comments": [],
+        "project": {
+            "owner": "example",
+            "number": 8,
+            "title": "Voxel ECS",
+            "url": "https://github.com/users/example/projects/8",
+            "item_id": f"PVTI_{number}",
+            "fields": {"Status": status},
+        },
+    }
+
+
+class TrackerSyncTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name).resolve()
+        # The credential file lives in the user's home, never inside the
+        # working tree the command runs from.
+        (self.root / "home").mkdir()
+        (self.root / "work").mkdir()
+        self.patches = [
+            mock.patch.object(config, "GLOBAL_CONFIG", self.root / "home" / ".tbconfig"),
+            mock.patch.dict(os.environ, {"TB_DATA_HOME": str(self.root / "home" / "app-data")}),
+            mock.patch.object(
+                projectconfig, "credential_file", return_value=self.root / "home" / "credentials.env"
+            ),
+        ]
+        for patch in self.patches:
+            patch.start()
+        os.environ.pop("GITHUB_ACCESS_TOKEN", None)
+        self.context = commands.CommandContext(self.root / "work", transport="desktop")
+
+    def tearDown(self) -> None:
+        for patch in reversed(self.patches):
+            patch.stop()
+        self.tempdir.cleanup()
+
+    def dispatch(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return commands.dispatch(action, payload, self.context)
+
+    def test_a_project_syncs_its_tracker_board_into_tickets(self) -> None:
+        created = self.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "ECS", "project_name": "Entity Component System"},
+        )["bunker"]
+        project_id = created["projects"][0]["id"]
+        self.assertFalse(application.state()["trackers"]["github"])
+
+        with self.assertRaises(commands.CommandRejected) as no_tracker:
+            self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})
+        self.assertEqual(no_tracker.exception.code, "tracker_required")
+
+        configured = self.dispatch(
+            "application.bunker.configuration.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": project_id,
+                "kind": "tracker-source",
+                "expected_revision": "",
+                "content": {"provider": "github", "kind": "project", "owner": "example", "number": 8},
+            },
+        )
+        self.assertEqual(configured["documents"]["tracker-source"]["content"]["owner"], "example")
+        self.assertEqual(
+            bunkerdb.get_bunker(created["id"])["projects"][0]["tracker"]["number"], 8
+        )
+
+        with self.assertRaises(commands.CommandRejected) as no_token:
+            self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})
+        self.assertEqual(no_token.exception.code, "tracker_token_required")
+        self.assertIn("Settings", no_token.exception.message)
+
+        saved = self.dispatch("credentials.update", {"provider": "github", "token": "ghp_test"})
+        self.assertTrue(saved["credentials"]["github"])
+        self.assertTrue(application.state()["trackers"]["github"])
+        self.assertNotIn("ghp_test", json.dumps(application.state()))
+
+        # Issue #12 carries a deliberate "ECS-2" title key while issue #2 has
+        # none. The keyed title wins ECS-2; the bare #2 gets the next free
+        # number and keeps it on later syncs through its source identity.
+        stale = github_entry(12)
+        stale["issue"]["title"] = "ECS-2 Renamed later"
+        with mock.patch.object(
+            github, "collect_entries",
+            return_value=[github_entry(4), github_entry(5, "In Progress"), github_entry(9, keyed=True), github_entry(2), stale],
+        ) as collect:
+            result = self.dispatch(
+                "application.project.sync", {"bunker_id": created["id"], "project_id": project_id}
+            )
+        source, token = collect.call_args.args
+        self.assertEqual((source["owner"], source["number"], token), ("example", 8, "ghp_test"))
+        self.assertEqual((result["sync"]["created"], result["sync"]["updated"], result["sync"]["unchanged"]), (5, 0, 0))
+        self.assertEqual(result["sync"]["source"], "GitHub Project #8 · example")
+        self.assertEqual(result["bunker"]["projects"][0]["ticket_count"], 5)
+
+        listed = self.dispatch(
+            "application.ticket.list", {"bunker_id": created["id"], "project_id": project_id}
+        )
+        self.assertEqual({item["id"] for item in listed["tickets"]}, {"ECS-2", "ECS-4", "ECS-5", "ECS-9", "ECS-10"})
+        by_id = {item["id"]: item for item in listed["tickets"]}
+        self.assertEqual(by_id["ECS-4"]["title"], "Mock ticket 4")
+        self.assertEqual(by_id["ECS-9"]["title"], "Mock ticket 9")
+        self.assertEqual(by_id["ECS-2"]["title"], "Renamed later")
+        self.assertEqual(by_id["ECS-10"]["title"], "Mock ticket 2")
+        self.assertEqual(by_id["ECS-5"]["status"], "in-progress")
+        self.assertEqual(by_id["ECS-4"]["assignee"], "Ada")
+        detail = self.dispatch(
+            "application.ticket.get", {"bunker_id": created["id"], "ticket_id": "ECS-4"}
+        )
+        self.assertEqual(detail["ticket"]["source_kind"], "github")
+        self.assertEqual(detail["ticket"]["source_reference"], "https://github.com/example/voxel/issues/4")
+
+        with mock.patch.object(
+            github, "collect_entries",
+            return_value=[github_entry(2), github_entry(4), github_entry(5, "Done"), github_entry(9, keyed=True), stale],
+        ):
+            second = self.dispatch(
+                "application.project.sync", {"bunker_id": created["id"], "project_id": project_id}
+            )["sync"]
+        self.assertEqual((second["created"], second["updated"], second["unchanged"]), (0, 1, 4))
+        after = self.dispatch(
+            "application.ticket.list",
+            {"bunker_id": created["id"], "project_id": project_id, "status": "all"},
+        )
+        self.assertEqual({item["id"] for item in after["tickets"]}, {"ECS-2", "ECS-4", "ECS-5", "ECS-9", "ECS-10"})
+        self.assertEqual({item["id"]: item["status"] for item in after["tickets"]}["ECS-5"], "done")
+        self.assertEqual({item["id"]: item["title"] for item in after["tickets"]}["ECS-10"], "Mock ticket 2")
+
+        with mock.patch.object(github, "collect_entries", side_effect=github.GitHubError("GitHub returned HTTP 401: Bad credentials")):
+            with self.assertRaises(commands.CommandRejected) as failed:
+                self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})
+        self.assertEqual(failed.exception.code, "tracker_unreachable")
+        self.assertIn("Settings → Trackers", failed.exception.message)
+

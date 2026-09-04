@@ -13,6 +13,7 @@ import os
 import platform
 import shlex
 import shutil
+import ssl
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -188,6 +189,43 @@ class PlatformServices:
                     candidates.append(candidate)
         return candidates
 
+    def ca_bundle_candidates(self) -> tuple[str, ...]:
+        """Host certificate bundles for interpreters that ship none of their own."""
+        if self.family == "macos":
+            return ("/etc/ssl/cert.pem", "/private/etc/ssl/cert.pem")
+        if self.family == "linux":
+            return (
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/ssl/ca-bundle.pem",
+                "/etc/ssl/cert.pem",
+            )
+        return ()
+
+    def https_context(self) -> ssl.SSLContext:
+        """A verifying TLS context that works on hosts without Python's bundle.
+
+        python.org macOS builds and some frozen cores point OpenSSL at a
+        certificate path that does not exist, which fails every HTTPS request
+        with CERTIFICATE_VERIFY_FAILED. When the interpreter's own paths are
+        absent, trust the operating system's bundle instead. Windows loads its
+        certificate store through the default context already.
+        """
+        context = ssl.create_default_context()
+        paths = ssl.get_default_verify_paths()
+        has_file = bool(paths.cafile) and os.path.isfile(str(paths.cafile))
+        has_dir = bool(paths.capath) and os.path.isdir(str(paths.capath))
+        if has_file or has_dir or self.is_windows:
+            return context
+        for candidate in self.ca_bundle_candidates():
+            if os.path.isfile(candidate):
+                try:
+                    context.load_verify_locations(cafile=candidate)
+                except (ssl.SSLError, OSError):
+                    continue
+                break
+        return context
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "family": self.family,
@@ -195,6 +233,17 @@ class PlatformServices:
             "runtime_key": self.runtime_key or "",
             "data_home": str(self.data_home()),
         }
+
+
+_HTTPS_CONTEXT: ssl.SSLContext | None = None
+
+
+def https_context() -> ssl.SSLContext:
+    """One shared verifying context for every outbound HTTPS call in the core."""
+    global _HTTPS_CONTEXT
+    if _HTTPS_CONTEXT is None:
+        _HTTPS_CONTEXT = current().https_context()
+    return _HTTPS_CONTEXT
 
 
 def current() -> PlatformServices:

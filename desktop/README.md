@@ -55,7 +55,9 @@ service publishes configuration, even if a cached snapshot names a write
 capability.
 
 A Bunker page lists its Projects with repository and ticket counts; the ticket
-catalog lives inside a selected Project, after that Project's subprojects. Only
+catalog lives inside a selected Project, after that Project's subprojects. A
+Project page names its tracker board and offers Sync tickets or Connect
+tracker; Settings → Trackers connects tracker tokens to this computer. Only
 the Bunker header exposes service connectivity (Share Bunker, then Members).
 Projects never show a database or remote-service connection action. Their Repositories tab separates
 shared canonical remotes from the current computer's local checkout mappings.
