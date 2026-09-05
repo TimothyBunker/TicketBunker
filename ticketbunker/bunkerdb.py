@@ -672,6 +672,17 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
             """
         ).fetchall()
     }
+    connections_row = connection.execute(
+        """
+        SELECT content_json FROM config_documents
+        WHERE scope_type = 'bunker' AND kind = 'connections'
+        """
+    ).fetchone()
+    connections = (
+        _payload_object(connections_row["content_json"]).get("providers")
+        if connections_row is not None
+        else {}
+    )
     remote_value = dict(connection_row) if connection_row else None
     membership = None
     if remote_value is not None:
@@ -704,6 +715,7 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "remote": remote_value,
         "membership": membership,
         "sharing": _sharing(str(row["mode"]), remote_value, membership),
+        "connections": connections if isinstance(connections, dict) else {},
         "projects": _project_tree(projects, ticket_counts, trackers),
         "project_count": len(projects),
         "repositories": repositories,
@@ -929,7 +941,7 @@ def get_configuration(
             SELECT kind, revision, content_json, updated_at
             FROM config_documents
             WHERE scope_type = ? AND scope_id = ?
-              AND kind IN ('ticket-fields', 'integrations', 'tracker-source')
+              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'connections')
             ORDER BY kind
             """,
             (scope_type, scope_id),
@@ -1073,8 +1085,8 @@ def propose_configuration(
     """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
-    if document_kind not in {"ticket-fields", "integrations", "tracker-source"}:
-        raise BunkerDatabaseError("Choose Ticket fields, Integrations, or Tracker to publish.")
+    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "connections"}:
+        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Tracker, or Connections to publish.")
     if not isinstance(content, Mapping):
         raise BunkerDatabaseError("Configuration content must be one object.")
     with _database(bunker_id) as connection:
@@ -1083,6 +1095,8 @@ def propose_configuration(
         )
         if document_kind == "tracker-source" and scope_type != "project":
             raise BunkerDatabaseError("A tracker belongs to one Project, not to Bunker defaults.")
+        if document_kind == "connections" and scope_type != "bunker":
+            raise BunkerDatabaseError("Tracker connections belong to the Bunker, not to one Project.")
         mode = str(bunker.get("mode") or "local")
         permission = _config_permission(connection, bunker)
         if not permission["can_write"]:
@@ -1094,7 +1108,7 @@ def propose_configuration(
             """,
             (scope_type, scope_id, document_kind),
         ).fetchone()
-        if current is None and document_kind != "tracker-source":
+        if current is None and document_kind not in CREATABLE_DOCUMENTS:
             raise BunkerDatabaseError("That configuration document is missing. Reopen the editor.")
         current_revision = str(current["revision"]) if current is not None else ""
         if current is None:
@@ -1108,6 +1122,8 @@ def propose_configuration(
             )
         if document_kind == "tracker-source":
             normalized = _validated_tracker_source(content)
+        elif document_kind == "connections":
+            normalized = _validated_connections(content)
         elif document_kind == "ticket-fields":
             normalized = _validated_ticket_fields(content)
             available = {str(value["key"]) for value in normalized["fields"]}
@@ -1275,7 +1291,9 @@ def replace_configuration(
 
 
 TRACKER_PROVIDERS = {"github": "GitHub"}
+CONNECTION_PROVIDERS = {"github": "GitHub", "gitlab": "GitLab", "jira": "Jira"}
 TRACKER_KINDS = {"project": "Project board", "issues": "Repository issues"}
+CREATABLE_DOCUMENTS = {"tracker-source", "connections"}
 _GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 _GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
@@ -1308,20 +1326,53 @@ def _validated_tracker_source(content: Mapping[str, Any]) -> dict[str, Any]:
             repository = repository.split("/")[-1]
         if not _GITHUB_REPO_RE.fullmatch(repository):
             raise BunkerDatabaseError("Enter the repository name whose issues to sync.")
+    title = " ".join(str(content.get("title") or "").split())[:200]
+    url = str(content.get("url") or "").strip()[:500]
+    if url and not url.startswith("https://"):
+        raise BunkerDatabaseError("A board link must start with https://.")
     return {
         "provider": provider,
         "kind": kind,
         "owner": owner,
         "number": number,
         "repository": repository,
+        "title": title,
+        "url": url,
         "include_comments": bool(content.get("include_comments", True)),
     }
+
+
+def _validated_connections(content: Mapping[str, Any]) -> dict[str, Any]:
+    """Bunker-level tracker connections: which account each provider is linked as."""
+    raw = content.get("providers")
+    if not isinstance(raw, Mapping):
+        raise BunkerDatabaseError("Connections must map providers to accounts.")
+    providers: dict[str, Any] = {}
+    for key, value in raw.items():
+        provider = str(key or "").strip().lower()
+        if provider not in CONNECTION_PROVIDERS:
+            raise BunkerDatabaseError(f"Unknown tracker provider {provider!r}.")
+        if not isinstance(value, Mapping):
+            raise BunkerDatabaseError(f"The {provider} connection must be an object.")
+        account = " ".join(str(value.get("account") or "").split())[:100]
+        if not account:
+            raise BunkerDatabaseError(f"The {provider} connection needs an account.")
+        providers[provider] = {
+            "account": account,
+            "name": " ".join(str(value.get("name") or "").split())[:120],
+            "connected_at": str(value.get("connected_at") or "")[:40],
+            "connected_by": " ".join(str(value.get("connected_by") or "").split())[:120],
+        }
+    return {"providers": providers}
 
 
 def tracker_summary(source: Mapping[str, Any] | None) -> str:
     if not source:
         return ""
     label = TRACKER_PROVIDERS.get(str(source.get("provider") or ""), str(source.get("provider") or ""))
+    title = str(source.get("title") or "").strip()
+    if title:
+        return f"{label} · {title}"
     if str(source.get("kind")) == "project":
         return f"{label} Project #{source.get('number')} · {source.get('owner')}"
     return f"{label} issues · {source.get('owner')}/{source.get('repository')}"

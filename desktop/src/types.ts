@@ -5,6 +5,19 @@ export type TrackerSource = {
   number: number;
   repository: string;
   include_comments: boolean;
+  title?: string;
+  url?: string;
+};
+
+export type Board = {
+  kind: string;
+  owner: string;
+  number: number;
+  repository: string;
+  title: string;
+  url: string;
+  open_issues?: number;
+  private?: boolean;
 };
 
 export type Project = {
@@ -51,6 +64,7 @@ export type Bunker = {
     can_manage_members: boolean;
     server: string;
   };
+  connections?: Record<string, { account: string; name?: string }>;
   projects: Project[];
   repositories: Repository[];
   project_count: number;
@@ -201,12 +215,19 @@ export type ConfigurationState = {
       updated_at: string;
       content: TrackerSource;
     };
+    connections?: {
+      kind: "connections";
+      revision: string;
+      updated_at: string;
+      content: { providers: Record<string, { account: string; name?: string }> };
+    };
   };
 };
 
 export function trackerSummary(tracker: TrackerSource | null | undefined): string {
   if (!tracker) return "";
   const label = tracker.provider === "github" ? "GitHub" : tracker.provider;
+  if (tracker.title) return `${label} · ${tracker.title}`;
   return tracker.kind === "project"
     ? `${label} Project #${tracker.number} · ${tracker.owner}`
     : `${label} issues · ${tracker.owner}/${tracker.repository}`;

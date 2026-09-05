@@ -56,8 +56,9 @@ capability.
 
 A Bunker page lists its Projects with repository and ticket counts; the ticket
 catalog lives inside a selected Project, after that Project's subprojects. A
-Project page names its tracker board and offers Sync tickets or Connect
-tracker; Settings → Trackers connects tracker tokens to this computer. Only
+Project page names its board and offers Sync tickets or Connect a board, whose
+Board view lists the boards this computer's token can see and links one by
+selection; Bunker-level Trackers and Settings → Trackers connect tokens. Only
 the Bunker header exposes service connectivity (Share Bunker, then Members).
 Projects never show a database or remote-service connection action. Their Repositories tab separates
 shared canonical remotes from the current computer's local checkout mappings.

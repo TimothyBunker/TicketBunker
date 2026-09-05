@@ -744,6 +744,192 @@ def command_credentials_state(
     }
 
 
+def _record_connection(
+    bunker_id: str, provider: str, account: Mapping[str, str], connected_by: str
+) -> dict[str, Any]:
+    """Note the linked account on the Bunker when this member may write config."""
+    import datetime
+
+    try:
+        configuration = bunkerdb.get_configuration(bunker_id)
+        if not configuration["permission"]["can_write"]:
+            return {"recorded": False, "note": "Only a Bunker owner can record the linked account for everyone."}
+        document = configuration["documents"].get("connections") or {}
+        providers = dict((document.get("content") or {}).get("providers") or {})
+        providers[provider] = {
+            "account": str(account.get("login") or ""),
+            "name": str(account.get("name") or ""),
+            "connected_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "connected_by": connected_by,
+        }
+        proposal = bunkerdb.propose_configuration(
+            bunker_id,
+            project_id=None,
+            kind="connections",
+            expected_revision=str(document.get("revision") or ""),
+            content={"providers": providers},
+        )
+        accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+        bunkerdb.apply_configuration_change(bunker_id, proposal, accepted=accepted)
+    except (bunkerdb.BunkerDatabaseError, remote.RemoteContractError, commands.CommandRejected) as exc:
+        return {"recorded": False, "note": str(exc)}
+    return {"recorded": True, "note": ""}
+
+
+@commands.register("application.tracker.connect")
+def command_tracker_connect(
+    context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Verify a tracker token, keep it on this computer, and note the account."""
+    from .integrations import github
+
+    provider = str(payload.get("provider") or "").strip().lower()
+    token = str(payload.get("token") or "").strip()
+    if provider not in bunkerdb.CONNECTION_PROVIDERS:
+        raise commands.CommandRejected("tracker_unknown", "Choose GitHub, GitLab, or Jira.")
+    if not token:
+        raise commands.CommandRejected("credential_required", "Paste a personal access token first.")
+    account = {"login": "", "name": ""}
+    if provider == "github":
+        try:
+            discovered = github.discover(token)
+        except github.GitHubError as exc:
+            raise commands.CommandRejected(
+                "tracker_token_rejected",
+                f"GitHub did not accept this token ({exc}). Create a personal access token with repository and Projects read access, then retry.",
+            ) from exc
+        account = dict(discovered["account"])
+    saved = commands.dispatch("credentials.update", {"provider": provider, "token": token}, context)
+    result: dict[str, Any] = {
+        "connection": {"provider": provider, "account": account["login"], "name": account["name"]},
+        "trackers": saved["credentials"],
+    }
+    bunker_id = str(payload.get("bunker_id") or "")
+    if bunker_id and account["login"]:
+        profile = _profile(config.load())
+        result["connection"].update(
+            _record_connection(bunker_id, provider, account, str(profile.get("name") or ""))
+        )
+        result["bunker"] = _bunker_result(bunkerdb.get_bunker, bunker_id)
+    return result
+
+
+@commands.register("application.tracker.boards")
+def command_tracker_boards(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """List the boards this computer's token can mirror, for picking one."""
+    from .integrations import github
+
+    provider = str(payload.get("provider") or "github").strip().lower()
+    if provider != "github":
+        raise commands.CommandRejected(
+            "tracker_unsupported", "This version lists GitHub boards. GitLab and Jira are coming."
+        )
+    token = projectconfig.credential_value("github")
+    if not token:
+        raise commands.CommandRejected(
+            "tracker_token_required", "Connect GitHub with a token first, then choose a board."
+        )
+    try:
+        return github.discover(token)
+    except github.GitHubError as exc:
+        raise commands.CommandRejected(
+            "tracker_unreachable",
+            f"GitHub could not list your boards ({exc}). Check the token, then retry.",
+        ) from exc
+
+
+def _apply_document(
+    bunker_id: str, project_id: str, kind: str, expected_revision: str, content: Mapping[str, Any]
+) -> dict[str, Any]:
+    proposal = _bunker_result(
+        bunkerdb.propose_configuration,
+        bunker_id,
+        project_id=project_id,
+        kind=kind,
+        expected_revision=expected_revision,
+        content=content,
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    return _bunker_result(bunkerdb.apply_configuration_change, bunker_id, proposal, accepted=accepted)
+
+
+@commands.register("application.project.link")
+def command_project_link(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Link a chosen board: scan it, build the Project's model, record the board."""
+    from .integrations import github
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    project_id = str(payload.get("project_id") or "")
+    board = payload.get("board")
+    if not isinstance(board, dict):
+        raise commands.CommandRejected("board_required", "Choose a board from the list first.")
+    source = {
+        "provider": "github",
+        "kind": str(board.get("kind") or ""),
+        "owner": str(board.get("owner") or ""),
+        "number": board.get("number") or 0,
+        "repository": str(board.get("repository") or ""),
+        "title": str(board.get("title") or ""),
+        "url": str(board.get("url") or ""),
+        "include_comments": bool(payload.get("include_comments", True)),
+    }
+    token = projectconfig.credential_value("github")
+    if not token:
+        raise commands.CommandRejected(
+            "tracker_token_required", "Connect GitHub with a token first, then link a board."
+        )
+    try:
+        inspection = github.inspect_board(source, token)
+    except (github.GitHubError, ValueError) as exc:
+        raise commands.CommandRejected(
+            "tracker_unreachable", f"GitHub could not read that board ({exc}). Retry, or pick another board."
+        ) from exc
+    if inspection.get("title"):
+        source["title"] = str(inspection["title"])
+    if inspection.get("url"):
+        source["url"] = str(inspection["url"])
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id)
+    documents = configuration["documents"]
+    fields = list((documents.get("ticket-fields", {}).get("content") or {}).get("fields") or [])
+    providers = dict((documents.get("integrations", {}).get("content") or {}).get("providers") or {})
+    github_settings = dict(providers.get("github") or bunkerdb.DEFAULT_INTEGRATIONS["github"])
+    derived = github.derive_model(inspection, fields, dict(github_settings.get("fields") or {}))
+    # The model is published before the board is recorded, and fields before the
+    # mapping that references them, so every step validates against what exists.
+    configuration = _apply_document(
+        bunker_id, project_id, "ticket-fields",
+        str(documents.get("ticket-fields", {}).get("revision") or ""),
+        {"fields": derived["fields"]},
+    )
+    providers["github"] = {**github_settings, "fields": derived["mapping"]}
+    configuration = _apply_document(
+        bunker_id, project_id, "integrations",
+        str(configuration["documents"].get("integrations", {}).get("revision") or ""),
+        {"providers": providers},
+    )
+    configuration = _apply_document(
+        bunker_id, project_id, "tracker-source",
+        str(configuration["documents"].get("tracker-source", {}).get("revision") or ""),
+        source,
+    )
+    return {
+        "configuration": configuration,
+        "bunker": bunkerdb.get_bunker(bunker_id),
+        "bunkers": bunkerdb.list_bunkers(),
+        "link": {
+            "summary": derived["summary"],
+            "fields_found": len(inspection.get("fields") or []),
+            "labels_found": len(inspection.get("labels") or []),
+            "items": int(inspection.get("items") or 0),
+            "source": bunkerdb.tracker_summary(source),
+        },
+    }
+
+
 @commands.register("application.project.sync")
 def command_project_sync(
     _context: commands.CommandContext, payload: dict[str, Any]

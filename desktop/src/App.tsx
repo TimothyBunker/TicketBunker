@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BunkerHub from "./BunkerHub";
 import TicketWorkspace from "./TicketWorkspace";
+import TrackerConnections from "./TrackerConnections";
 import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal, OFFLINE_MESSAGE } from "./transport";
 import type { AppState, SourceDraft, TicketReference } from "./types";
 
@@ -91,7 +92,6 @@ function DirectEditor({
 }
 
 type Provider = { id: string; name: string; models: Array<{ id: string; name: string }>; methods: string[] };
-const TRACKER_LABELS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", jira: "Jira" };
 
 function AgentSetup({
   state,
@@ -272,19 +272,6 @@ function Settings({
       setMessage(String(reason));
     }
   }
-  async function saveToken(provider: string, event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const token = String(new FormData(form).get("token") || "");
-    try {
-      const result = await command<{ credentials: Record<string, boolean> }>("credentials.update", { provider, token });
-      onState({ ...state, trackers: result.credentials });
-      form.reset();
-      setMessage(`${TRACKER_LABELS[provider] || provider} token saved on this computer`);
-    } catch (reason) {
-      setMessage(String(reason));
-    }
-  }
   async function checkRelease() {
     setCheckingRelease(true);
     setMessage("");
@@ -317,17 +304,8 @@ function Settings({
         <form onSubmit={saveEditor}><h3>Included editor</h3><label>Indentation<select name="indent_style"><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></label><label>Tab size<input name="tab_size" type="number" min="1" max="16" defaultValue="4" /></label><label className="check"><input name="line_wrap" type="checkbox" defaultChecked />Wrap long lines</label><label className="check"><input name="trim_trailing_whitespace" type="checkbox" />Trim trailing whitespace on save</label><label className="check"><input name="ensure_final_newline" type="checkbox" defaultChecked />Ensure final newline</label><button className="primary">Save editor settings</button></form>
       </div>}
       {tab === "trackers" && <div className="settings-content">
-        <div><h3>Trackers</h3><p className="settings-copy">Connect your agile app with a personal access token. Tokens stay in a private file on this computer and never sync. Each Project chooses its board under Configure → Tracker.</p></div>
-        {Object.entries(TRACKER_LABELS).map(([provider, label]) => {
-          const connected = Boolean(state.trackers?.[provider]);
-          return (
-            <form key={provider} onSubmit={(event) => saveToken(provider, event)}>
-              <div className="token-row"><i className={connected ? "state-dot ready" : "state-dot"} /><strong>{label}</strong><span>{connected ? "Connected" : "Not connected"}</span></div>
-              <label>{label} token<input name="token" type="password" autoComplete="off" placeholder={connected ? "Paste a new token to replace it" : "Paste a personal access token"} required /></label>
-              <button className="primary">{connected ? `Replace ${label} token` : `Connect ${label}`}</button>
-            </form>
-          );
-        })}
+        <div><h3>Trackers</h3><p className="settings-copy">Connect your agile app with a personal access token. Tokens stay in a private file on this computer and never sync. Each Project picks its board from the list that token can see.</p></div>
+        <TrackerConnections trackers={state.trackers} onConnected={(trackers) => onState({ ...state, trackers })} onMessage={(message) => setMessage(message)} />
       </div>}
       {tab === "system" && <>
         <dl className="system-info">

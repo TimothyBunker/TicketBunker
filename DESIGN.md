@@ -933,13 +933,29 @@ key, explicit branch assignments, repository binding, and mechanical timestamps
 remain locally owned. A semantically identical snapshot performs no write,
 adds no ticket-ledger event, and advances no local or remote revision.
 
-**A Project owns its tracker source.** Each Project may carry one shared,
-revisioned `tracker-source` document naming the agile board it mirrors: today
-a GitHub Project board or a repository's issues (owner, number or repository,
-whether to carry comments). It travels in the join snapshot, so a new member's
-Project already knows its board. **Sync tickets** on the Project page reads
-that source with the machine-local token, normalizes every item through the
-Project's field matrix, and upserts tickets into the Bunker database. A ticket
+**Linking a board is one flow, and the token is the only thing typed.** A
+tracker is connected once at Bunker level (or in Settings) by pasting a
+personal access token; the app verifies it against the provider, keeps it in
+the machine-local credential file, and records the linked account in the
+Bunker's shared `connections` document when the member may write
+configuration. A Project's **Board** view then lists every board that token
+can see (GitHub Project boards for the account and its organisations, and
+repositories whose issues can be mirrored) and the user picks one. That choice
+becomes the Project's shared, revisioned `tracker-source` document (kind,
+owner, number or repository, title, link, whether to carry comments), which
+travels in the join snapshot so a new member's Project already knows its
+board. Linking first scans the board and builds the Project's model from what
+it actually carries: Status options become the status enum in TicketBunker's
+vocabulary, every other single-select field becomes an enum with the board's
+options, and iteration, number, date, and text fields are added with mappings
+into the synced item. Existing fields are updated in place and never removed.
+The model is published before the board is recorded, fields before the mapping
+that references them, and on a shared Bunker each step is a service-accepted
+change. The same view shows what will sync, with the field matrix and ticket
+fields behind advanced disclosures rather than as separate surfaces. **Sync
+tickets** reads that source with the machine-local token, normalizes every
+item through the Project's field matrix, and upserts tickets into the Bunker
+database. A ticket
 id is a deliberate `KEY-n` prefix in the issue title when present, otherwise
 the Project key plus the issue number, so ordinary boards need no naming
 convention. Every synced ticket carries its tracker identity
@@ -1506,16 +1522,22 @@ A separate Migration section lists legacy companion-backed projects and offers
 **Import copy**. That operation is read-only with respect to both source and
 companion repositories and records its import digest.
 
-A Project page names its tracker beneath the title and offers **Sync tickets**
-when one is connected, or **Connect tracker**, which opens Configure → Tracker.
-Settings → Trackers connects a GitHub, GitLab, or Jira token to this computer
-and shows only whether one is present; GitHub is the tracker this version can
-sync, and the others are listed so the token step is already familiar.
+A Project page names its board beneath the title and offers **Sync tickets**
+when one is linked, or **Connect a board**, which opens the Project's Board
+view. That view asks for a token only when this computer has none, otherwise
+it lists the boards the token can see; picking one links it, and the field
+matrix and ticket fields sit beneath as advanced disclosures. A Bunker page
+offers **Trackers** (connect GitHub, GitLab, or Jira once for the Bunker) and
+**Defaults** (the field and matrix documents new Projects copy). Settings →
+Trackers reaches the same token step for this computer. GitHub is the tracker
+this version can list and sync; the others accept a token so that step is
+already familiar.
 
-**Configure** edits Bunker defaults or the selected Project snapshot. Ticket
-fields, integration matrices, and the Project's tracker source are whole
-revisioned documents: a publish uses the revision loaded by the editor and
-replaces the complete draft atomically.
+**Configure** therefore has two Project tabs, Board and Repositories, and two
+Bunker tabs, Trackers and Defaults. Ticket fields, integration matrices, the
+Bunker's connections, and the Project's tracker source are whole revisioned
+documents: a publish uses the revision loaded by the editor and replaces the
+complete draft atomically.
 GitHub, GitLab, and Jira are prefilled templates; custom integrations use the
 same matrix. Project creation copies and pins the current Bunker field and
 integration documents, so later default changes affect only later Projects.

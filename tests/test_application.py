@@ -704,23 +704,21 @@ class SharedBunkerTests(unittest.TestCase):
         # The owner connects the Project's tracker board and syncs it; every
         # ticket is accepted by the service before it lands locally.
         self.as_user("tim")
-        self.dispatch(
-            "application.bunker.configuration.replace",
-            {
-                "bunker_id": created["id"],
-                "project_id": project_id,
-                "kind": "tracker-source",
-                "expected_revision": "",
-                "content": {"provider": "github", "kind": "project", "owner": "example", "number": 8},
-            },
-        )
+        inspection = {"kind": "project", "title": "Voxel ECS", "url": "https://github.com/users/example/projects/8", "items": 2, "fields": [{"name": "Status", "type": "SINGLE_SELECT", "options": ["Todo", "Done"]}], "labels": []}
         with mock.patch.dict(os.environ, {"GITHUB_ACCESS_TOKEN": "ghp_owner"}):
+            with mock.patch.object(github, "inspect_board", return_value=inspection):
+                linked = self.dispatch(
+                    "application.project.link",
+                    {"bunker_id": created["id"], "project_id": project_id, "board": {"kind": "project", "owner": "example", "number": 8, "repository": "", "title": "Voxel ECS", "url": ""}},
+                )
+            self.assertEqual(linked["configuration"]["documents"]["tracker-source"]["content"]["title"], "Voxel ECS")
             with mock.patch.object(github, "collect_entries", return_value=[github_entry(4), github_entry(5)]):
                 synced = self.dispatch(
                     "application.project.sync", {"bunker_id": created["id"], "project_id": project_id}
                 )["sync"]
         self.assertEqual(synced["created"], 2)
-        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-8")
+        # fields, mapping, board, then two tickets, after the five earlier changes
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-10")
 
         # A member joining afterwards receives the tracker and its tickets, and
         # may sync too because members hold tickets:write.
@@ -729,7 +727,9 @@ class SharedBunkerTests(unittest.TestCase):
         )["invitation"]["link"]
         self.as_user("lin")
         late = self.dispatch("application.bunker.join", {"invitation": late_link})["bunker"]
-        self.assertEqual(late["projects"][0]["tracker"]["number"], 8)
+        self.assertEqual(late["projects"][0]["tracker"]["title"], "Voxel ECS")
+        late_fields = self.dispatch("application.bunker.configuration.get", {"bunker_id": late["id"], "project_id": late["projects"][0]["id"]})
+        self.assertEqual({f["key"]: f for f in late_fields["documents"]["ticket-fields"]["content"]["fields"]}["status"]["values"], ["todo", "done"])
         self.assertEqual(late["projects"][0]["ticket_count"], 2)
         late_project = late["projects"][0]["id"]
         with mock.patch.dict(os.environ, {"GITHUB_ACCESS_TOKEN": "ghp_member"}):
@@ -905,4 +905,126 @@ class TrackerSyncTests(unittest.TestCase):
                 self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})
         self.assertEqual(failed.exception.code, "tracker_unreachable")
         self.assertIn("Settings → Trackers", failed.exception.message)
+
+
+def discovery() -> dict[str, Any]:
+    return {
+        "provider": "github",
+        "account": {"login": "example", "name": "Example Person"},
+        "boards": [
+            {"kind": "project", "owner": "example", "number": 8, "repository": "", "title": "Voxel ECS", "url": "https://github.com/users/example/projects/8"},
+            {"kind": "issues", "owner": "example", "number": 0, "repository": "voxel", "title": "example/voxel", "url": "https://github.com/example/voxel", "open_issues": 3, "private": False},
+        ],
+        "notes": [],
+    }
+
+
+class TrackerConnectionTests(TrackerSyncTests):
+    def test_connecting_a_token_verifies_it_and_records_the_account(self) -> None:
+        created = self.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "ECS", "project_name": "Entity Component System"},
+        )["bunker"]
+        self.dispatch(
+            "application.profile.update",
+            {"name": "Tim", "email": "tim@example.test", "branch_user": "tim"},
+        )
+
+        with mock.patch.object(github, "discover", side_effect=github.GitHubError("GitHub returned HTTP 401: Bad credentials")):
+            with self.assertRaises(commands.CommandRejected) as rejected:
+                self.dispatch("application.tracker.connect", {"bunker_id": created["id"], "provider": "github", "token": "bad"})
+        self.assertEqual(rejected.exception.code, "tracker_token_rejected")
+        self.assertFalse(application.state()["trackers"]["github"])
+
+        with mock.patch.object(github, "discover", return_value=discovery()) as discover:
+            result = self.dispatch(
+                "application.tracker.connect",
+                {"bunker_id": created["id"], "provider": "github", "token": "ghp_good"},
+            )
+        discover.assert_called_once_with("ghp_good")
+        self.assertEqual(result["connection"]["account"], "example")
+        self.assertTrue(result["connection"]["recorded"])
+        self.assertTrue(result["trackers"]["github"])
+        self.assertEqual(result["bunker"]["connections"]["github"]["account"], "example")
+        self.assertEqual(result["bunker"]["connections"]["github"]["connected_by"], "Tim")
+        self.assertNotIn("ghp_good", json.dumps(result))
+        self.assertEqual(
+            bunkerdb.get_configuration(created["id"])["documents"]["connections"]["revision"], "local:1"
+        )
+
+        with mock.patch.object(github, "discover", return_value=discovery()):
+            boards = self.dispatch("application.tracker.boards", {"provider": "github"})
+        self.assertEqual([board["title"] for board in boards["boards"]], ["Voxel ECS", "example/voxel"])
+
+        project_id = created["projects"][0]["id"]
+        chosen = boards["boards"][0]
+        linked = self.dispatch(
+            "application.bunker.configuration.replace",
+            {
+                "bunker_id": created["id"],
+                "project_id": project_id,
+                "kind": "tracker-source",
+                "expected_revision": "",
+                "content": {**chosen, "provider": "github", "include_comments": True},
+            },
+        )
+        self.assertEqual(linked["documents"]["tracker-source"]["content"]["title"], "Voxel ECS")
+        self.assertEqual(
+            bunkerdb.tracker_summary(linked["documents"]["tracker-source"]["content"]), "GitHub · Voxel ECS"
+        )
+
+    def test_linking_a_board_scans_it_and_builds_the_project_model(self) -> None:
+        created = self.dispatch(
+            "application.bunker.create",
+            {"name": "Engineering", "project_key": "ECS", "project_name": "Entity Component System"},
+        )["bunker"]
+        project_id = created["projects"][0]["id"]
+        board = discovery()["boards"][0]
+        inspection = {
+            "kind": "project", "title": "Voxel ECS", "url": board["url"], "items": 12,
+            "fields": [
+                {"name": "Status", "type": "SINGLE_SELECT", "options": ["Todo", "In Progress", "Done"]},
+                {"name": "Priority", "type": "SINGLE_SELECT", "options": ["P0", "P1"]},
+                {"name": "Sprint", "type": "ITERATION", "options": []},
+            ],
+            "labels": [],
+        }
+
+        with self.assertRaises(commands.CommandRejected) as missing:
+            self.dispatch("application.project.link", {"bunker_id": created["id"], "project_id": project_id, "board": board})
+        self.assertEqual(missing.exception.code, "tracker_token_required")
+
+        self.dispatch("credentials.update", {"provider": "github", "token": "ghp_test"})
+        with mock.patch.object(github, "inspect_board", return_value=inspection) as inspect:
+            result = self.dispatch(
+                "application.project.link",
+                {"bunker_id": created["id"], "project_id": project_id, "board": board},
+            )
+        inspect.assert_called_once()
+        documents = result["configuration"]["documents"]
+        self.assertEqual(documents["tracker-source"]["content"]["title"], "Voxel ECS")
+        by_key = {field["key"]: field for field in documents["ticket-fields"]["content"]["fields"]}
+        self.assertEqual(by_key["status"]["values"], ["todo", "in-progress", "done"])
+        self.assertEqual(by_key["priority"]["values"], ["P0", "P1"])
+        self.assertEqual(by_key["sprint"]["label"], "Sprint")
+        mapping = documents["integrations"]["content"]["providers"]["github"]["fields"]
+        self.assertEqual(mapping["sprint"], "project.fields.Sprint.title")
+        self.assertEqual(result["link"]["items"], 12)
+        self.assertIn("Status: Todo, In Progress, Done", result["link"]["summary"])
+        self.assertEqual(result["bunker"]["projects"][0]["tracker"]["title"], "Voxel ECS")
+
+        entry = github_entry(4, "In Progress")
+        entry["project"]["fields"]["Priority"] = "P1"
+        entry["project"]["fields"]["Sprint"] = {"title": "Sprint 3", "start_date": "2026-09-01", "duration": 14}
+        with mock.patch.object(github, "collect_entries", return_value=[entry]):
+            self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})
+        detail = self.dispatch("application.ticket.get", {"bunker_id": created["id"], "ticket_id": "ECS-4"})
+        self.assertEqual(detail["ticket"]["priority"], "P1")
+        self.assertEqual(detail["ticket"]["sprint"], "Sprint 3")
+        self.assertEqual(detail["ticket"]["status"], "in-progress")
+
+    def test_boards_need_a_token_first(self) -> None:
+        with self.assertRaises(commands.CommandRejected) as missing:
+            self.dispatch("application.tracker.boards", {"provider": "github"})
+        self.assertEqual(missing.exception.code, "tracker_token_required")
 

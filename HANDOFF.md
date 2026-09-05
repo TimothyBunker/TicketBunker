@@ -97,8 +97,13 @@ exercise unless a live boundary is explicitly called out.
   `tests/test_service.py` and `SharedBunkerTests` in `tests/test_application.py`
   drive the owner and member flows against the in-process service.
 - Each Project can own a `tracker-source` document (GitHub Project board or
-  repository issues). Settings → Trackers connects a token to this computer
-  through `credentials.update`; **Sync tickets** (`application.project.sync`)
+  repository issues, with title and link). `application.tracker.connect`
+  verifies a token with `integrations/github.py` `discover`, keeps it through
+  `credentials.update`, and records the account in the Bunker's `connections`
+  document; `application.tracker.boards` lists what the token can see and the
+  Project's Board view links one by selection. The field matrix and ticket
+  fields live under that view as disclosures; Bunker Configure has Trackers
+  and Defaults. **Sync tickets** (`application.project.sync`)
   reads the board with `integrations/github.py` (`collect_entries`,
   `build_tickets`), keys issues by Project key plus issue number when titles
   carry none, and upserts tickets through `propose_ticket_sync` /

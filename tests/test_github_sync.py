@@ -138,3 +138,108 @@ class GitHubSyncTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GitHubDiscoveryTests(unittest.TestCase):
+    def test_discover_lists_boards_and_repositories_for_the_token(self) -> None:
+        from unittest import mock
+
+        viewer = {
+            "viewer": {
+                "login": "tim",
+                "name": "Tim",
+                "projectsV2": {"nodes": [{"number": 8, "title": "Voxel ECS", "url": "https://github.com/users/tim/projects/8", "closed": False}, {"number": 3, "title": "Old", "url": "", "closed": True}]},
+            }
+        }
+        organizations = {
+            "viewer": {
+                "organizations": {"nodes": [{"login": "acme", "projectsV2": {"nodes": [{"number": 2, "title": "Acme Board", "url": "https://github.com/orgs/acme/projects/2", "closed": False}]}}]},
+            }
+        }
+        repos = [
+            {"name": "voxel", "full_name": "tim/voxel", "owner": {"login": "tim"}, "html_url": "https://github.com/tim/voxel", "open_issues_count": 4, "private": False},
+            {"name": "gone", "full_name": "tim/gone", "owner": {"login": "tim"}, "archived": True},
+        ]
+        with mock.patch.object(github, "_graphql", side_effect=[viewer, organizations]):
+            with mock.patch.object(github, "_request_json", return_value=repos):
+                found = github.discover("ghp_x")
+
+        self.assertEqual(found["account"], {"login": "tim", "name": "Tim"})
+        self.assertEqual(
+            [(board["kind"], board["owner"], board["title"]) for board in found["boards"]],
+            [("project", "tim", "Voxel ECS"), ("project", "acme", "Acme Board"), ("issues", "tim", "tim/voxel")],
+        )
+        self.assertEqual(found["notes"], [])
+
+    def test_discover_without_project_scope_still_names_the_account(self) -> None:
+        from unittest import mock
+
+        responses = [{"login": "tim", "name": "Tim"}, []]
+        with mock.patch.object(github, "_graphql", side_effect=github.GitHubError("GitHub GraphQL error: missing scope")):
+            with mock.patch.object(github, "_request_json", side_effect=responses):
+                found = github.discover("ghp_x")
+
+        self.assertEqual(found["account"]["login"], "tim")
+        self.assertEqual(found["boards"], [])
+        self.assertIn("read:project", found["notes"][0])
+        self.assertIn("read:org", found["notes"][1])
+
+    def test_missing_org_scope_keeps_the_accounts_own_boards(self) -> None:
+        from unittest import mock
+
+        viewer = {"viewer": {"login": "tim", "name": "Tim", "projectsV2": {"nodes": [{"number": 8, "title": "Voxel ECS", "url": "", "closed": False}]}}}
+        with mock.patch.object(github, "_graphql", side_effect=[viewer, github.GitHubError("requires read:org")]):
+            with mock.patch.object(github, "_request_json", return_value=[]):
+                found = github.discover("ghp_x")
+
+        self.assertEqual([board["title"] for board in found["boards"]], ["Voxel ECS"])
+        self.assertEqual(len(found["notes"]), 1)
+        self.assertIn("read:org", found["notes"][0])
+
+    def test_inspect_and_derive_build_the_project_model_from_the_board(self) -> None:
+        from unittest import mock
+
+        graph = {
+            "owner": {
+                "projectV2": {
+                    "title": "Voxel ECS",
+                    "url": "https://github.com/users/tim/projects/8",
+                    "items": {"totalCount": 12},
+                    "fields": {"nodes": [
+                        {"name": "Title", "dataType": "TITLE"},
+                        {"name": "Status", "dataType": "SINGLE_SELECT", "options": [{"name": "Todo"}, {"name": "In Progress"}, {"name": "Done"}]},
+                        {"name": "Priority", "dataType": "SINGLE_SELECT", "options": [{"name": "P0"}, {"name": "P1"}]},
+                        {"name": "Sprint", "dataType": "ITERATION"},
+                        {"name": "Story Points", "dataType": "NUMBER"},
+                        {"name": "Labels", "dataType": "LABELS"},
+                    ]},
+                }
+            }
+        }
+        with mock.patch.object(github, "_request_json", return_value={"type": "User"}):
+            with mock.patch.object(github, "_graphql", return_value=graph):
+                inspection = github.inspect_board({"kind": "project", "owner": "tim", "number": 8}, "ghp_x")
+
+        self.assertEqual(inspection["items"], 12)
+        self.assertEqual([field["name"] for field in inspection["fields"]], ["Status", "Priority", "Sprint", "Story Points"])
+
+        fields = [
+            {"key": "title", "label": "Title", "type": "string", "required": True},
+            {"key": "status", "label": "Status", "type": "string", "required": True},
+            {"key": "priority", "label": "Priority", "type": "string", "required": False},
+            {"key": "mine", "label": "Mine", "type": "string", "required": False},
+        ]
+        derived = github.derive_model(inspection, fields, {"title": "title", "status": "state"})
+
+        by_key = {field["key"]: field for field in derived["fields"]}
+        self.assertEqual(by_key["status"]["values"], ["todo", "in-progress", "done"])
+        self.assertEqual(by_key["priority"]["values"], ["P0", "P1"])
+        self.assertEqual(by_key["sprint"]["type"], "string")
+        self.assertEqual(by_key["story_points"]["type"], "number")
+        self.assertIn("mine", by_key)
+        self.assertEqual(derived["mapping"]["priority"], "project.fields.Priority")
+        self.assertEqual(derived["mapping"]["sprint"], "project.fields.Sprint.title")
+        self.assertEqual(derived["mapping"]["status"], "state")
+        self.assertIn("Status: Todo, In Progress, Done", derived["summary"])
+        self.assertIn("12 items", derived["summary"])
+

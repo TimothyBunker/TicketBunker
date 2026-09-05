@@ -562,7 +562,8 @@ export default function BunkerHub({
               <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
             </div>
             <div className="header-actions">
-              <button onClick={() => openConfiguration()}>Configure</button>
+              <button onClick={() => openConfiguration("trackers")}>Trackers</button>
+              <button onClick={() => openConfiguration("defaults")}>Defaults</button>
               {bunker.remote ? <button onClick={() => setAction("members")}>Members</button> : <button onClick={() => setAction("share")}>Share Bunker</button>}
               <button className="primary" onClick={() => setAction("project")}>Add project</button>
             </div>
@@ -580,13 +581,13 @@ export default function BunkerHub({
               </nav>
               <h1><span className="project-key">{project.key}</span>{project.name}</h1>
               {project.description && <p className="project-description">{project.description}</p>}
-              <p className="tracker-line">{project.tracker ? trackerSummary(project.tracker) : "No tracker connected"}</p>
+              <p className="tracker-line">{project.tracker ? trackerSummary(project.tracker) : "No board linked"}</p>
             </div>
             <div className="header-actions">
               <button onClick={() => openConfiguration()}>Configure</button>
               {project.tracker
                 ? <button disabled={syncing} onClick={syncTickets}>{syncing ? "Syncing…" : "Sync tickets"}</button>
-                : <button onClick={() => openConfiguration("tracker")}>Connect tracker</button>}
+                : <button onClick={() => openConfiguration("board")}>Connect a board</button>}
               <button className="primary" onClick={() => setAction("project")}>Add subproject</button>
             </div>
           </header>
@@ -596,7 +597,7 @@ export default function BunkerHub({
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
       {action === "members" && bunker && <MembersPanel bunker={bunker} onClose={() => setAction("")} notify={notify} />}
-      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} notify={notify} />}
+      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} onConnected={(trackers, _connection, refreshed) => onState({ ...state, trackers, bunkers: refreshed ? state.bunkers.map((item) => item.id === refreshed.id ? refreshed : item) : state.bunkers })} onSync={syncTickets} notify={notify} />}
     </div>
   );
 }

@@ -388,6 +388,294 @@ def _fixture_entries(path: Path) -> list[dict[str, Any]]:
     return normalized
 
 
+VIEWER_PROJECTS_QUERY = """
+query {
+  viewer {
+    login
+    name
+    projectsV2(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes { number title url closed }
+    }
+  }
+}
+"""
+
+ORGANIZATION_PROJECTS_QUERY = """
+query {
+  viewer {
+    organizations(first: 25) {
+      nodes {
+        login
+        projectsV2(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          nodes { number title url closed }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _project_boards(owner: str, container: Mapping[str, Any]) -> list[dict[str, Any]]:
+    boards = []
+    for node in (container.get("projectsV2") or {}).get("nodes") or []:
+        if not isinstance(node, dict) or node.get("closed") or not node.get("number"):
+            continue
+        boards.append(
+            {
+                "kind": "project",
+                "owner": owner,
+                "number": int(node["number"]),
+                "repository": "",
+                "title": str(node.get("title") or f"Project #{node['number']}"),
+                "url": str(node.get("url") or ""),
+            }
+        )
+    return boards
+
+
+def discover(token: str) -> dict[str, Any]:
+    """What one token can see: its account and every board it may mirror.
+
+    The account's own Project boards, organization boards, and repositories are
+    read separately so a missing scope removes only its own part and leaves a
+    note saying which scope would add it.
+    """
+    if not token:
+        raise GitHubError("a GitHub token is required to list boards")
+    notes: list[str] = []
+    boards: list[dict[str, Any]] = []
+    account = {"login": "", "name": ""}
+    try:
+        viewer = _graphql(token, VIEWER_PROJECTS_QUERY, {}).get("viewer") or {}
+        account = {"login": str(viewer.get("login") or ""), "name": str(viewer.get("name") or "")}
+        boards.extend(_project_boards(account["login"], viewer))
+    except GitHubError as exc:
+        notes.append(
+            f"Your own Project boards could not be listed ({exc}). "
+            "A classic token needs the read:project scope; a fine-grained token needs Projects: read."
+        )
+        user = _request_json(f"{API}/user", token)
+        if not isinstance(user, dict):
+            raise GitHubError("GitHub returned an unexpected account payload")
+        account = {"login": str(user.get("login") or ""), "name": str(user.get("name") or "")}
+    if not account["login"]:
+        raise GitHubError("GitHub did not identify the token's account")
+    try:
+        viewer = _graphql(token, ORGANIZATION_PROJECTS_QUERY, {}).get("viewer") or {}
+        for organization in (viewer.get("organizations") or {}).get("nodes") or []:
+            if isinstance(organization, dict) and organization.get("login"):
+                boards.extend(_project_boards(str(organization["login"]), organization))
+    except GitHubError:
+        notes.append(
+            "Organization Project boards are not listed: add the read:org scope to the token to include them."
+        )
+    query = urllib.parse.urlencode(
+        {"per_page": 100, "sort": "updated", "affiliation": "owner,collaborator,organization_member"}
+    )
+    repositories = _request_json(f"{API}/user/repos?{query}", token)
+    if isinstance(repositories, list):
+        for repo in repositories:
+            if not isinstance(repo, dict) or repo.get("archived"):
+                continue
+            owner = (repo.get("owner") or {}).get("login")
+            name = repo.get("name")
+            if not owner or not name:
+                continue
+            boards.append(
+                {
+                    "kind": "issues",
+                    "owner": str(owner),
+                    "number": 0,
+                    "repository": str(name),
+                    "title": str(repo.get("full_name") or f"{owner}/{name}"),
+                    "url": str(repo.get("html_url") or ""),
+                    "open_issues": int(repo.get("open_issues_count") or 0),
+                    "private": bool(repo.get("private")),
+                }
+            )
+    return {"provider": "github", "account": account, "boards": boards, "notes": notes}
+
+
+PROJECT_FIELDS_QUERY = """
+query($login: String!, $number: Int!) {
+  owner: __OWNER__(login: $login) {
+    projectV2(number: $number) {
+      title
+      url
+      items(first: 1) { totalCount }
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2Field { name dataType }
+          ... on ProjectV2SingleSelectField { name dataType options { name } }
+          ... on ProjectV2IterationField { name dataType }
+        }
+      }
+    }
+  }
+}
+"""
+
+# Board fields GitHub manages itself; they never become ticket fields.
+_BUILTIN_BOARD_FIELDS = {
+    "TITLE", "ASSIGNEES", "LABELS", "LINKED_PULL_REQUESTS", "MILESTONE", "REPOSITORY",
+    "REVIEWERS", "TRACKS", "TRACKED_BY", "PARENT_ISSUE", "SUB_ISSUES_PROGRESS", "ISSUE_TYPE",
+    "CREATED", "UPDATED", "CLOSED",
+}
+
+
+def _owner_field(login: str, token: str) -> str:
+    account = _request_json(f"{API}/users/{urllib.parse.quote(login)}", token)
+    if not isinstance(account, dict):
+        raise GitHubError("GitHub returned an unexpected account payload")
+    return "organization" if str(account.get("type")).casefold() == "organization" else "user"
+
+
+def inspect_board(source: Mapping[str, Any], token: str) -> dict[str, Any]:
+    """Scan one board for the data it actually carries, without writing."""
+    kind = str(source.get("kind") or "")
+    owner = str(source.get("owner") or "").strip()
+    if not owner:
+        raise GitHubError("the board needs a GitHub owner")
+    if kind == "project":
+        number = int(source.get("number") or 0)
+        if number <= 0:
+            raise GitHubError("the board needs a GitHub Project number")
+        query = PROJECT_FIELDS_QUERY.replace("__OWNER__", _owner_field(owner, token))
+        data = _graphql(token, query, {"login": owner, "number": number})
+        project_value = (data.get("owner") or {}).get("projectV2")
+        if not isinstance(project_value, dict):
+            raise GitHubError(f"no Project #{number} found for {owner}")
+        fields = []
+        for node in (project_value.get("fields") or {}).get("nodes") or []:
+            if not isinstance(node, dict) or not node.get("name"):
+                continue
+            data_type = str(node.get("dataType") or "").upper()
+            if data_type in _BUILTIN_BOARD_FIELDS:
+                continue
+            fields.append(
+                {
+                    "name": str(node["name"]),
+                    "type": data_type,
+                    "options": [
+                        str(option.get("name"))
+                        for option in node.get("options") or []
+                        if isinstance(option, dict) and option.get("name")
+                    ],
+                }
+            )
+        return {
+            "kind": "project",
+            "title": str(project_value.get("title") or ""),
+            "url": str(project_value.get("url") or ""),
+            "items": int(((project_value.get("items") or {}).get("totalCount")) or 0),
+            "fields": fields,
+            "labels": [],
+        }
+    if kind == "issues":
+        repo = str(source.get("repository") or "").strip()
+        if not repo:
+            raise GitHubError("the board needs a GitHub repository")
+        base = f"{API}/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
+        repository = _request_json(base, token)
+        labels = _request_json(f"{base}/labels?per_page=100", token)
+        return {
+            "kind": "issues",
+            "title": str((repository or {}).get("full_name") or f"{owner}/{repo}") if isinstance(repository, dict) else f"{owner}/{repo}",
+            "url": str((repository or {}).get("html_url") or "") if isinstance(repository, dict) else "",
+            "items": int((repository or {}).get("open_issues_count") or 0) if isinstance(repository, dict) else 0,
+            "fields": [],
+            "labels": [
+                str(label.get("name")) for label in (labels if isinstance(labels, list) else [])
+                if isinstance(label, dict) and label.get("name")
+            ],
+        }
+    raise GitHubError("the board must be a GitHub Project or a repository's issues")
+
+
+def _field_key(name: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")
+    if not key or not key[0].isalpha():
+        key = f"f_{key}" if key else "field"
+    return key[:64]
+
+
+def derive_model(
+    inspection: Mapping[str, Any],
+    fields: list[dict[str, Any]],
+    mapping: Mapping[str, str],
+) -> dict[str, Any]:
+    """Build a Project's ticket fields and GitHub mapping from a scanned board.
+
+    Status keeps TicketBunker's vocabulary so the catalog groups stay stable;
+    every other single-select field becomes an enum with the board's options,
+    and iteration, number, date, and text fields are added with mappings into
+    the synced Project item. Existing fields are updated in place, never
+    removed, so a person's own additions survive a rescan.
+    """
+    result_fields = [dict(field) for field in fields]
+    by_key = {str(field.get("key")): field for field in result_fields}
+    result_mapping = dict(mapping)
+    summary: list[str] = []
+    for board_field in inspection.get("fields") or []:
+        name = str(board_field.get("name") or "").strip()
+        data_type = str(board_field.get("type") or "").upper()
+        options = [str(item) for item in board_field.get("options") or []]
+        if not name or "." in name:
+            continue
+        lowered = name.casefold()
+        if lowered == "status" and data_type == "SINGLE_SELECT":
+            values: list[str] = []
+            for option in options:
+                normalized = _normalized_status(option)
+                if normalized not in values:
+                    values.append(normalized)
+            status = by_key.get("status")
+            if status is None:
+                status = {"key": "status", "label": "Status", "type": "enum", "required": True}
+                result_fields.append(status)
+                by_key["status"] = status
+            status["type"] = "enum"
+            status["values"] = values
+            summary.append(f"Status: {', '.join(options)}")
+            continue
+        key = "priority" if lowered == "priority" else _field_key(name)
+        path = f"project.fields.{name}"
+        if data_type == "SINGLE_SELECT":
+            field_type, values = "enum", options
+        elif data_type == "NUMBER":
+            field_type, values = "number", None
+        elif data_type == "DATE":
+            field_type, values = "date", None
+        elif data_type == "ITERATION":
+            field_type, values = "string", None
+            path = f"{path}.title"
+        elif data_type == "TEXT":
+            field_type, values = "string", None
+        else:
+            continue
+        field = by_key.get(key)
+        if field is None:
+            field = {"key": key, "label": name, "type": field_type, "required": False}
+            result_fields.append(field)
+            by_key[key] = field
+        else:
+            field["type"] = field_type
+        if values is not None:
+            field["values"] = values
+        elif "values" in field:
+            del field["values"]
+        result_mapping[key] = path
+        summary.append(f"{name}: {', '.join(options)}" if options else name)
+    labels = [str(item) for item in inspection.get("labels") or []]
+    if labels:
+        summary.append(f"Labels: {', '.join(labels[:8])}{'…' if len(labels) > 8 else ''}")
+    items = int(inspection.get("items") or 0)
+    if items:
+        summary.append(f"{items} item{'s' if items != 1 else ''}")
+    return {"fields": result_fields, "mapping": result_mapping, "summary": summary}
+
+
 def fetch_repository_issues(owner: str, repo: str, token: str | None) -> list[dict[str, Any]]:
     """Every issue in one repository, open and closed, without pull requests."""
     issues: list[dict[str, Any]] = []

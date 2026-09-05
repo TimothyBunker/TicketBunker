@@ -171,25 +171,93 @@ describe("Bunker and Project boundaries", () => {
     );
 
     expect(screen.getByText("GitHub Project #8 · example")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Connect tracker" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect a board" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sync tickets" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.sync", { bunker_id: bunker.id, project_id: project.id }));
     await waitFor(() => expect(notify).toHaveBeenCalledWith("Synced GitHub Project #8 · example: 2 new, 0 updated, 1 unchanged"));
     expect(onState).toHaveBeenCalled();
   });
 
-  it("offers Connect tracker and opens the Tracker tab when none is configured", async () => {
+  it("asks only for a token when no tracker is connected yet", async () => {
     render(
       <BunkerHub state={{ ...state, trackers: { github: false } }} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
 
-    expect(screen.getByText("No tracker connected")).toBeInTheDocument();
+    expect(screen.getByText("No board linked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect tracker" }));
-    expect(await screen.findByRole("heading", { name: "Tracker" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Tracker source")).toBeInTheDocument();
-    expect(screen.getByText(/No GitHub token on this computer yet/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save tracker" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a board" }));
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Connect GitHub to see your boards" })).toBeInTheDocument();
+    expect(screen.getByLabelText("GitHub token")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Boards" })).not.toBeInTheDocument();
+    expect(transport.command).not.toHaveBeenCalledWith("application.tracker.boards", expect.anything());
+  });
+
+  it("links a board picked from the list the token can see", async () => {
+    const onState = vi.fn();
+    transport.command.mockImplementation((action: string, payload?: Record<string, unknown>) => {
+      if (action === "application.ticket.list") {
+        return Promise.resolve({ tickets: [], total: 0, page: 1, page_size: 25, page_count: 0, facets: { statuses: [], assignees: [], reporters: [], labels: [] } });
+      }
+      if (action === "application.bunker.configuration.get") return Promise.resolve(configuration);
+      if (action === "application.tracker.boards") {
+        return Promise.resolve({
+          provider: "github",
+          account: { login: "example", name: "Example" },
+          boards: [
+            { kind: "project", owner: "example", number: 8, repository: "", title: "Voxel ECS", url: "https://github.com/users/example/projects/8" },
+            { kind: "issues", owner: "example", number: 0, repository: "voxel", title: "example/voxel", url: "https://github.com/example/voxel", open_issues: 3 },
+          ],
+          notes: [],
+        });
+      }
+      if (action === "application.project.link") {
+        const board = payload?.board as Record<string, unknown>;
+        return Promise.resolve({
+          configuration: {
+            ...configuration,
+            documents: { ...configuration.documents, "tracker-source": { kind: "tracker-source", revision: "local:1", updated_at: "", content: { provider: "github", ...board, include_comments: true } } },
+          },
+          bunker,
+          bunkers: [bunker],
+          link: { summary: ["Status: Todo, In Progress, Done", "12 items"], items: 12, fields_found: 1 },
+        });
+      }
+      throw new Error(`Unexpected command ${action}`);
+    });
+
+    render(
+      <BunkerHub state={{ ...state, trackers: { github: true } }} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect a board" }));
+    const list = await screen.findByRole("list", { name: "Boards" });
+    expect(within(list).getByText("Voxel ECS")).toBeInTheDocument();
+    expect(within(list).getByText("example/voxel")).toBeInTheDocument();
+    const link = screen.getByRole("button", { name: "Link board" });
+    expect(link).toBeDisabled();
+    fireEvent.click(within(list).getByRole("button", { name: /Voxel ECS/ }));
+    expect(link).toBeEnabled();
+    fireEvent.click(link);
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith(
+      "application.project.link",
+      expect.objectContaining({ bunker_id: bunker.id, project_id: project.id, include_comments: true, board: expect.objectContaining({ kind: "project", owner: "example", number: 8, title: "Voxel ECS" }) }),
+    ));
+    expect(await screen.findByText(/Linked to GitHub · Voxel ECS/)).toBeInTheDocument();
+    expect(screen.getByText(/Built from the board: Status: Todo, In Progress, Done/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync tickets" })).toBeInTheDocument();
+    expect(screen.getByText("Adjust field mapping")).toBeInTheDocument();
+  });
+
+  it("connects trackers at Bunker level", async () => {
+    render(
+      <BunkerHub state={{ ...state, trackers: { github: false } }} selection={{ bunkerId: bunker.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Trackers" }));
+    expect(await screen.findByRole("heading", { name: "Trackers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect Jira" })).toBeInTheDocument();
   });
 
   it("joins from one invitation link without raw credentials", () => {
@@ -239,6 +307,7 @@ describe("Bunker and Project boundaries", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
     expect(await screen.findByRole("table", { name: "Project repositories" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("github.com/Example/coal")).toBeInTheDocument();
     expect(screen.getByText("Not connected")).toBeInTheDocument();
