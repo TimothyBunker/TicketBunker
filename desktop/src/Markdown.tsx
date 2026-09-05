@@ -6,13 +6,18 @@ import { sourceLinks, sourceReference } from "./report";
 
 // What the page can do with one file reference. The ticket page provides
 // these once; every Markdown surface under it offers the same three actions.
+// Where a reference was read: the report topic, scope, and branch. Sending it
+// to chat lands in that topic, not a default one.
+export type ReportPlace = { category: string; scope: string; branch: string };
+
 export type SourceActions = {
   open?: (path: string, line: number) => void;
   copy?: (path: string, line: number) => void;
-  ask?: (path: string, line: number) => void;
+  ask?: (path: string, line: number, place: ReportPlace | null) => void;
 };
 
 export const SourceActionsContext = createContext<SourceActions>({});
+export const ReportPlaceContext = createContext<ReportPlace | null>(null);
 
 type Props = {
   children: string;
@@ -26,6 +31,14 @@ type Props = {
 // ("grounded — …", "adjacent:", "ungrounded"); the dash or colon after it is
 // punctuation, not content.
 const CLAIM_RE = /^\s*\[(observation|real|speculation|inference)\]\s*(?:(grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?/i;
+// A proactive claim names its aspect after the tag: "Risk:" for something
+// that could cause the reader problems, "Next:" for one thing to do now.
+const ASPECT_RE = /^\s*(Risk|Next):\s*/i;
+
+export const ASPECT_LABELS: Record<string, { label: string; title: string }> = {
+  risk: { label: "Risk", title: "Something that could cause you problems: a bug, an untested change, a conflict, a stale branch, an unclear owner." },
+  next: { label: "Next", title: "One concrete thing you could do now." },
+};
 
 export const TRUST_LABELS: Record<string, { label: string; title: string }> = {
   observation: { label: "Observed", title: "A mechanical Git or ticket fact produced by the pipeline, reproducible from the same repository state." },
@@ -37,13 +50,22 @@ export const TRUST_LABELS: Record<string, { label: string; title: string }> = {
   speculation: { label: "Speculation", title: "Interpretation, not a verified fact." },
 };
 
-export function claimTag(text: string): { key: string; rest: string } | null {
+export function claimTag(text: string): { key: string; rest: string; aspect?: string } | null {
   const match = CLAIM_RE.exec(text);
   if (!match) return null;
   const tag = match[1].toLowerCase();
   const grounding = match[2]?.toLowerCase();
   const key = tag === "speculation" && grounding ? `speculation:${grounding}` : tag;
-  return { key, rest: text.slice(match[0].length) };
+  const rest = text.slice(match[0].length);
+  const aspect = ASPECT_RE.exec(rest);
+  if (aspect) return { key, rest: rest.slice(aspect[0].length), aspect: aspect[1].toLowerCase() };
+  return { key, rest };
+}
+
+function AspectChip({ aspect }: { aspect: string }) {
+  const entry = ASPECT_LABELS[aspect];
+  if (!entry) return null;
+  return <span className={`aspect-chip ${aspect}`} title={entry.title}>{entry.label}</span>;
 }
 
 function TrustChip({ tagKey }: { tagKey: string }) {
@@ -58,7 +80,8 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
   if (typeof first === "string") {
     const claim = claimTag(first);
     if (!claim) return null;
-    return { chip: <TrustChip tagKey={claim.key} />, tone: claim.key, children: [claim.rest, ...others] };
+    const chip = claim.aspect ? <><TrustChip tagKey={claim.key} /><AspectChip aspect={claim.aspect} /></> : <TrustChip tagKey={claim.key} />;
+    return { chip, tone: claim.key, children: [claim.rest, ...others] };
   }
   if (isValidElement(first) && (first as ReactElement<{ children?: ReactNode }>).type === "p") {
     const element = first as ReactElement<{ children?: ReactNode }>;
@@ -75,12 +98,13 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
 // reference into the coworker chat.
 function SourceRef({ path, line, label }: { path: string; line: number; label: ReactNode }) {
   const actions = useContext(SourceActionsContext);
+  const place = useContext(ReportPlaceContext);
   const anchor = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   const items: FloatingAction[] = [];
   if (actions.open) items.push({ label: "Open in editor", onSelect: () => actions.open?.(path, line) });
   if (actions.copy) items.push({ label: "Copy path", onSelect: () => actions.copy?.(path, line) });
-  if (actions.ask) items.push({ label: "Send to chat", onSelect: () => actions.ask?.(path, line) });
+  if (actions.ask) items.push({ label: "Send to chat", onSelect: () => actions.ask?.(path, line, place) });
   if (items.length === 0) return <>{label}</>;
   return (
     <span ref={anchor} className={open ? "source-reference open" : "source-reference"}>

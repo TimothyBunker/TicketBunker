@@ -421,6 +421,10 @@ details.advanced > *:not(summary) { margin-top: 10px; }
 .trust-chip.grounded { color: #7a5a14; background: #fbefcf; }
 .trust-chip.adjacent { color: #7a5a14; background: #fbf3e0; border: 1px dashed #e2c98a; }
 .trust-chip.ungrounded, .trust-chip.speculation { color: #8a3a3a; background: #f8e5e5; }
+.aspect-chip { display: inline-flex; align-items: center; margin-left: 4px; padding: 1px 6px; border: 1px solid; border-radius: 3px; font-size: 8px; font-weight: 760; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5; vertical-align: middle; }
+.aspect-chip.risk { color: #8a1c1c; border-color: #e3b4b4; background: #fff5f5; }
+.aspect-chip.next { color: #1c4f87; border-color: #b9cfe8; background: #f2f7fd; }
+.legend-gap { margin-left: 6px; }
 .trust-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px; color: var(--muted); font-size: 10px; }
 .trust-legend span.trust-chip { cursor: help; }
 .report-provenance { margin: -6px 0 12px; color: var(--muted); font-size: 10px; }

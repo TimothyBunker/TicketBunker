@@ -10,8 +10,10 @@ pipeline's; only the fill is the agent's.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 MAX_PREFILL_FILES = 15
+MAX_PREFILL_PEOPLE = 6
 
 AGENT_AREA = "<!-- agent: {instruction} -->"
 
@@ -21,6 +23,9 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     au = observations.get("authorship", {}).get(branch, {})
     df = observations.get("diff", {}).get(branch, {})
     ws = observations.get("work_separation", {}).get(branch, {})
+    pe = observations.get("people", {}).get(branch, {})
+    rk = observations.get("risk", {}).get(branch, {})
+    baseline = str(observations.get("baseline") or "the baseline")
 
     lines: list[str] = []
 
@@ -32,26 +37,33 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines += ["### Who", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Who: one or two concise [real]/[speculation] claims naming the people "
-        "most important to this ticket and why, highest apparent importance first; use ticket/authorship "
-        "evidence, do not merely list everyone"
+        "most important to this ticket and why, highest apparent importance first, drawn from ticket config, "
+        "branch authorship, and the people observation (recent authors of the touched files, other branches of "
+        "this ticket); cite (ticket), (authorship), or (people) rather than a source path; if the assignee and "
+        "reporter are the only people known, say so in one plain sentence and cite (ticket); optionally one "
+        "'Risk:' claim (an unclear or absent owner) and one 'Next:' claim (whom to involve)"
     ))
     lines += ["", "### What", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief What: one or two concise [real]/[speculation] claims explaining the most "
         "important work or result in plain language, highest apparent importance first, grounded in the "
-        "diff and observations"
+        "diff and observations; optionally one 'Risk:' claim (a bug, regression, or untested change you can "
+        "point at) and one 'Next:' claim (one concrete thing to do about the work)"
     ))
     lines += ["", "### Where", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Where: one short [real]/[speculation] claim naming up to three paths worth "
         "checking first, in importance order, and why; write verified source locations as @[relative/path]:line "
-        "so the viewer can open them; [real] paths need anchors, inferred recommendations need a grounding rank"
+        "so the viewer can open them; [real] paths need anchors, inferred recommendations need a grounding rank; "
+        "optionally one 'Risk:' claim (where a change is likely to bite: a file also changed on the baseline, a "
+        "caller left unchanged) and one 'Next:' claim (the first place to edit or check)"
     ))
     lines += ["", "### Why", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Why: one or two concise [real]/[speculation] claims explaining the ticket's "
         "purpose and your best-supported interpretation, highest apparent importance first, grounded in "
-        "primary ticket and code evidence"
+        "primary ticket and code evidence; optionally one 'Risk:' claim (where the change and the ticket's "
+        "intent diverge or an acceptance criterion is unmet) and one 'Next:' claim (what would settle it)"
     ))
     lines.append("")
 
@@ -62,11 +74,45 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(f"- [observation] Reporter: {ticket['reporter']} (ticket config).")
     for poi in ticket.get("people_of_interest") or []:
         lines.append(f"- [observation] Person of interest: {poi} (ticket config).")
+    for reviewer in ticket.get("reviewers") or []:
+        if isinstance(reviewer, str) and reviewer:
+            lines.append(f"- [observation] Reviewer: {reviewer} (ticket config).")
+    commenters = Counter(
+        str(c.get("author")) for c in (ticket.get("comments") or []) if isinstance(c, dict) and c.get("author")
+    )
+    for name, count in commenters.most_common():
+        lines.append(f"- [observation] Commenter: {name} ({count} comment(s) on the ticket) (ticket).")
     for author, v in (au.get("authors") or {}).items():
         lines.append(
             f"- [observation] {author}: {v['commits']} work commit(s), {v['first']} → {v['last']} (authorship)."
         )
-    lines.append(AGENT_AREA.format(instruction="add [real]/[speculation] people context only if the code points at someone not listed"))
+    file_authors = sorted(
+        (pe.get("file_authors") or {}).items(), key=lambda item: (-item[1]["commits"], item[1]["last"]), reverse=False
+    )
+    for name, v in file_authors[:MAX_PREFILL_PEOPLE]:
+        lines.append(
+            f"- [observation] Recent author of the touched files on {baseline}: {name} — "
+            f"{v['commits']} commit(s), last {str(v['last'])[:10]} (people)."
+        )
+    if len(file_authors) > MAX_PREFILL_PEOPLE:
+        lines.append(f"- [observation] ...and {len(file_authors) - MAX_PREFILL_PEOPLE} more author(s) — see observations/people.json.")
+    if pe.get("touched_paths") and not file_authors:
+        lines.append(f"- [observation] The touched files have no earlier history on {baseline} (people).")
+    for other in pe.get("other_branches") or []:
+        if other.get("author"):
+            lines.append(
+                f"- [observation] Other branch for this ticket: {other['branch']} — last work commit by "
+                f"{other['author']} on {str(other['date'])[:10]} (people)."
+            )
+        else:
+            lines.append(f"- [observation] Other branch for this ticket: {other['branch']} — no work commits yet (people).")
+    lines.append(AGENT_AREA.format(
+        instruction="Who is about people: add a [real]/[speculation] claim only when it names a person and why they "
+        "matter to this ticket (an owner or frequent author of a touched module, a reviewer or commenter named in "
+        "the ticket, the author of a related change), citing (ticket), (authorship), or (people); a source path "
+        "alone is never a Who claim, and 'no one else' is not a finding — the observations above already list "
+        "everyone known, so if that is all, add nothing"
+    ))
     lines.append("")
 
     lines += ["## What", ""]
@@ -83,7 +129,16 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     if df.get("patch"):
         lines.append(f"- [observation] Full patch text: {df['patch']}"
                      + (" (truncated)" if df.get("patch_truncated") else "") + " (diff).")
-    lines.append(AGENT_AREA.format(instruction="characterize the actual code changes from the patch — what the code does, not just which files moved; [speculation] with grounding"))
+    for path, count in sorted((rk.get("added_markers") or {}).items()):
+        lines.append(f"- [observation] Added {count} TODO/FIXME-style marker(s) in {path} (risk).")
+    if rk.get("source_touched_without_tests"):
+        source_count = len(files) - len(rk.get("tests_touched") or [])
+        lines.append(f"- [observation] No test file changed alongside {source_count} source file(s) (risk).")
+    lines.append(AGENT_AREA.format(
+        instruction="characterize the actual code changes from the patch — what the code does, not just which "
+        "files moved; [speculation] with grounding; optionally one 'Risk:' claim pointing at a bug, regression, "
+        "or untested path in the change, and one 'Next:' claim"
+    ))
     lines.append("")
 
     lines += ["## Where", ""]
@@ -91,8 +146,14 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(f"- [observation] Edit already happened: {f['path']} (diff).")
     if not files:
         lines.append("- [observation] No edits on this branch yet relative to the merge-base (diff).")
+    for path in rk.get("baseline_overlap") or []:
+        lines.append(f"- [observation] Also changed on {baseline} since the merge-base: {path} — conflict risk on merge (risk).")
     lines.append(AGENT_AREA.format(instruction="[real] located ticket-related information: symbols/paths from the ticket found in the baseline, with anchors"))
-    lines.append(AGENT_AREA.format(instruction="[speculation] where changes may be needed to solve the ticket, ranked grounded/adjacent/ungrounded; if nothing concrete, say so and name the tag-up person"))
+    lines.append(AGENT_AREA.format(
+        instruction="[speculation] where changes may be needed to solve the ticket, ranked grounded/adjacent/ungrounded; "
+        "if nothing concrete, say so and name the tag-up person; optionally one 'Risk:' claim (where a change is likely "
+        "to bite) and one 'Next:' claim (the first place to edit or check)"
+    ))
     lines.append("")
 
     lines += ["## Why", ""]
@@ -100,7 +161,11 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(f"- [observation] Ticket description: {ticket['description']} (ticket).")
     if ticket.get("title"):
         lines.append(f"- [observation] Ticket title: {ticket['title']} (ticket).")
-    lines.append(AGENT_AREA.format(instruction="primary sources first; your [speculation] synthesis at the bottom, composed from [real] findings and tagged"))
+    lines.append(AGENT_AREA.format(
+        instruction="primary sources first; your [speculation] synthesis at the bottom, composed from [real] findings "
+        "and tagged; optionally one 'Risk:' claim (where the change and the ticket's intent diverge, or an acceptance "
+        "criterion is unmet) and one 'Next:' claim (what would settle it)"
+    ))
     lines.append("")
 
     lines += ["## State", ""]

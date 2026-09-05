@@ -15,7 +15,11 @@ SECTION_BUDGET_LINES = 60
 BRIEF_SECTION = "Reader brief"
 BRIEF_PARTS = ("Who", "What", "Where", "Why")
 BRIEF_CLAIM_LIMITS = {"Who": 2, "What": 2, "Where": 1, "Why": 2}
-BRIEF_WORD_LIMITS = {"Who": 80, "What": 120, "Where": 70, "Why": 120}
+BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170}
+# Each brief part may carry one proactive Risk claim and one Next claim on
+# top of its ordinary claims; they are what keeps a report task-oriented
+# without letting it sprawl.
+ASPECT_LIMITS = {"risk": 1, "next": 1}
 # Tags: observation (pipeline fact) / real (agent-located, checkable) /
 # speculation (interpretation, ranked by grounding). [inference] is accepted
 # as a deprecated alias of [speculation].
@@ -23,6 +27,22 @@ STRATUM_RE = re.compile(r"^\s*[-*]?\s*\[(observation|real|speculation|inference)
 CITATION_RE = re.compile(r"\(obs:|observations?/|merge[-_]base|diff|authorship|merge[-_]history|work[-_]separation|branch[- _]resolution", re.IGNORECASE)
 PATHLIKE_RE = re.compile(r"[\w.-]+/[\w./-]+|[\w-]+\.\w{1,8}(:\d+)?")
 GROUNDING_RE = re.compile(r"\b(grounded|adjacent|ungrounded)\b", re.IGNORECASE)
+ASPECT_RE = re.compile(
+    r"^\s*[-*]?\s*\[(?:observation|real|speculation|inference)\]\s*"
+    r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?(Risk|Next):",
+    re.IGNORECASE,
+)
+# Who is about people, so a [real] Who claim may rest on the ticket or the
+# people observations instead of a source path.
+WHO_CITATION_RE = re.compile(
+    r"\((?:ticket(?: config)?|authorship|people|comments?)\)|ticket\.json|observations/(?:authorship|people)\.json",
+    re.IGNORECASE,
+)
+NOBODY_RE = re.compile(
+    r"\b(?:identifies|names|lists|shows|reveals)?\s*no\s+(?:additional|other|further|new)?\s*"
+    r"(?:contributors?|people|persons?|owners?|reviewers?|authors?|individuals?)\b|\bnobody\b|\bno one\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -87,15 +107,32 @@ def lint(text: str) -> list[Finding]:
                     Finding("brief-schema", "error", f"Reader brief '{name}' needs at least one tagged claim")
                 )
                 continue
+            aspects: dict[str, int] = {"risk": 0, "next": 0}
+            plain = 0
+            for line in claims:
+                aspect = ASPECT_RE.match(line)
+                if aspect:
+                    aspects[aspect.group(1).lower()] += 1
+                else:
+                    plain += 1
             limit = BRIEF_CLAIM_LIMITS[name]
-            if len(claims) > limit:
+            if plain > limit:
                 findings.append(
                     Finding(
                         "brief-length",
                         "error",
-                        f"Reader brief '{name}' has {len(claims)} claims (max {limit})",
+                        f"Reader brief '{name}' has {plain} claims (max {limit}); one Risk: and one Next: claim may be added on top",
                     )
                 )
+            for aspect, count in aspects.items():
+                if count > ASPECT_LIMITS[aspect]:
+                    findings.append(
+                        Finding(
+                            "brief-length",
+                            "error",
+                            f"Reader brief '{name}' has {count} {aspect.capitalize()}: claims (max {ASPECT_LIMITS[aspect]})",
+                        )
+                    )
             words = sum(len(line.split()) for line in brief[name] if line.strip())
             word_limit = BRIEF_WORD_LIMITS[name]
             if words > word_limit:
@@ -117,12 +154,21 @@ def lint(text: str) -> list[Finding]:
                         )
                     )
 
+    # Claims are checked per section, and per part inside the brief, so the
+    # Who rules apply to '## Who' and '### Who' alike.
+    groups: list[tuple[str, bool, list[str]]] = []
     for name, lines in sections.items():
         body = [l for l in lines if l.strip()]
         if len(body) > SECTION_BUDGET_LINES:
             findings.append(
                 Finding("length", "error", f"section '{name}' is {len(body)} lines (budget {SECTION_BUDGET_LINES}) — summarize harder")
             )
+        if name == BRIEF_SECTION:
+            for part, part_lines in split_subsections(lines).items():
+                groups.append((f"{name} / {part}", part == "Who", [l for l in part_lines if l.strip()]))
+        else:
+            groups.append((name, name == "Who", body))
+    for name, is_who, body in groups:
         claims = [l for l in body if l.strip().startswith(("-", "*"))]
         unlabeled = [l for l in claims if not STRATUM_RE.match(l)]
         if claims and unlabeled:
@@ -134,9 +180,17 @@ def lint(text: str) -> list[Finding]:
             if not m:
                 continue
             tag = m.group(1).lower()
-            if tag == "real" and not PATHLIKE_RE.search(l):
+            if tag == "real" and not PATHLIKE_RE.search(l) and not (is_who and WHO_CITATION_RE.search(l)):
                 findings.append(
                     Finding("real-anchor", "error", f"section '{name}': [real] claim names no path/line to check: {l.strip()[:80]}")
+                )
+            if is_who and tag in ("real", "speculation", "inference") and NOBODY_RE.search(l):
+                findings.append(
+                    Finding(
+                        "who-people",
+                        "warn",
+                        f"section '{name}': Who claims name people; the observations already list everyone known, so drop this line: {l.strip()[:80]}",
+                    )
                 )
             if tag in ("speculation", "inference"):
                 if not GROUNDING_RE.search(l):

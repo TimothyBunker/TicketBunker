@@ -141,8 +141,30 @@ Your stages, in order:
      The brief is agent-authored, so never label its claims [observation]:
      use anchored [real] for verified facts and ranked [speculation] for
      synthesis. The complete trail remains unchanged below it.
-   - **Who**: the ticket's assignee, reporter, and people of interest
-     first (from ticket configuration), then git authors.
+   - **Who**: people, never files. The ticket's assignee, reporter,
+     reviewers, people of interest, and commenters come first (from ticket
+     configuration), then this branch's git authors, then the people
+     observation: recent authors of the touched files on the baseline and
+     the last committer on each other branch of the ticket. All of that is
+     pre-filled. Add a claim only when you can name a person and say why
+     they matter to this ticket (an owner or frequent author of a touched
+     module, a reviewer or commenter named in the ticket, the author of a
+     related change), citing the observation or ticket line it rests on;
+     a Who claim may cite `(ticket)`, `(authorship)`, or `(people)` instead
+     of a source path. A source path by itself is never a Who claim, and
+     "no one else" is not a finding: the observations already list everyone
+     known, so if that is all, add nothing.
+   - **Be proactive, but bounded.** In each brief part you may add one
+     `Risk:` claim and one `Next:` claim, tagged and grounded like every
+     other claim and placed in the part it belongs to. A Risk is something
+     that could cause the reader problems: a bug or regression you can
+     point at, an untested change, a file also changed on the baseline, a
+     stale branch, an unclear owner. A Next is one concrete thing the
+     reader could do now. Who: whom to involve. What: what in the change
+     looks wrong or untested. Where: where a change is likely to bite.
+     Why: where the change and the ticket's intent diverge. The risk
+     observation pre-fills the mechanical hazards; do not restate them,
+     interpret them.
    - **Where**: three blocks, in this order. (1) Edits that already
      happened — [observation], from the git diffs; emphasize these, they
      are the ground truth of where the ticket already lives. (2) Located
@@ -448,6 +470,6 @@ def load_observations(obs_dir: Path) -> dict | None:
     br = stage_files.get("branch_resolution", {})
     combined["branches"] = br.get("branches", [])
     combined["baseline"] = stage_files.get("baseline", {}).get("baseline") or stage_files.get("merge_history", {}).get("baseline")
-    for stage in ("diff", "merge_history", "work_separation", "authorship"):
+    for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk"):
         combined[stage] = stage_files.get(stage, {}).get("per_branch", {})
     return combined

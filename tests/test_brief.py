@@ -138,3 +138,45 @@ class ReaderBriefTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhoAndProactiveClaimTests(unittest.TestCase):
+    def brief(self, who: str, what: str = "- [speculation] grounded — one file changed (diff).") -> str:
+        return (
+            "## Reader brief\n\n### Who\n\n" + who + "\n\n### What\n\n" + what
+            + "\n\n### Where\n\n- [real] Start in `ticketbunker/viewer.py:1`.\n\n### Why\n\n"
+            "- [speculation] grounded — the ticket wants a clearer report (ticket).\n\n" + EVIDENCE
+        )
+
+    def test_who_real_claim_may_rest_on_ticket_or_people_evidence(self) -> None:
+        text = self.brief("- [real] Tim is the assignee and the only author so far (ticket).")
+        checks = {f.check for f in reportlint.lint(text) if f.severity == "error"}
+        self.assertNotIn("real-anchor", checks)
+        text = self.brief("- [real] Grace owns the parser this branch touches (people).")
+        self.assertNotIn("real-anchor", {f.check for f in reportlint.lint(text)})
+        text = self.brief("- [real] Grace owns the parser this branch touches.")
+        self.assertIn("real-anchor", {f.check for f in reportlint.lint(text)})
+
+    def test_who_warns_when_a_claim_says_nobody_instead_of_naming_someone(self) -> None:
+        text = self.brief("- [real] `src/parse.py:7-42` identifies no contributor beyond the assignee (people).")
+        findings = [f for f in reportlint.lint(text) if f.check == "who-people"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "warn")
+        ok, _ = reportlint.gate(text)
+        self.assertTrue(ok)
+
+    def test_each_brief_part_allows_one_risk_and_one_next_on_top(self) -> None:
+        who = (
+            "- [real] Tim is the assignee (ticket).\n"
+            "- [real] Grace owns the parser (people).\n"
+            "- [speculation] grounded — Risk: nobody has reviewed parser changes since Grace left (people).\n"
+            "- [real] Next: ask Grace to review (people)."
+        )
+        text = self.brief(who)
+        self.assertNotIn("brief-length", {f.check for f in reportlint.lint(text)})
+        text = self.brief(who + "\n- [real] Next: also ping Lin (people).")
+        messages = [f.message for f in reportlint.lint(text) if f.check == "brief-length"]
+        self.assertTrue(any("Next: claims" in m for m in messages), messages)
+        text = self.brief(who + "\n- [real] Lin spiked the same ticket (people).")
+        messages = [f.message for f in reportlint.lint(text) if f.check == "brief-length"]
+        self.assertTrue(any("has 3 claims (max 2)" in m for m in messages), messages)

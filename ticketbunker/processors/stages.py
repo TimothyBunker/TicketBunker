@@ -59,6 +59,20 @@ CONTRACTS: dict[str, StageContract] = {
         process="Aggregate work commits by author with first/last activity dates.",
         desired_outcome="Per branch: authors, commit counts, activity window, and the branch's recency-of-development timestamp.",
     ),
+    "people": StageContract(
+        name="people",
+        purpose="Answer 'who else' mechanically: who has worked on the code this branch touches, and who is active on the ticket's other branches.",
+        inputs="Per-branch touched files; the baseline; every other resolved branch's work commits.",
+        process="git log on the baseline for the touched paths, bounded, aggregated by author; the last work commit on each other branch of the ticket.",
+        desired_outcome="Per branch: recent authors of the touched files on the baseline with counts and last activity, and the last committer on each other branch of the ticket.",
+    ),
+    "risk": StageContract(
+        name="risk",
+        purpose="Surface mechanical hazards in the work so the report can be proactive without guessing.",
+        inputs="Per-branch merge-bases, touched files, and patch text; the baseline.",
+        process="Intersect the branch's touched files with files changed on the baseline since the merge-base; scan added patch lines for TODO/FIXME/XXX/HACK markers; check whether any touched path is a test.",
+        desired_outcome="Per branch: files changed on both sides (conflict risk), added work markers by file, and whether tests were touched alongside source.",
+    ),
 }
 
 
@@ -102,7 +116,7 @@ def run_bootstrap(
     ledger: Ledger,
     assigned_branches: list[str] | None = None,
 ) -> dict:
-    """Run all six stages in order. Returns the combined observation set."""
+    """Run all eight stages in order. Returns the combined observation set."""
     observations: dict = {"ticket_key": ticket_key, "baseline": baseline, "repo": str(repo)}
     baseline_ref = baseline
 
@@ -291,5 +305,99 @@ def run_bootstrap(
 
     authorship = run_stage(CONTRACTS["authorship"], ledger, stage_authorship)
     observations["authorship"] = authorship
+
+    FILE_HISTORY_MAX_COMMITS = 200
+    FILE_HISTORY_MAX_PATHS = 40
+
+    def stage_people() -> dict:
+        result = {}
+        for br, info in diffs.items():
+            paths = [f["path"] for f in (info.get("files") or [])][:FILE_HISTORY_MAX_PATHS]
+            file_authors: dict[str, dict] = {}
+            if paths:
+                out = git(
+                    repo,
+                    [
+                        "log",
+                        f"--max-count={FILE_HISTORY_MAX_COMMITS}",
+                        "--no-merges",
+                        "--format=%an%x09%aI",
+                        baseline_ref,
+                        "--",
+                        *paths,
+                    ],
+                    ledger,
+                    "people",
+                )
+                for line in out.splitlines():
+                    name, _, date = line.partition("\t")
+                    if not name:
+                        continue
+                    entry = file_authors.setdefault(name, {"commits": 0, "first": date, "last": date})
+                    entry["commits"] += 1
+                    entry["first"] = min(entry["first"], date)
+                    entry["last"] = max(entry["last"], date)
+            others = []
+            for other, winfo in work.items():
+                if other == br:
+                    continue
+                commits = winfo.get("work_commits") or []
+                if not commits:
+                    others.append({"branch": other, "author": "", "date": "", "commits": 0})
+                    continue
+                last = max(commits, key=lambda c: c["date"])
+                others.append({"branch": other, "author": last["author"], "date": last["date"], "commits": len(commits)})
+            result[br] = {
+                "touched_paths": len(paths),
+                "history_commits_examined": FILE_HISTORY_MAX_COMMITS,
+                "file_authors": file_authors,
+                "other_branches": others,
+            }
+        _write_observation(obs_dir, "people", {"per_branch": result})
+        return result
+
+    people = run_stage(CONTRACTS["people"], ledger, stage_people)
+    observations["people"] = people
+
+    MARKER_RE = re.compile(r"\b(TODO|FIXME|XXX|HACK)\b")
+    TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec|specs|__tests__)(/|$)|(^|/)test_[^/]*$|[._-](test|spec)s?\.[A-Za-z0-9]+$", re.IGNORECASE)
+
+    def stage_risk() -> dict:
+        result = {}
+        for br, info in bases.items():
+            base = info["merge_base"]
+            touched = [f["path"] for f in (diffs.get(br, {}).get("files") or [])]
+            baseline_changed = git(
+                repo, ["diff", "--name-only", f"{base}..{baseline_ref}", *code_pathspec], ledger, "risk"
+            ).splitlines()
+            overlap = sorted(set(touched) & {line.strip() for line in baseline_changed if line.strip()})
+            markers: dict[str, int] = {}
+            patch_rel = diffs.get(br, {}).get("patch")
+            if patch_rel:
+                patch_path = obs_dir.parent / patch_rel
+                current = ""
+                try:
+                    patch_lines = patch_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                except OSError:
+                    patch_lines = []
+                for line in patch_lines:
+                    if line.startswith("+++ "):
+                        current = line[4:].strip()
+                        current = current[2:] if current.startswith("b/") else current
+                    elif line.startswith("+") and not line.startswith("+++") and MARKER_RE.search(line):
+                        markers[current] = markers.get(current, 0) + 1
+            tests = [path for path in touched if TEST_PATH_RE.search(path)]
+            source = [path for path in touched if path not in tests]
+            result[br] = {
+                "baseline_overlap": overlap,
+                "added_markers": markers,
+                "tests_touched": tests,
+                "source_touched_without_tests": bool(source) and not tests,
+            }
+        _write_observation(obs_dir, "risk", {"per_branch": result})
+        return result
+
+    risk = run_stage(CONTRACTS["risk"], ledger, stage_risk)
+    observations["risk"] = risk
 
     return observations

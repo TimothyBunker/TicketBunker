@@ -1,6 +1,6 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
-import Markdown, { SourceActionsContext, TRUST_LABELS } from "./Markdown";
+import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, type ReportPlace } from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
@@ -239,7 +239,9 @@ function SynthesisCard({
       text: selectedText,
     });
   }
+  const place = useMemo<ReportPlace>(() => ({ category: topic, scope, branch: report.scope.startsWith("branch:") ? report.scope.slice(7) : "" }), [topic, scope, report.scope]);
   return (
+    <ReportPlaceContext.Provider value={place}>
     <section ref={cardRef} className="synthesis-card" onMouseUp={selected}>
       {menu && (
         <FloatingActions
@@ -263,6 +265,7 @@ function SynthesisCard({
       </div>
       {value.synthesis && <details><summary>Full trail</summary>{value.trail ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown> : <p>No evidence trail was published.</p>}</details>}
     </section>
+    </ReportPlaceContext.Provider>
   );
 }
 
@@ -293,7 +296,7 @@ function AgentTab({
         <div><h2>Agent work</h2><p>{scope === "all" ? `Every branch report, most recent first (${branchReports.length}).` : "This branch's report. Synthesis first; evidence stays one disclosure away."}</p></div>
         {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
       </div>
-      {reports.length > 0 && <p className="trust-legend"><span>Each claim carries how much to trust it:</span>{["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => <span key={key} className={`trust-chip ${key.startsWith("speculation") ? key.split(":")[1] : key}`} title={TRUST_LABELS[key].title}>{TRUST_LABELS[key].label}</span>)}</p>}
+      {reports.length > 0 && <p className="trust-legend"><span>Each claim carries how much to trust it:</span>{["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => <span key={key} className={`trust-chip ${key.startsWith("speculation") ? key.split(":")[1] : key}`} title={TRUST_LABELS[key].title}>{TRUST_LABELS[key].label}</span>)}<span className="legend-gap">and may flag</span>{["risk", "next"].map((key) => <span key={key} className={`aspect-chip ${key}`} title={ASPECT_LABELS[key].title}>{ASPECT_LABELS[key].label}</span>)}</p>}
       {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
       {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
       {reports.map((report) => (
@@ -614,8 +617,9 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     setQuote({ ...value, scope, category: "what" });
     setChatOpen(true);
   }
-  function askSource(path: string, line: number) {
-    setQuote({ kind: "source", category: "what", scope: scope === "all" ? "combined" : scope, branch: "", text: `${path}:${line}`, path, line_start: line, line_end: line });
+  function askSource(path: string, line: number, place: ReportPlace | null) {
+    const category = (place?.category || "what") as Topic;
+    setQuote({ kind: "source", category, scope: place?.scope || (scope === "all" ? "combined" : scope), branch: place?.branch || "", text: `${path}:${line}`, path, line_start: line, line_end: line });
     setChatOpen(true);
   }
   const sourceActions = useMemo(() => ({ open: openSource, copy: copySource, ask: askSource }), [repoRoot, scope]);

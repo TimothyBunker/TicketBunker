@@ -303,6 +303,15 @@ new Bunkers.
   exact lint/anchor findings remain in private local `diagnostics.jsonl` and do
   not leak into coworker replies or command errors. It cannot edit source, run
   Git mutations, or write Combined directly.
+- The bootstrap runs eight stages: the six Git stages plus `people` (recent
+  authors of the touched files on the baseline, last committer on each other
+  branch of the ticket) and `risk` (baseline overlap since the merge-base,
+  TODO/FIXME markers added by the patch, source changed without a test).
+  The scaffold pre-fills Who, What, and Where from them, Who guidance names
+  people and forbids file-only or "no one else" claims (lint warns
+  `who-people`, and a Who `[real]` claim may cite `(ticket)`/`(authorship)`/
+  `(people)` instead of a path), and each brief part may add one `Risk:` and
+  one `Next:` claim, rendered as a second chip in the viewer.
 - Every reference form the anchor checker accepts (`path:line` or `path` in a
   code span, `@path:line`, `@path`, and the older `@[path]:line`) renders as
   one reference control in Combined, child synthesis, full trails, the ticket

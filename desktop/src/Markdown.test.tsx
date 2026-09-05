@@ -73,3 +73,18 @@ describe("source references", () => {
     expect(screen.getByText("src/app.py:12")).toBeTruthy();
   });
 });
+
+
+describe("risk and next chips", () => {
+  afterEach(cleanup);
+
+  it("marks proactive claims with an aspect chip and strips the prefix", () => {
+    expect(claimTag("[speculation] grounded — Risk: the parser skips blank lines.")).toEqual({ key: "speculation:grounded", rest: "the parser skips blank lines.", aspect: "risk" });
+    expect(claimTag("[real] Next: run the viewer tests (tests/test_viewer.py:1).")?.aspect).toBe("next");
+    render(<Markdown compact>{"- [speculation] grounded — Risk: the parser skips blank lines (src/parse.py:4).\n- [real] Next: run the viewer tests (tests/test_viewer.py:1)."}</Markdown>);
+    expect(screen.getByText("Risk")).toBeTruthy();
+    expect(screen.getByText("Next")).toBeTruthy();
+    expect(screen.queryByText(/Risk:/)).toBeNull();
+    expect(document.querySelector("li.claim-speculation .aspect-chip.risk")).toBeTruthy();
+  });
+});

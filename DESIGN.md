@@ -429,11 +429,28 @@ this schema; every newly scaffolded session must fill it.
 | Section | Determined by | Content | Stratum |
 |---|---|---|---|
 | Reader brief | **The agent, bounded by the evidence below.** Ticket fields, git observations, and verified finds determine what may be emphasized | `### Who`, `### What`, `### Where`, `### Why`: one or two short claims for Who, What, and Why in descending apparent importance; one short Where claim may name up to three paths in importance order. It makes the evidence readable; it does not summarize every observation. | agent-authored [real] / ranked [speculation]; never [observation] |
-| Who | **Users.** Assignee, reporter, people of interest from ticket config; the session's user from session config. Manually configured for now; tracker API compatibility after manual is solid. Git authors supplement | Direct ticket people first, then git authors from the branches | config + observation |
+| Who | **People, never files.** Assignee, reporter, reviewers, people of interest, and commenters from the ticket; the branch's git authors (authorship); recent authors of the touched files on the baseline and the last committer on each other branch of the ticket (people observation) | Direct ticket people first, then branch authors, then the people around the code, all pre-filled. An agent claim names a person and why they matter, citing `(ticket)`, `(authorship)`, or `(people)`; a source path alone is never a Who claim and "no one else" is not a finding | config + observation |
 | What | **Git diffs and actual code** — not just which region changed but the changed code itself. The diff stage captures patch text as an observation so What can quote and describe real changes | Summarized diff: files, hunks, additions/deletions, work vs. merge churn, with the actual changes characterized | observation |
 | Where | **Other ticket work, git diffs, ticket information, and a little agent speculation** — in that order of authority | Three blocks, in epistemic order. **(1) Edits that already happened** — from the git diffs and prior components of this ticket, with emphasis: the ground truth of where the ticket already lives. **(2) Located information directly relating to the ticket** — symbols/paths from the ticket found in the baseline and what ties into them. **(3) Informed speculation** on where the user may need to make changes to solve the ticket, ranked by grounding; if nothing concrete, "tag up with reporter/person of interest" | observation → real → speculation |
 | Why | **The ticket itself, primary sources** — then the agent | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
 | State | **Merge history + authorship observations** — then the agent | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
+
+**Proactive, but bounded.** A report should tell the reader what could bite
+them and what to do next, inside the same four questions rather than in a
+new section. Each Reader brief part may carry, on top of its ordinary claims,
+one `Risk:` claim (something that could cause the reader problems: a bug or
+regression the agent can point at, an untested change, a file also changed on
+the baseline, a stale branch, an unclear owner) and one `Next:` claim (one
+concrete thing to do now), each tagged and grounded like every other claim.
+Who: whom to involve. What: what in the change looks wrong or untested.
+Where: where a change is likely to bite. Why: where the change and the
+ticket's intent diverge. The lint counts them separately from the ordinary
+claims and refuses a second of either. The `risk` stage pre-fills the
+mechanical hazards as `[observation]` lines (files changed on both the branch
+and the baseline since the merge-base, TODO/FIXME-style markers added by the
+patch, source changed with no test touched), so the agent interprets hazards
+instead of inventing them. The viewer renders the aspect as a second chip,
+Risk or Next, beside the trust chip.
 
 ### 3.5 Report-first UX
 
@@ -618,7 +635,8 @@ only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips that say what to trust rather than the on-disk word: Observed
 for pipeline facts, Verified for anchored [real] claims, and Speculation with
 its grounding rank (grounded, adjacent, ungrounded); a legend above the report
-explains each on hover. The bracket tags remain the report's stored form.
+explains each on hover, and a `Risk:` or `Next:` prefix becomes a second
+chip beside it. The bracket tags and prefixes remain the report's stored form.
 
 **File references act on click, and selection never acts on its own.** Any
 reference a report or ticket carries in the forms the anchor checker accepts
@@ -882,8 +900,11 @@ session (§3.13) composes one fragment more — the merge preamble
 composition.
 
 **The report is a form.** A report component doesn't start empty: the
-pipeline **pre-fills** it — Who from ticket config and authorship, What from
-the diffs, State from merge history, all as `[observation]` lines — and the
+pipeline **pre-fills** it — Who from ticket config, authorship, and the
+people stage (recent authors of the touched files, committers on the
+ticket's other branches), What from the diffs and the risk stage, Where from
+the diffs and baseline overlap, State from merge history, all as
+`[observation]` lines — and the
 agent **fills in the agent-specific areas**: the `[real]` finds, the ranked
 `[speculation]`, the Why synthesis. The form's structure is ours; the
 observations are the pipeline's; only the fill is the agent's. This keeps the
