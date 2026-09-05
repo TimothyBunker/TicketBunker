@@ -234,7 +234,9 @@ def _read_ticket(bunker: Path) -> dict[str, Any]:
 def resolve_bunker(repo: Path, branch: str) -> Path | None:
     root = layout.find_root(repo)
     if root is None:
-        return None
+        from . import bunkerruntime
+
+        return bunkerruntime.resolve(repo, branch)
     ticket_id = config.extract_ticket_id(branch)
     if ticket_id:
         candidate = layout.bunker_path(root, ticket_id)
@@ -263,7 +265,13 @@ def resolve_bunker(repo: Path, branch: str) -> Path | None:
     for bunker in layout.ticket_dirs(layout.bunkers_dir(root)):
         if branch in (_read_ticket(bunker).get("assigned_branches") or []):
             assigned.append(bunker)
-    return assigned[0] if len(assigned) == 1 else None
+    if len(assigned) == 1:
+        return assigned[0]
+    if not assigned:
+        from . import bunkerruntime
+
+        return bunkerruntime.resolve(repo, branch)
+    return None
 
 
 def _locked_file(path: Path):
@@ -431,7 +439,9 @@ def _spawn_worker(repo: Path) -> None:
         log.close()
 
 
-def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
+def enqueue(
+    repo: Path, event: str, *, spawn: bool = True, bunker: Path | None = None
+) -> dict[str, Any]:
     """Coalesce one explicit synthesis request and start its worker."""
     repo = Path(repo).resolve()
     selected = config.load().get("agent") or {}
@@ -440,7 +450,7 @@ def enqueue(repo: Path, event: str, *, spawn: bool = True) -> dict[str, Any]:
     branch, status = _git(repo, "branch", "--show-current")
     if status != 0 or not branch:
         return {"queued": False, "reason": "detached_or_missing_branch"}
-    bunker = resolve_bunker(repo, branch)
+    bunker = Path(bunker) if bunker is not None else resolve_bunker(repo, branch)
     if bunker is None:
         return {"queued": False, "reason": "branch_has_no_ticket", "branch": branch}
     head, _ = _git(repo, "rev-parse", "HEAD")

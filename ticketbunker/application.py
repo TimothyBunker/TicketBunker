@@ -561,6 +561,21 @@ def command_ticket_get(
             )
         except (OSError, ValueError):
             detail["truth"] = {}
+    elif repository is not None:
+        from . import bunkerruntime
+
+        bunker_id = str(payload.get("bunker_id") or "")
+        ticket_id = str(detail["ticket"].get("id") or "")
+        try:
+            bunkerruntime.materialize(bunker_id, ticket_id)
+            detail["truth"] = truth.state(
+                Path(str(repository["local_path"])),
+                str(detail["project"].get("key") or ""),
+                ticket_id,
+                bunker_id,
+            )
+        except (OSError, ValueError, bunkerdb.BunkerDatabaseError):
+            detail["truth"] = {}
     else:
         detail["truth"] = {}
     return detail
@@ -930,6 +945,33 @@ def command_project_link(
     }
 
 
+def publish_ticket_reports(
+    bunker_id: str,
+    ticket_id: str,
+    repository_id: str,
+    branch: str,
+    child: str,
+    master: str,
+) -> dict[str, Any]:
+    """Record an accepted child report and its master in the Bunker.
+
+    The lint and anchor gates already ran; on a shared Bunker the service
+    accepts the report changes before they are written locally.
+    """
+    proposal = _bunker_result(
+        bunkerdb.propose_report_publication,
+        bunker_id,
+        ticket_id=ticket_id,
+        repository_id=repository_id,
+        branch=branch,
+        child=child,
+        master=master,
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    result = _bunker_result(bunkerdb.apply_report_publication, bunker_id, proposal, accepted=accepted)
+    return {**result, "shared": proposal["mode"] == "remote"}
+
+
 @commands.register("application.project.sync")
 def command_project_sync(
     _context: commands.CommandContext, payload: dict[str, Any]
@@ -1097,6 +1139,22 @@ def command_bunker_invitation_revoke(
     )
     return {
         "invitations": _bunker_result(adapter.list_invitations, str(connection["remote_bunker_id"]))
+    }
+
+
+@commands.register("application.bunker.sync")
+def command_bunker_sync(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Pull the service's current state into this replica."""
+    bunker_id = str(payload.get("bunker_id") or "")
+    adapter, connection = _remote_adapter(bunker_id)
+    snapshot = _bunker_result(adapter.pull, str(connection["remote_bunker_id"]), "")
+    applied = _bunker_result(bunkerdb.apply_snapshot, bunker_id, snapshot)
+    return {
+        "sync": applied,
+        "bunker": bunkerdb.get_bunker(bunker_id),
+        "bunkers": bunkerdb.list_bunkers(),
     }
 
 

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
 import { command } from "./transport";
 import { trackerSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
@@ -453,7 +453,9 @@ export default function BunkerHub({
   const [action, setAction] = useState<ActionMode>("");
   const [configTab, setConfigTab] = useState<ConfigurationTab | undefined>(undefined);
   const [syncing, setSyncing] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [catalogVersion, setCatalogVersion] = useState(0);
+  const pulledAt = useRef<Record<string, number>>({});
   const [importing, setImporting] = useState("");
   const bunker = state.bunkers.find((value) => value.id === selection?.bunkerId);
   const projects = bunker ? flatten(bunker.projects) : [];
@@ -497,6 +499,29 @@ export default function BunkerHub({
       setSyncing(false);
     }
   }
+
+  async function pullBunker(target: Bunker, quiet = false) {
+    setPulling(true);
+    try {
+      const result = await command<{ sync: { tickets: number; reports: number }; bunkers: Bunker[] }>("application.bunker.sync", { bunker_id: target.id });
+      pulledAt.current[target.id] = Date.now();
+      onState({ ...state, bunkers: result.bunkers });
+      setCatalogVersion((value) => value + 1);
+      if (!quiet) notify(`Synced with ${remoteLabel(target).replace(/^Shared on /, "")}: ${result.sync.tickets} tickets, ${result.sync.reports} reports`);
+    } catch (reason) {
+      if (!quiet) notify(String(reason), true);
+    } finally {
+      setPulling(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!bunker?.remote || bunker.remote.state !== "ready") return;
+    const last = pulledAt.current[bunker.id] || 0;
+    if (Date.now() - last < 60_000) return;
+    pulledAt.current[bunker.id] = Date.now();
+    void pullBunker(bunker, true);
+  }, [bunker?.id]);
 
   function openConfiguration(tab?: ConfigurationTab) {
     setConfigTab(tab);
@@ -559,9 +584,10 @@ export default function BunkerHub({
             <div>
               <button className="breadcrumb" onClick={() => onSelection(null)}>Bunkers</button>
               <h1>{bunker.name}</h1>
-              <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
+              <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}{bunker.remote ? ` · synced ${bunker.remote.last_synced_at ? relativeTime(bunker.remote.last_synced_at) : "never"}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
             </div>
             <div className="header-actions">
+              {bunker.remote && <button disabled={pulling} onClick={() => pullBunker(bunker)}>{pulling ? "Syncing…" : "Sync now"}</button>}
               <button onClick={() => openConfiguration("trackers")}>Trackers</button>
               <button onClick={() => openConfiguration("defaults")}>Defaults</button>
               {bunker.remote ? <button onClick={() => setAction("members")}>Members</button> : <button onClick={() => setAction("share")}>Share Bunker</button>}

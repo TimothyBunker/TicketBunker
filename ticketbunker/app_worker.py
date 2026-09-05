@@ -47,6 +47,7 @@ DESKTOP_ACTIONS = frozenset(
         "application.bunker.invitations",
         "application.bunker.invitation.revoke",
         "application.bunker.members",
+        "application.bunker.sync",
         "application.project.sync",
         "application.tracker.connect",
         "application.tracker.boards",

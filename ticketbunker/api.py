@@ -442,14 +442,17 @@ class TicketDatabase:
             )
         return tuple(summaries)
 
-    def get_ticket(self, ticket_id: str, *, refresh_branches: bool = False) -> TicketSnapshot:
-        if not config.validate_ticket_id(ticket_id):
-            raise KeyError(ticket_id)
-        bunker = (
+    def _bunker_dir(self, ticket_id: str) -> Path:
+        return (
             layout.companion_bunker_path(self.bunkers, ticket_id)
             if project.load_locator(self.project_root) is not None
             else layout.bunker_path(self.project_root, ticket_id)
         )
+
+    def get_ticket(self, ticket_id: str, *, refresh_branches: bool = False) -> TicketSnapshot:
+        if not config.validate_ticket_id(ticket_id):
+            raise KeyError(ticket_id)
+        bunker = self._bunker_dir(ticket_id)
         paths = layout.paths(bunker)
         data = _read_json(paths["ticket"])
         if data.get("id") != ticket_id:
@@ -584,6 +587,25 @@ class TicketDatabase:
             activity=tuple(activity),
             validation_errors=tuple(types.validate("ticket", data)),
         )
+
+
+class RuntimeTicketDatabase(TicketDatabase):
+    """The same read model over a Bunker ticket's machine-local runtime directory.
+
+    The Bunker database owns the ticket and its accepted reports; this reads
+    the projection the pipeline works on (observations, working reports,
+    ledger) against the attached checkout so synthesis state, branch
+    comparison, and verification badges compose exactly as they do for legacy
+    tickets.
+    """
+
+    def __init__(self, project_root: Path | str, runtime_root: Path | str):
+        self.project_root = Path(project_root).resolve()
+        self.project_key = ""
+        self.bunkers = Path(runtime_root)
+
+    def _bunker_dir(self, ticket_id: str) -> Path:
+        return self.bunkers / f"{ticket_id}_bunker"
 
 
 _ACTIVE_STATUSES = frozenset({"backlog", "open", "todo", "in-progress", "in-review"})
@@ -828,6 +850,7 @@ __all__ = [
     "BranchSnapshot",
     "ReaderBrief",
     "ReportSnapshot",
+    "RuntimeTicketDatabase",
     "TicketDatabase",
     "TicketCatalog",
     "TicketFacets",

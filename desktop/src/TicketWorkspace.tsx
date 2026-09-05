@@ -1,6 +1,6 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "./Markdown";
-import { reportTopic, relativeTime, TOPICS, type Topic } from "./report";
+import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import type { Bunker, SourceDraft, TicketDetail, TicketReference } from "./types";
 
@@ -151,6 +151,7 @@ function AgentTab({
       {reports.map((report) => (
         <section className="branch-report" key={report.scope}>
           {scope === "combined" && <div className="branch-divider"><span>{report.scope === "combined" ? "Combined report" : report.scope.slice(7)}</span></div>}
+          {report.scope !== "combined" && <p className="report-provenance">{provenanceLine(verifiedStamp(report.content), report.updated_at) || "Provenance unknown"}</p>}
           <div className="synthesis-grid">
             {TOPICS.map((topic) => <SynthesisCard key={topic} topic={topic} report={report} scope={scope} onQuote={onQuote} openSource={openSource} copySource={copySource} />)}
           </div>
@@ -162,6 +163,7 @@ function AgentTab({
 
 function TicketRail({
   detail,
+  bunkerId,
   repoRoot,
   scope,
   onScope,
@@ -169,6 +171,7 @@ function TicketRail({
   notify,
 }: {
   detail: TicketDetail;
+  bunkerId: string;
   repoRoot: string;
   scope: string;
   onScope: (value: string) => void;
@@ -184,7 +187,7 @@ function TicketRail({
     if (!repoRoot) return notify("Attach a local repository before synthesizing.", true);
     setBusy(true);
     try {
-      await command("truth.synthesize", { project: agentProject(detail), ticket: ticket.id }, repoRoot);
+      await command("truth.synthesize", { project: agentProject(detail), ticket: ticket.id, bunker_id: bunkerId }, repoRoot);
       notify("Synthesis started");
       onReload();
     } catch (reason) {
@@ -433,7 +436,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
         <main className="ticket-main">
           {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : tab === "ticket" ? <TicketTab detail={detail} openSource={openSource} copySource={copySource} /> : <AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} />}
         </main>
-        <TicketRail detail={detail} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setTab("agent"); }} onReload={load} notify={notify} />
+        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setTab("agent"); }} onReload={load} notify={notify} />
       </div>
       <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} onReload={load} notify={notify} />
     </div>

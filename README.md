@@ -203,7 +203,9 @@ tb serve --data ~/ticketbunker-service.sqlite3
 ```
 
 It prints its address and a one-time owner setup token. In the app, open the
-Bunker, choose **Share Bunker**, and paste both. The service keeps one SQLite
+Bunker, choose **Share Bunker**, and paste both. From then on every synced
+ticket and every verified agent report goes to the service first; teammates'
+copies pull when they open the Bunker or press **Sync now**. The service keeps one SQLite
 file; back it up by copying it. TicketBunker apps require HTTPS except on
 localhost, so run the service behind a platform or proxy that terminates TLS
 (`--host 0.0.0.0`), or pass `--certfile` and `--keyfile`. Larger teams may

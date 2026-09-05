@@ -37,12 +37,13 @@ ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
     ),
     ROLE_MEMBER: ("tickets:read", "tickets:write", "config:read"),
 }
-CHANGE_KINDS = ("project", "repository-bindings", "config-document", "ticket")
+CHANGE_KINDS = ("project", "repository-bindings", "config-document", "ticket", "report")
 CHANGE_CAPABILITIES = {
     "project": "config:write",
     "repository-bindings": "config:write",
     "config-document": "config:write",
     "ticket": "tickets:write",
+    "report": "tickets:write",
 }
 MAX_CHANGE_BATCH = 200
 DEFAULT_INVITATION_SECONDS = 7 * 24 * 60 * 60
@@ -123,6 +124,7 @@ _CODE_MESSAGES = {
     "project_key_taken": "That project key already exists in the shared Bunker.",
     "bunker_invalid": "The Bunker could not be published because its content did not validate.",
     "ticket_conflict": "Those tickets changed on the shared Bunker. Sync again.",
+    "report_conflict": "That report changed on the shared Bunker. Sync, then synthesize again.",
 }
 
 

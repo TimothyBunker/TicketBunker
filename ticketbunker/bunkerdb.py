@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from . import layout, platform_services, project as companion, remote
+from . import config, layout, platform_services, project as companion, remote
 
 
 SCHEMA_VERSION = 3
@@ -2612,6 +2612,139 @@ def apply_ticket_sync_change(
     }
 
 
+def find_bunker_ticket(repo_root: Path | str, branch: str) -> dict[str, Any] | None:
+    """The one Bunker ticket a checkout branch names, or None when ambiguous."""
+    ticket_id = config.extract_ticket_id(str(branch or ""))
+    if not ticket_id:
+        return None
+    try:
+        resolved = Path(repo_root).resolve()
+    except OSError:
+        return None
+    matches: list[dict[str, Any]] = []
+    for bunker in list_bunkers():
+        if not bunker.get("available"):
+            continue
+        for repository in bunker.get("repositories") or []:
+            raw = str(repository.get("local_path") or "")
+            if not raw or Path(raw).resolve() != resolved:
+                continue
+            with _database(str(bunker["id"])) as connection:
+                row = connection.execute(
+                    "SELECT project_id FROM tickets WHERE id = ?", (ticket_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+                allowed, _projects = _project_scope(
+                    _project_rows(connection), str(repository.get("project_id") or "")
+                )
+            if str(row["project_id"]) not in allowed:
+                continue
+            matches.append(
+                {
+                    "bunker_id": str(bunker["id"]),
+                    "ticket_id": ticket_id,
+                    "project_id": str(row["project_id"]),
+                    "repository_id": str(repository.get("id") or ""),
+                }
+            )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _report_revision(content: str) -> str:
+    import hashlib
+
+    return "r:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def propose_report_publication(
+    bunker_id: str,
+    *,
+    ticket_id: str,
+    repository_id: str,
+    branch: str,
+    child: str,
+    master: str,
+) -> dict[str, Any]:
+    """The accepted child report plus regenerated master as typed changes."""
+    bunker_id = _id(bunker_id, "Bunker")
+    ticket_id = _id(ticket_id, "ticket")
+    repository_key = _id(repository_id, "repository") if repository_id else ""
+    branch_name = str(branch or "").strip()
+    if not branch_name:
+        raise BunkerDatabaseError("A report belongs to one branch.")
+    candidates = [
+        {"ticket_id": ticket_id, "scope": f"branch:{branch_name}", "repository_id": repository_key, "content": str(child)},
+        {"ticket_id": ticket_id, "scope": "combined", "repository_id": "", "content": str(master)},
+    ]
+    with _database(bunker_id) as connection:
+        mode = _mode(connection, bunker_id)
+        if connection.execute("SELECT 1 FROM tickets WHERE id = ?", (ticket_id,)).fetchone() is None:
+            raise BunkerDatabaseError("That ticket is not in this Bunker.")
+        rows: list[dict[str, Any]] = []
+        changes: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        for candidate in candidates:
+            if not candidate["content"].strip():
+                continue
+            current = connection.execute(
+                "SELECT content FROM reports WHERE ticket_id = ? AND scope = ? AND repository_id = ?",
+                (ticket_id, candidate["scope"], candidate["repository_id"]),
+            ).fetchone()
+            current_text = str(current["content"]) if current is not None else None
+            if current_text == candidate["content"]:
+                results.append({"scope": candidate["scope"], "action": "unchanged"})
+                continue
+            results.append({"scope": candidate["scope"], "action": "updated" if current is not None else "created"})
+            rows.append(candidate)
+            changes.append(
+                remote.change_record(
+                    key=uuid.uuid4().hex,
+                    kind="report",
+                    record_id=f"{ticket_id}|{candidate['scope']}|{candidate['repository_id']}",
+                    expected_revision=_report_revision(current_text) if current_text is not None else "",
+                    revision=_report_revision(candidate["content"]),
+                    payload=candidate,
+                )
+            )
+    return {"mode": mode, "ticket_id": ticket_id, "rows": rows, "changes": changes, "results": results}
+
+
+def apply_report_publication(
+    bunker_id: str,
+    proposal: Mapping[str, Any],
+    *,
+    accepted: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write accepted reports. Shared Bunkers require service acceptance."""
+    bunker_id = _id(bunker_id, "Bunker")
+    rows = list(proposal.get("rows") or [])
+    with _database(bunker_id) as connection:
+        if rows:
+            _require_acceptance(_mode(connection, bunker_id), accepted)
+        now = _now()
+        for row in rows:
+            connection.execute(
+                """
+                INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(ticket_id, scope, repository_id) DO UPDATE SET
+                    content = excluded.content,
+                    updated_at = excluded.updated_at
+                """,
+                (str(row["ticket_id"]), str(row["scope"]), str(row["repository_id"]), str(row["content"]), now),
+            )
+        if accepted:
+            _record_acceptance(connection, accepted)
+    results = list(proposal.get("results") or [])
+    return {
+        "reports": results,
+        "created": sum(item["action"] == "created" for item in results),
+        "updated": sum(item["action"] == "updated" for item in results),
+        "unchanged": sum(item["action"] == "unchanged" for item in results),
+    }
+
+
 def local_publication(bunker_id: str) -> dict[str, Any]:
     """Everything a service needs to host this Bunker. Device paths never leave."""
     bunker_id = _id(bunker_id, "Bunker")
@@ -2720,6 +2853,164 @@ def _replace_members(connection: sqlite3.Connection, members: Iterable[Mapping[s
                 str(value.get("updated_at") or now),
             ),
         )
+
+
+def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot) -> dict[str, Any]:
+    """Reconcile a replica with the service's authorized snapshot.
+
+    Shared records are upserted by identity; repository bindings the service
+    no longer lists are removed along with this device's mapping to them.
+    Device paths, runtime artefacts, and the credential reference stay.
+    """
+    bunker_id = _id(bunker_id, "Bunker")
+    counts = {"projects": 0, "repositories": 0, "documents": 0, "tickets": 0, "reports": 0}
+    with _database(bunker_id) as connection:
+        if _mode(connection, bunker_id) != "remote":
+            raise BunkerDatabaseError("This Bunker is local; there is nothing to sync from.")
+        row = connection.execute(
+            "SELECT remote_bunker_id FROM remote_connection WHERE singleton = 1"
+        ).fetchone()
+        remote_id = str(row["remote_bunker_id"]) if row else ""
+        if str(snapshot.bunker.get("id") or "") != remote_id:
+            raise BunkerDatabaseError("The service answered for a different Bunker.")
+        now = _now()
+        name = str(snapshot.bunker.get("name") or "").strip()
+        if name:
+            connection.execute("UPDATE bunker SET name = ?, updated_at = ? WHERE id = ?", (name, now, bunker_id))
+        # Projects: parents before children.
+        pending = [dict(value) for value in snapshot.projects]
+        known = {str(item["id"]) for item in connection.execute("SELECT id FROM projects").fetchall()}
+        placed = set(known)
+        while pending:
+            progressed = False
+            for value in list(pending):
+                project_id = _id(value.get("id"), "project")
+                parent = str(value.get("parent_id") or "")
+                if parent and parent not in placed:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO projects(id, bunker_id, parent_id, key, name, description, position, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        parent_id = excluded.parent_id, key = excluded.key, name = excluded.name,
+                        description = excluded.description, position = excluded.position,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        project_id, bunker_id, parent or None, _project_key(value.get("key")),
+                        _clean_name(value.get("name"), "project"), str(value.get("description") or ""),
+                        int(value.get("position") or 0), str(value.get("created_at") or now),
+                        str(value.get("updated_at") or now),
+                    ),
+                )
+                placed.add(project_id)
+                pending.remove(value)
+                progressed = True
+                counts["projects"] += 1
+            if not progressed:
+                raise BunkerDatabaseError("The service snapshot contains a missing parent or cycle.")
+        listed_bindings: set[str] = set()
+        for value in snapshot.repository_bindings:
+            binding_id = _id(value.get("id"), "repository binding")
+            identity = canonical_remote(str(value.get("canonical_remote") or ""))
+            if not identity:
+                raise BunkerDatabaseError("The service snapshot contains an invalid repository identity.")
+            connection.execute(
+                """
+                INSERT INTO repository_bindings(id, bunker_id, project_id, name, canonical_remote, default_branch, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id = excluded.project_id, name = excluded.name,
+                    canonical_remote = excluded.canonical_remote, default_branch = excluded.default_branch,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    binding_id, bunker_id, _id(value.get("project_id"), "project"),
+                    _clean_name(value.get("name"), "repository"), identity,
+                    _repository_branch(value.get("default_branch")),
+                    str(value.get("created_at") or now), str(value.get("updated_at") or now),
+                ),
+            )
+            listed_bindings.add(binding_id)
+            counts["repositories"] += 1
+        for item in connection.execute("SELECT id FROM repository_bindings").fetchall():
+            if str(item["id"]) not in listed_bindings:
+                connection.execute("DELETE FROM repository_bindings WHERE id = ?", (str(item["id"]),))
+        for value in snapshot.config_documents:
+            scope_type = str(value.get("scope_type") or "bunker")
+            scope_id = (
+                bunker_id
+                if scope_type == "bunker" and str(value.get("scope_id") or remote_id) == remote_id
+                else str(value.get("scope_id") or remote_id)
+            )
+            connection.execute(
+                """
+                INSERT INTO config_documents(scope_type, scope_id, kind, revision, content_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(scope_type, scope_id, kind) DO UPDATE SET
+                    revision = excluded.revision, content_json = excluded.content_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    scope_type, scope_id, str(value.get("kind") or "configuration"),
+                    str(value.get("revision") or snapshot.revision),
+                    json.dumps(value.get("content") or {}, sort_keys=True),
+                    str(value.get("updated_at") or now),
+                ),
+            )
+            counts["documents"] += 1
+        for value in snapshot.tickets:
+            connection.execute(
+                """
+                INSERT INTO tickets(id, project_id, payload_json, source_kind, source_reference, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id = excluded.project_id, payload_json = excluded.payload_json,
+                    source_kind = excluded.source_kind, source_reference = excluded.source_reference,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    _id(value.get("id"), "ticket"), _id(value.get("project_id"), "project"),
+                    json.dumps(value.get("payload") or {}, sort_keys=True),
+                    str(value.get("source_kind") or "remote"), str(value.get("source_reference") or ""),
+                    str(value.get("updated_at") or now),
+                ),
+            )
+            counts["tickets"] += 1
+        for value in snapshot.reports:
+            scope = str(value.get("scope") or "").strip()
+            if not scope:
+                continue
+            connection.execute(
+                """
+                INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(ticket_id, scope, repository_id) DO UPDATE SET
+                    content = excluded.content, updated_at = excluded.updated_at
+                """,
+                (
+                    _id(value.get("ticket_id"), "ticket"), scope,
+                    str(value.get("repository_id") or ""), str(value.get("content") or ""),
+                    str(value.get("updated_at") or now),
+                ),
+            )
+            counts["reports"] += 1
+        _replace_members(connection, snapshot.members)
+        connection.execute(
+            """
+            UPDATE remote_connection
+            SET state = 'ready', config_revision = ?, sync_cursor = ?, last_synced_at = ?,
+                current_member_id = COALESCE(NULLIF(?, ''), current_member_id),
+                capabilities_json = ?
+            WHERE singleton = 1
+            """,
+            (
+                snapshot.revision, snapshot.cursor, now, str(snapshot.current_member_id or ""),
+                json.dumps(list(snapshot.capabilities), sort_keys=True),
+            ),
+        )
+    return {**counts, "cursor": snapshot.cursor, "revision": snapshot.revision, "synced_at": now}
 
 
 def share_bunker(

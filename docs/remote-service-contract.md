@@ -197,11 +197,14 @@ roles and capabilities to any member.
 Change kinds are `project` (payload: the project row, `expected_revision`
 empty for creation), `config-document` (payload: scope, kind, content),
 `repository-bindings` (record id: the project id; payload: the complete list;
-revisions are the content-derived digest both sides compute), and `ticket`
+revisions are the content-derived digest both sides compute), `ticket`
 (record id: the ticket id; payload: `id`, `project_id`, `payload`,
-`source_kind`, `source_reference`; revisions are content digests). The first
-three require `config:write`; `ticket` requires `tickets:write`, so members
-may sync a Project's tracker while only owners change its setup. A batch that
+`source_kind`, `source_reference`; revisions are content digests), and
+`report` (record id: `ticket|scope|repository`; payload: `ticket_id`,
+`scope`, `repository_id`, `content`; revisions are content digests; the ticket
+and any named repository must exist). The first three require `config:write`;
+`ticket` and `report` require `tickets:write`, so members may sync a Project's
+tracker and publish verified reports while only owners change its setup. A batch that
 mixes kinds needs every capability involved. Each change
 carries an idempotency `key`, a record identity, the expected revision, and the
 revision the client proposes. The service applies the whole set transactionally
@@ -237,7 +240,7 @@ Project repositories without assigning the ticket itself to one repository.
   (`bunker_unavailable`, `invitation_invalid`);
 - `409`: an expected revision conflicts, or setup was already completed
   (`revision_conflict`, `project_key_taken`, `ticket_conflict`,
-  `setup_complete`);
+  `report_conflict`, `setup_complete`);
 - `410`: the invitation was used, revoked, or expired (`invitation_used`,
   `invitation_revoked`, `invitation_expired`);
 - `413`: the request exceeds the 8 MiB bound;

@@ -110,6 +110,19 @@ exercise unless a live boundary is explicitly called out.
   `apply_ticket_sync_change`. Shared Bunkers send `ticket` changes (members
   hold `tickets:write`) before writing locally. `TrackerSyncTests` and the
   shared-Bunker test cover it with the GitHub transport mocked.
+- Agent reports are Bunker records. `ticketbunker/bunkerruntime.py` projects a
+  Bunker ticket into `<data home>/bunkers/<id>/runtime/<TICKET>_bunker/` so the
+  unchanged pipeline (bootstrap, compose, harness, lint, anchors, master) runs
+  there; `tb run`/`tb publish`/coworker acceptance then call
+  `publish_reports`, which writes the child and master into `reports` and, on
+  a shared Bunker, pushes `report` changes first. `truth.*` and
+  `autoagent.resolve_bunker` accept a `bunker_id`/runtime directory, so
+  Synthesize works on tickets that came from a board with no `.tb` layout.
+  `application.bunker.sync` reconciles a replica from the service snapshot
+  (`bunkerdb.apply_snapshot`); the Bunker page pulls on open and on Sync now.
+  Ticket pages show each branch report's verification stamp and record time.
+  `tests/test_bunkerruntime.py` runs the stub harness end to end on a local and
+  a shared Bunker.
 - Existing companion-backed projects appear in a separate Migration section.
   **Import copy** reads legacy locator/config/ticket/report material into a new
   local Bunker, records its digest and counts, and does not modify the source or
@@ -498,15 +511,16 @@ exercise intentionally does not run an agent report.
 
 ## Remaining product work
 
-1. Move the ticket, report, observation, ledger, configuration, search, and
-   coworker handlers from legacy companion paths to the per-Bunker database,
-   preserving their typed gates and viewer behavior.
+1. Retire the remaining legacy-only paths: the coworker session and the
+   `tb` ticket/comment/set commands still address companion layouts; route
+   them through the Bunker runtime and database the way reports now are, and
+   let `tb view` open a repository attached only through a Bunker.
 2. Extend the reference service and app with join requests and owner
    approval, member management (roles, removal), deploy recipes for platforms
    that provide HTTPS and a persistent disk, and ticket/report synchronisation
-   (pull through the existing adapter so members receive the owner's later
-   syncs). Add GitLab and Jira transports behind the same tracker source, and
-   a per-device "last synced" fact on the Project page.
+   Add GitLab and Jira transports behind the same tracker source, incremental
+   pull after the cursor instead of whole-snapshot reconcile, and deletion
+   propagation for tickets and reports.
 3. Add an OS-vault backend behind the credential reference store and native
    sign-in for services that require authentication before redemption.
 4. Add signed/versioned JSON and markdown export/import for local-only and

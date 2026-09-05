@@ -739,6 +739,20 @@ class SharedBunkerTests(unittest.TestCase):
                 )["sync"]
         self.assertEqual((member_sync["created"], member_sync["updated"], member_sync["unchanged"]), (1, 1, 1))
 
+        # Ada's replica joined before any of this. Sync now brings the tracker,
+        # every ticket, and the configuration without a new invitation.
+        self.as_user("ada")
+        before = self.dispatch("application.ticket.list", {"bunker_id": joined["id"], "project_id": joined["projects"][0]["id"], "status": "all"})
+        self.assertEqual(before["total"], 0)
+        pulled = self.dispatch("application.bunker.sync", {"bunker_id": joined["id"]})
+        self.assertEqual(pulled["sync"]["tickets"], 3)
+        self.assertEqual(pulled["bunker"]["projects"][0]["tracker"]["title"], "Voxel ECS")
+        self.assertEqual(pulled["bunker"]["projects"][0]["ticket_count"], 3)
+        self.assertTrue(pulled["bunker"]["remote"]["last_synced_at"])
+        after = self.dispatch("application.ticket.list", {"bunker_id": joined["id"], "project_id": joined["projects"][0]["id"], "status": "all"})
+        self.assertEqual({item["id"] for item in after["tickets"]}, {"ECS-4", "ECS-5", "ECS-6"})
+        self.assertEqual({item["id"]: item["status"] for item in after["tickets"]}["ECS-5"], "done")
+
         # Only the owner revokes invitations.
         self.as_user("tim")
         second = self.dispatch(

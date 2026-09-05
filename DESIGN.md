@@ -155,6 +155,14 @@ configuration publication. The role and capability vocabulary lives in
 `ticketbunker/remote.py`; every compatible service enforces it on its own side,
 and a cached capability only decides what the editor offers.
 
+**Replicas pull.** A shared Bunker syncs when it is opened (at most once a
+minute) and on **Sync now**: the app fetches the service's authorized snapshot
+and reconciles the replica by identity, upserting Projects, repository
+bindings, configuration documents, tickets, reports, and members, removing
+bindings the service no longer lists, and recording the new cursor, revision,
+and sync time. Device paths and the credential reference are untouched. The
+Bunker page states "Shared on host · role · synced N minutes ago".
+
 **Sharing is the owner's inverse of joining.** A local Bunker is published to a
 chosen service with **Share Bunker**: the app signs in (with the one-time owner
 setup token a fresh reference service prints, or a credential this computer
@@ -385,11 +393,25 @@ consequences:
    home. That conversation can propose report changes but is never itself
    shared report truth.
 4. **Components live together under the ticket, keyed by source branch.** A
-   successful publish commits the gated component through the report service,
-   regenerates the master in the same local transaction, and queues a bounded
-   remote change when the Bunker is shared. Another authorized replica sees the
-   complete child set after sync. Legacy companion data may be imported but is
-   never a simultaneous writer.
+   successful publish writes the gated component and the regenerated master
+   into the Bunker database as `report` records (scope `branch:<name>` with
+   its repository binding, and `combined`). On a shared Bunker those two rows
+   are sent to the service as `report` changes first and written locally only
+   after acceptance; any member holds `tickets:write`, so a report published
+   on one computer is shared truth for every replica that syncs. Legacy
+   companion data may be imported but is never a simultaneous writer.
+
+**The pipeline runs in a machine-local runtime directory.** For a Bunker
+ticket, `ticketbunker/bunkerruntime.py` projects the database row into
+`<data home>/bunkers/<bunker>/runtime/<TICKET>_bunker/`, a directory shaped
+exactly like a legacy ticket bunker, so the observation stages, context
+composition, harness session, lint and anchor gates, and master builder run
+unchanged. The projection is rewritten only when the ticket itself changes, so
+a rerun keeps its input fingerprint. Observations, session forms, transcripts,
+inferences, and the ledger stay in that directory as this machine's evidence;
+the accepted reports are handed to the Bunker database by `publish_reports`
+and the database is the only shared truth. Nothing is written into the source
+repository, and a Bunker ticket needs no `.tb` layout or companion repository.
 
 **Report component schema** — each new child leads with a compact Reader brief,
 then carries the complete who / what / where / why / state evidence trail. Each
@@ -549,9 +571,10 @@ are no longer resolved remain available for audit.
 State remains a separate collapsed report trail, because tracker lifecycle and
 observed branch state are already visible in the rail. Legacy children derive
 compact previews from their evidence without inventing synthesis. Verification
-and freshness remain visible. Each child trail labels work authors separately
-from the harness/provider/model that generated the report; a selected branch also
-shows its known generator beside its branch identity. Unknown generator fields
+and freshness remain visible. Each branch report carries one provenance line
+read from its mechanical stamp: the commit and branch it was verified against,
+when, the harness, provider, and model that generated it, and when the Bunker
+recorded it. Work authors stay separate from that generator identity. Unknown generator fields
 stay absent instead of being guessed. Before the first report, Agent work shows
 only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips. Ticket, Project, and Agent reading remains strictly read-only.

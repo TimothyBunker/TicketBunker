@@ -76,6 +76,19 @@ def _identifier(raw: Any, label: str) -> str:
     return value
 
 
+_RECORD_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,512}$")
+
+
+def _record_identifier(raw: Any, kind: str) -> str:
+    """Report records embed a branch scope, so they allow path characters."""
+    value = str(raw or "").strip()
+    if kind == "report":
+        if not _RECORD_RE.fullmatch(value) or value.count("|") != 2:
+            raise ServiceError(400, "changes_invalid", "The report record identity is not valid.")
+        return value
+    return _identifier(value, "record")
+
+
 def _name(raw: Any, label: str, limit: int = 120) -> str:
     value = " ".join(str(raw or "").split())
     if not value or len(value) > limit:
@@ -731,7 +744,7 @@ class ServiceStore:
                     try:
                         revision = self._apply_one(connection, bunker_id, raw)
                     except ServiceError as exc:
-                        if exc.code in {"revision_conflict", "project_key_taken", "ticket_conflict"}:
+                        if exc.code in {"revision_conflict", "project_key_taken", "ticket_conflict", "report_conflict"}:
                             conflicts.append({"key": key, "ok": False, "code": exc.code, "message": exc.message})
                             continue
                         raise
@@ -783,7 +796,7 @@ class ServiceStore:
         kind = str(raw.get("kind") or "")
         if kind not in remote.CHANGE_KINDS:
             raise ServiceError(400, "changes_invalid", "That change kind is not supported.")
-        record_id = _identifier(raw.get("record_id"), "record")
+        record_id = _record_identifier(raw.get("record_id"), kind)
         expected = str(raw.get("expected_revision") or "")
         revision = str(raw.get("revision") or "").strip()
         if not revision or len(revision) > 128:
@@ -796,7 +809,42 @@ class ServiceStore:
             return self._apply_config_document(connection, bunker_id, record_id, expected, revision, payload, now)
         if kind == "ticket":
             return self._apply_ticket(connection, bunker_id, record_id, expected, revision, payload, now)
+        if kind == "report":
+            return self._apply_report(connection, bunker_id, record_id, expected, revision, payload, now)
         return self._apply_repository_bindings(connection, bunker_id, record_id, expected, revision, payload, now)
+
+    def _apply_report(
+        self, connection, bunker_id, record_id, expected, revision, payload, now
+    ) -> str:
+        if not isinstance(payload, Mapping):
+            raise ServiceError(400, "changes_invalid", "A report change needs a report object.")
+        ticket_id = _identifier(payload.get("ticket_id"), "report ticket")
+        if self._current_revision(connection, bunker_id, "ticket", ticket_id) == "":
+            raise ServiceError(409, "revision_conflict", "The report's ticket is missing.")
+        scope = str(payload.get("scope") or "").strip()
+        if not scope or len(scope) > 300 or "|" in scope:
+            raise ServiceError(400, "changes_invalid", "A report needs a scope.")
+        repository_id = str(payload.get("repository_id") or "").strip()
+        if repository_id and self._current_revision(connection, bunker_id, "repository-binding", repository_id) == "":
+            raise ServiceError(409, "revision_conflict", "The report names a repository the Bunker does not have.")
+        content = payload.get("content")
+        if not isinstance(content, str) or len(content.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ServiceError(400, "changes_invalid", "A report needs bounded text content.")
+        if record_id != f"{ticket_id}|{scope}|{repository_id}":
+            raise ServiceError(400, "changes_invalid", "The report record identity does not match its payload.")
+        current = self._current_revision(connection, bunker_id, "report", record_id)
+        if current != expected:
+            raise ServiceError(409, "report_conflict", "The report changed elsewhere.")
+        value = {
+            "ticket_id": ticket_id,
+            "scope": scope,
+            "repository_id": repository_id,
+            "content": content,
+            "revision": revision,
+            "updated_at": now,
+        }
+        self._upsert(connection, bunker_id, "report", record_id, value, revision, now)
+        return revision
 
     def _apply_ticket(
         self, connection, bunker_id, record_id, expected, revision, payload, now

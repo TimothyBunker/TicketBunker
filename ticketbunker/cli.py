@@ -730,7 +730,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         return 1
     out = master.regenerate(bunker, ledger)
     print(f"published {dest}; master regenerated at {out}")
-    return 0
+    return _publish_to_bunker(bunker, args.branch, ledger)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -967,6 +967,25 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
     out = master.regenerate(bunker, ledger)
     print(f"session complete: published {dest}; master regenerated at {out}")
+    return _publish_to_bunker(bunker, args.branch, ledger)
+
+
+def _publish_to_bunker(bunker: Path, branch: str, ledger: Ledger) -> int:
+    """Hand an accepted report to its Bunker; legacy bunkers are unaffected."""
+    from . import bunkerruntime
+
+    try:
+        result = bunkerruntime.publish_reports(bunker, branch, ledger)
+    except commands.CommandRejected as exc:
+        print(
+            "The report passed its checks and is kept on this computer, but the Bunker "
+            f"did not accept it: {exc.message}",
+            file=sys.stderr,
+        )
+        return 1
+    if result is not None:
+        where = "the shared Bunker" if result.get("shared") else "the local Bunker"
+        print(f"report recorded in {where}")
     return 0
 
 
@@ -1561,14 +1580,21 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         assigned = _bunkers_assigned(project, branch)
         bunker = assigned[0] if len(assigned) == 1 else None
     if bunker is None:
+        from . import bunkerruntime
+
+        bunker = bunkerruntime.resolve(repo, branch)
+    if bunker is None:
         return stop(
             f"the checked-out branch '{branch}' is not linked to one local ticket.",
             "Open its ticket and attach this branch, or switch to a branch whose name contains the ticket key.",
         )
     ticket = _ticket(bunker)
     ledger = _ledger(bunker)
+    from . import bunkerruntime as _runtime
+
+    runtime_info = _runtime.marker(bunker) or {}
     locator = project_mod.load_locator(repo) or {}
-    configured_baseline = str(locator.get("base_branch") or "")
+    configured_baseline = str(runtime_info.get("base_branch") or locator.get("base_branch") or "")
     baseline = configured_baseline or "main"
     base_obs = layout.paths(bunker)["observations"] / "baseline.json"
     if base_obs.exists():

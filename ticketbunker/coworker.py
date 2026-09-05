@@ -893,6 +893,10 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
             PROPOSAL_ACCEPT_REJECTION,
         ) from exc
     master.regenerate(ticket.bunker, ledger)
+    from . import bunkerruntime
+
+    for branch, _text in prepared:
+        bunkerruntime.publish_reports(ticket.bunker, branch, ledger)
     ledger.event(
         "coworker_proposal_accepted",
         proposal=proposal_id,

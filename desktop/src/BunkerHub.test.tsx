@@ -128,6 +128,30 @@ describe("Bunker and Project boundaries", () => {
     expect(transport.command).toHaveBeenCalledWith("application.bunker.invitation.create", { bunker_id: shared.id, role: "member" });
   });
 
+  it("pulls a shared Bunker on open and on Sync now", async () => {
+    const replica = {
+      ...bunker,
+      mode: "remote" as const,
+      remote: { server_url: "https://tickets.example.test", remote_bunker_id: "engineering", state: "ready", last_synced_at: "" },
+      sharing: { state: "ready", role: "member", is_owner: false, can_share: false, can_invite: false, can_manage_members: false, server: "https://tickets.example.test" },
+    };
+    const onState = vi.fn();
+    transport.command.mockImplementation((action: string) => {
+      if (action === "application.bunker.sync") return Promise.resolve({ sync: { tickets: 3, reports: 1 }, bunkers: [replica] });
+      throw new Error(`Unexpected command ${action}`);
+    });
+
+    render(
+      <BunkerHub state={{ ...state, bunkers: [replica] }} selection={{ bunkerId: replica.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.sync", { bunker_id: replica.id }));
+    expect(screen.getByText(/synced never/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(transport.command.mock.calls.filter(([action]) => action === "application.bunker.sync")).toHaveLength(2));
+    expect(onState).toHaveBeenCalled();
+  });
+
   it("shows members without invitation controls to a member", async () => {
     const replica = {
       ...bunker,

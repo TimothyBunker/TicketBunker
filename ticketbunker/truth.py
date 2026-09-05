@@ -87,7 +87,15 @@ def _ticket(
     ticket_id: str,
     *,
     live_branches: bool = False,
+    bunker_id: str = "",
 ) -> TicketSnapshot:
+    if bunker_id:
+        from . import bunkerruntime
+        from .api import RuntimeTicketDatabase
+
+        return RuntimeTicketDatabase(root, bunkerruntime.runtime_root(bunker_id)).get_ticket(
+            ticket_id, refresh_branches=live_branches
+        )
     if project_key:
         catalog = TicketCatalog(root)
         return catalog.database(project_key).get_ticket(
@@ -339,19 +347,29 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
     }
 
 
-def state(root: Path, project_key: str, ticket_id: str) -> dict[str, Any]:
+BUNKER_COMPANION = {
+    "status": "current",
+    "label": "Bunker data",
+    "detail": "This ticket and its reports come from the Bunker database.",
+    "action": "",
+}
+
+
+def state(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> dict[str, Any]:
     root = Path(root).resolve()
     with _LOCK:
         entry = dict(
             (_read_all(root).get("tickets") or {}).get(_key(project_key, ticket_id)) or {}
         )
     try:
-        ticket = _ticket(root, project_key, ticket_id)
+        ticket = _ticket(root, project_key, ticket_id, bunker_id=bunker_id)
     except (FileNotFoundError, KeyError, ValueError, commands.CommandRejected):
         ticket = None
     if ticket is not None:
         entry["content_revision"] = _content_revision(root, ticket)
         entry["synthesis"] = synthesis_state(root, ticket)
+    if bunker_id:
+        entry["companion"] = dict(BUNKER_COMPANION)
     entry.setdefault(
         "companion",
         {
@@ -373,6 +391,8 @@ def state(root: Path, project_key: str, ticket_id: str) -> dict[str, Any]:
     entry.setdefault("refresh", "idle")
     entry["ticket"] = ticket_id
     entry["project"] = project_key
+    if bunker_id:
+        entry["bunker_id"] = bunker_id
     return entry
 
 
@@ -416,11 +436,21 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
     root = Path(context.project_root).resolve()
     project_key = str(payload.get("project") or "").strip()
     ticket_id = str(payload.get("ticket") or "").strip()
+    bunker_id = str(payload.get("bunker_id") or "").strip()
     if not ticket_id:
         raise commands.CommandRejected("ticket_required", "Choose a ticket to refresh.")
+    if bunker_id:
+        from . import bunkerruntime
+
+        try:
+            bunkerruntime.materialize(bunker_id, ticket_id)
+        except Exception as exc:  # the database names the problem
+            raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
 
     companion: dict[str, str]
-    if project.load_locator(root) is not None:
+    if bunker_id:
+        companion = {**BUNKER_COMPANION, "checked_at": _now()}
+    elif project.load_locator(root) is not None:
         try:
             project.setup(root)
             companion = {
@@ -447,7 +477,7 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
             "checked_at": _now(),
         }
 
-    ticket = _ticket(root, project_key, ticket_id)
+    ticket = _ticket(root, project_key, ticket_id, bunker_id=bunker_id)
     ledger = Ledger(_git_dir(root) / "ticketbunker" / "ticket-open.jsonl")
     ok, detail = project.refresh_source_refs(root, ledger)
     if ok:
@@ -476,7 +506,7 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
         }
     # Resolve branches again from the now-current local and remote-tracking
     # refs. This remains a local read. Synthesis is a separate user action.
-    ticket = _ticket(root, project_key, ticket_id, live_branches=True)
+    ticket = _ticket(root, project_key, ticket_id, live_branches=True, bunker_id=bunker_id)
     content_revision = _content_revision(root, ticket)
     result = {
         "companion": companion,
@@ -496,9 +526,24 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
     root = Path(context.project_root).resolve()
     project_key = str(payload.get("project") or "").strip()
     ticket_id = str(payload.get("ticket") or "").strip()
+    bunker_id = str(payload.get("bunker_id") or "").strip()
     if not ticket_id:
         raise commands.CommandRejected("ticket_required", "Choose a ticket to synthesize.")
-    ticket = _ticket(root, project_key, ticket_id, live_branches=True)
+    runtime_bunker = None
+    if bunker_id:
+        from . import bunkerruntime
+
+        try:
+            info = bunkerruntime.materialize(bunker_id, ticket_id)
+        except Exception as exc:  # the database names the problem
+            raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
+        if info["repo"] is None:
+            raise commands.CommandRejected(
+                "repository_required",
+                "Connect this Project's repository on this computer, then press Synthesize again.",
+            )
+        runtime_bunker = info["bunker"]
+    ticket = _ticket(root, project_key, ticket_id, live_branches=True, bunker_id=bunker_id)
     branch = _current_branch(root)
     branches = [item.name for item in ticket.branches]
     if not branch or not any(_same_branch(name, branch) for name in branches):
@@ -512,8 +557,8 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
     for key in ("queued", "running"):
         active = automatic.get(key) or {}
         if isinstance(active, dict) and active.get("branch") == branch:
-            return {"queued": False, **state(root, project_key, ticket_id)}
-    queued = autoagent.enqueue(root, "user-requested-synthesis")
+            return {"queued": False, **state(root, project_key, ticket_id, bunker_id)}
+    queued = autoagent.enqueue(root, "user-requested-synthesis", bunker=runtime_bunker)
     if not queued.get("queued"):
         if queued.get("reason") == "agent_disabled":
             raise commands.CommandRejected(
@@ -526,15 +571,15 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
             "Synthesis could not start for the checked-out branch.\n"
             "Next: Run tb agent status, resolve the named issue, then retry.",
         )
-    return {"queued": True, **state(root, project_key, ticket_id)}
+    return {"queued": True, **state(root, project_key, ticket_id, bunker_id)}
 
 
-def _background(root: Path, project_key: str, ticket_id: str) -> None:
+def _background(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> None:
     target = (str(root), project_key, ticket_id)
     try:
         commands.dispatch(
             "truth.refresh",
-            {"project": project_key, "ticket": ticket_id},
+            {"project": project_key, "ticket": ticket_id, "bunker_id": bunker_id},
             commands.CommandContext(root, transport="background"),
         )
     except Exception as exc:
@@ -573,6 +618,7 @@ def queue_refresh(
     ticket_id: str,
     *,
     force: bool = False,
+    bunker_id: str = "",
 ) -> bool:
     """Start one coalesced ticket refresh and return without waiting."""
     root = Path(root).resolve()
@@ -580,7 +626,7 @@ def queue_refresh(
     with _LOCK:
         if target in _RUNNING:
             return False
-        current = state(root, project_key, ticket_id)
+        current = state(root, project_key, ticket_id, bunker_id)
         completed = str(current.get("completed_at") or "")
         if completed and not force:
             try:
@@ -611,7 +657,7 @@ def queue_refresh(
         )
     thread = threading.Thread(
         target=_background,
-        args=(root, project_key, ticket_id),
+        args=(root, project_key, ticket_id, bunker_id),
         name=f"tb-truth-{ticket_id}",
         daemon=True,
     )
@@ -626,8 +672,11 @@ def command_queue(context: commands.CommandContext, payload: dict[str, Any]) -> 
     ticket_id = str(payload.get("ticket") or "").strip()
     if not ticket_id:
         raise commands.CommandRejected("ticket_required", "Choose a ticket to refresh.")
-    queued = queue_refresh(root, project_key, ticket_id, force=bool(payload.get("force")))
-    return {"queued": queued, **state(root, project_key, ticket_id)}
+    bunker_id = str(payload.get("bunker_id") or "").strip()
+    queued = queue_refresh(
+        root, project_key, ticket_id, force=bool(payload.get("force")), bunker_id=bunker_id
+    )
+    return {"queued": queued, **state(root, project_key, ticket_id, bunker_id)}
 
 
 __all__ = [
