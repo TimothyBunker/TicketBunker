@@ -563,19 +563,19 @@ checked out, both), how far it is ahead of and behind the Project's base, and
 who last committed to it. The read uses only local refs. The rail is rendered
 once; the Work control and branch links are never duplicated between views.
 
-Agent work defaults to the mechanically assembled master, labeled **Combined**
-in the viewer, and provides one native report selector at the right of its
-heading: Combined followed by each branch report. Combined presents each
-category's concise Reader brief contributions in development-recency order, with
-the branch named and a visible rule between branch contributions; each category
-immediately follows its synthesis with a native disclosure for the unchanged
-evidence, likewise separated and grouped by child. Selecting a branch narrows all
-Who/What/Where/Why synthesis and evidence to that component. Direct links in the
-persistent Branches rail activate Agent and select the corresponding report.
-Once any report exists, Report scope is the union of resolved ticket branches
-and child reports: a newly created local branch remains selectable before its
-first child report and shows a direct Synthesize empty state. Reports whose refs
-are no longer resolved remain available for audit.
+Agent work opens on one branch report: the checked-out branch when it has a
+report, otherwise the most recent report. The selector at the right of its
+heading lists each branch report and, only when more than one exists, **All
+branches**, which stacks every branch's Reader brief contributions in
+development-recency order with the branch named and a visible rule between
+them. Each category immediately follows its synthesis with a native disclosure
+for the unchanged evidence; a legacy report without a brief shows its evidence
+trail in place and says so. The Branches rail lists branches only, each noting
+whether it has a report; selecting one narrows Agent work to that report or, for
+a branch without one, shows a direct Synthesize empty state. The mechanically
+assembled master remains the Bunker's `combined` record for agents, export, and
+audit rather than a reading surface of its own. Reports whose refs are no
+longer resolved remain available for audit.
 State remains a separate collapsed report trail, because tracker lifecycle and
 observed branch state are already visible in the rail. Legacy children derive
 compact previews from their evidence without inventing synthesis. Verification

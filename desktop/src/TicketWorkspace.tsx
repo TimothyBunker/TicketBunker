@@ -169,9 +169,13 @@ function SynthesisCard({
     <section className="synthesis-card" onMouseUp={selected}>
       <header><h3>{topic[0].toUpperCase() + topic.slice(1)}</h3></header>
       <div ref={synthesisRef} className="synthesis-copy">
-        {value.synthesis ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.synthesis}</Markdown> : <p className="missing-copy">No current synthesis.</p>}
+        {value.synthesis
+          ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.synthesis}</Markdown>
+          : value.trail
+            ? <><p className="missing-copy">No synthesis brief; this is the evidence trail.</p><Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown></>
+            : <p className="missing-copy">Nothing was published for {topic}.</p>}
       </div>
-      <details><summary>Full trail</summary>{value.trail ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown> : <p>No evidence trail was published.</p>}</details>
+      {value.synthesis && <details><summary>Full trail</summary>{value.trail ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown> : <p>No evidence trail was published.</p>}</details>}
     </section>
   );
 }
@@ -192,19 +196,22 @@ function AgentTab({
   copySource: (path: string, line: number) => void;
 }) {
   const branchReports = detail.reports.filter((value) => value.scope.startsWith("branch:"));
-  const reports = scope === "combined"
-    ? (branchReports.length ? branchReports : detail.reports.filter((value) => value.scope === "combined"))
-    : detail.reports.filter((value) => value.scope === scope || value.scope === `branch:${scope}`);
+  const legacyMaster = detail.reports.filter((value) => value.scope === "combined");
+  const reports = scope === "all"
+    ? (branchReports.length ? branchReports : legacyMaster)
+    : detail.reports.filter((value) => value.scope === `branch:${scope}`);
+  const selectable = branchReports.length > 0;
   return (
     <article className="agent-work">
       <div className="agent-toolbar">
-        <div><h2>Agent work</h2><p>Current synthesis first. Evidence stays available.</p></div>
-        <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}><option value="combined">Combined</option>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}</select></label>
+        <div><h2>Agent work</h2><p>{scope === "all" ? `Every branch report, most recent first (${branchReports.length}).` : "This branch's report. Synthesis first; evidence stays one disclosure away."}</p></div>
+        {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
       </div>
-      {reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Switch to a ticket branch and use Synthesize when you want the coworker to build one.</p></div>}
+      {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
+      {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
       {reports.map((report) => (
         <section className="branch-report" key={report.scope}>
-          {scope === "combined" && <div className="branch-divider"><span>{report.scope === "combined" ? "Combined report" : report.scope.slice(7)}</span></div>}
+          {scope === "all" && <div className="branch-divider"><span>{report.scope === "combined" ? "Combined report" : report.scope.slice(7)}</span></div>}
           {report.scope !== "combined" && <p className="report-provenance">{provenanceLine(verifiedStamp(report.content), report.updated_at) || "Provenance unknown"}</p>}
           <div className="synthesis-grid">
             {TOPICS.map((topic) => <SynthesisCard key={topic} topic={topic} report={report} scope={scope} onQuote={onQuote} openSource={openSource} copySource={copySource} />)}
@@ -279,14 +286,15 @@ function TicketRail({
       </section>
       <section className="branches-panel">
         <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" onClick={() => setCreating(!creating)}>+</button></header>
-        <button className={scope === "combined" ? "branch-item selected" : "branch-item"} onClick={() => onScope("combined")}><span>Combined</span><small>{detail.reports.filter((value) => value.scope.startsWith("branch:")).length} reports</small></button>
+        {detail.branches.length === 0 && <p className="rail-empty">No branch carries {detail.ticket.id} yet. Use + to start one.</p>}
         {detail.branches.map((branch) => {
           const compare = branchCompare(branch);
           const when = branch.last_commit_at ? `${branch.last_author ? `${branch.last_author} · ` : ""}${relativeTime(branch.last_commit_at)}` : "";
+          const hasReport = detail.reports.some((report) => report.scope === `branch:${branch.name}`);
           return (
             <button key={branch.name} className={scope === branch.name ? "branch-item selected" : "branch-item"} onClick={() => onScope(branch.name)} title={branch.upstream ? `Tracks ${branch.upstream}` : undefined}>
               <span className="branch-name">{branch.current && <i className="state-dot ready" />}{branch.name}</span>
-              <small>{[branchState(branch), compare].filter(Boolean).join(" · ")}</small>
+              <small>{[branchState(branch), compare, hasReport ? "report" : "no report"].filter(Boolean).join(" · ")}</small>
               {when && <small>{when}</small>}
             </button>
           );
@@ -331,7 +339,7 @@ function CoworkerDrawer({
   }, [quote, onOpen]);
   useEffect(() => {
     if (!open || !repoRoot) return;
-    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope }, repoRoot)
+    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot)
       .then(setCoworker)
       .catch((reason) => setError(String(reason)));
   }, [open, repoRoot, detail.project.key, detail.ticket.id, topic, scope]);
@@ -344,7 +352,7 @@ function CoworkerDrawer({
     setBusy(true);
     setError("");
     try {
-      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope, message, reference: quote }, repoRoot);
+      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope, message, reference: quote }, repoRoot);
       setCoworker(result);
       onQuote(null);
       form.reset();
@@ -361,7 +369,7 @@ function CoworkerDrawer({
       await command(`coworker.proposal.${action}`, { project: agentProject(detail), ticket: detail.ticket.id, proposal: id }, repoRoot);
       notify(action === "accept" ? "Report update accepted" : "Proposal dismissed");
       onReload();
-      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope }, repoRoot);
+      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot);
       setCoworker(refreshed);
     } catch (reason) {
       setError(String(reason));
@@ -376,7 +384,7 @@ function CoworkerDrawer({
   const proposals = (coworker?.proposals || []) as Array<Record<string, unknown>>;
   return (
     <aside className="coworker-drawer">
-      <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "combined" ? "Combined" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
+      <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
       <nav>{TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>
       <div className="chat-messages">{messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>
       <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={`Ask about ${topic}`} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>
@@ -430,7 +438,7 @@ function SourceEditor({
     const selected = content.slice(input.selectionStart, input.selectionEnd);
     const start = before.split("\n").length;
     const end = start + selected.split("\n").length - 1;
-    onQuote({ kind: "source", category: "what", scope: "combined", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: selected.slice(0, 4000) });
+    onQuote({ kind: "source", category: "what", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: selected.slice(0, 4000) });
   }
   return (
     <section className="source-editor">
@@ -443,7 +451,7 @@ function SourceEditor({
 export default function TicketWorkspace({ bunker, reference, onBack, notify }: Props) {
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [error, setError] = useState("");
-  const [scope, setScope] = useState("combined");
+  const [scope, setScope] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [editor, setEditor] = useState<SourceDraft | null>(null);
@@ -456,6 +464,14 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       .catch((reason) => setError(String(reason)));
   }
   useEffect(load, [bunker.id, reference.id]);
+  useEffect(() => {
+    if (!detail) return;
+    const withReports = detail.reports.filter((value) => value.scope.startsWith("branch:")).map((value) => value.scope.slice(7));
+    const valid = scope === "all" ? withReports.length > 1 : scope !== "" && (withReports.includes(scope) || detail.branches.some((branch) => branch.name === scope));
+    if (valid) return;
+    const current = detail.branches.find((branch) => branch.current)?.name;
+    setScope(current && withReports.includes(current) ? current : withReports[0] || current || detail.branches[0]?.name || "");
+  }, [detail]);
 
   async function openSource(path: string, line: number) {
     if (!repoRoot) return notify("Attach this ticket’s local repository before opening source.", true);
