@@ -2,7 +2,7 @@ import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "rea
 import Markdown from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
-import { trackerSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
+import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
 type Props = {
   bunker: Bunker;
@@ -85,12 +85,12 @@ function branchCompare(branch: TicketDetail["branches"][number]): string {
 
 function TicketTab({
   detail,
-  tracker,
+  trackers,
   openSource,
   copySource,
 }: {
   detail: TicketDetail;
-  tracker?: Project["tracker"];
+  trackers?: Project["trackers"];
   openSource: (path: string, line: number) => void;
   copySource: (path: string, line: number) => void;
 }) {
@@ -119,7 +119,7 @@ function TicketTab({
           <div><dt>Repository</dt><dd>{detail.repositories.map((value) => value.name).join(", ") || "—"}</dd></div>
           <div><dt>Created</dt><dd>{absoluteTime(ticket.created || ticket.created_at)}</dd></div>
           <div><dt>Updated</dt><dd>{absoluteTime(ticket.updated || ticket.updated_at)}</dd></div>
-          <div><dt>Board</dt><dd>{tracker ? trackerSummary(tracker) : "No board linked"}</dd></div>
+          <div><dt>Boards</dt><dd>{(trackers || []).length ? trackersSummary(trackers) : "No board linked"}</dd></div>
           <div><dt>Source</dt><dd>{SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)}</dd></div>
         </dl>
       </section>
@@ -443,7 +443,6 @@ function SourceEditor({
 export default function TicketWorkspace({ bunker, reference, onBack, notify }: Props) {
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"ticket" | "agent">("ticket");
   const [scope, setScope] = useState("combined");
   const [chatOpen, setChatOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -490,19 +489,21 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;
   const link = sourceLink(detail);
-  const tracker = flattenProjects(bunker.projects).find((value) => value.id === detail.project.id)?.tracker;
+  const trackers = flattenProjects(bunker.projects).find((value) => value.id === detail.project.id)?.trackers;
   return (
     <div className="ticket-shell">
       <header className="ticket-header">
         <button className="back-control" onClick={onBack}>← Tickets</button>
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
-        <nav className="ticket-tabs"><button className={tab === "ticket" ? "selected" : ""} onClick={() => setTab("ticket")}>Ticket</button><button className={tab === "agent" ? "selected" : ""} onClick={() => setTab("agent")}>Agent</button></nav>
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : tab === "ticket" ? <TicketTab detail={detail} tracker={tracker} openSource={openSource} copySource={copySource} /> : <AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} />}
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <>
+            <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
+            <div id="agent-work"><AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} /></div>
+          </>}
         </main>
-        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setTab("agent"); }} onReload={load} notify={notify} />
+        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
       </div>
       <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} onReload={load} notify={notify} />
     </div>

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
 import { command } from "./transport";
-import { trackerSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
+import { trackersSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
 import { relativeTime } from "./report";
 
 type Selection = { bunkerId: string; projectId?: string };
@@ -607,11 +607,11 @@ export default function BunkerHub({
               </nav>
               <h1><span className="project-key">{project.key}</span>{project.name}</h1>
               {project.description && <p className="project-description">{project.description}</p>}
-              <p className="tracker-line">{project.tracker ? trackerSummary(project.tracker) : "No board linked"}</p>
+              <p className="tracker-line">{(project.trackers || []).length ? trackersSummary(project.trackers) : "No board linked"}</p>
             </div>
             <div className="header-actions">
               <button onClick={() => openConfiguration()}>Configure</button>
-              {project.tracker
+              {(project.trackers || []).length
                 ? <button disabled={syncing} onClick={syncTickets}>{syncing ? "Syncing…" : "Sync tickets"}</button>
                 : <button onClick={() => openConfiguration("board")}>Connect a board</button>}
               <button className="primary" onClick={() => setAction("project")}>Add subproject</button>

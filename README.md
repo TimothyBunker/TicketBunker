@@ -183,8 +183,9 @@ The desktop launcher is the primary onboarding path:
 1. On the Bunker page choose **Trackers** and paste a GitHub personal access
    token (repository and Projects read access). TicketBunker verifies it, keeps
    it in a private file on this computer, and remembers the linked account.
-2. Open the Project and choose **Connect a board**. Pick the Project board or
-   repository from the list the token can see and press **Link board**.
+2. Open the Project and choose **Connect a board**. Pick a Project board or
+   repository from the list the token can see and press **Link board**. Link
+   as many as the Project mirrors; **Unlink** removes one and keeps its tickets.
 3. Press **Sync tickets**. Issues arrive as tickets keyed by the Project key
    and issue number unless their titles already carry a key. Syncing again
    reports what was new, updated, or unchanged. Field mappings and ticket

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import TrackerConnections, { type Connection } from "./TrackerConnections";
 import { chooseGitDirectory, command } from "./transport";
-import { trackerSummary, type Board, type Bunker, type ConfigurationState, type Integration, type Project, type Repository, type TicketField, type TrackerSource } from "./types";
+import { linkedBoards, trackerSummary, type Board, type Bunker, type ConfigurationState, type Integration, type Project, type Repository, type TicketField, type TrackerSource } from "./types";
 
 const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", "user", "enum", "tags", "url"];
 const EMPTY_TRACKER: TrackerSource = { provider: "github", kind: "project", owner: "", number: 0, repository: "", include_comments: true, title: "", url: "" };
@@ -94,6 +94,7 @@ export default function ConfigurationPanel({
   }, [bunker.id, project?.id]);
 
   const canWrite = Boolean(state?.permission.can_write);
+  const linked = state ? linkedBoards(state.documents) : [];
   const selected = providers[provider];
   const mappingRows = useMemo(() => Object.entries(selected?.fields || {}), [selected]);
 
@@ -135,6 +136,26 @@ export default function ConfigurationPanel({
       setLinkSummary(value.link.summary);
       onBunker(value.bunker);
       notify(`Linked ${board.title}. Sync tickets whenever you want the latest.`);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlinkBoard(source: TrackerSource) {
+    if (!state || !project || !source.id) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{ configuration: ConfigurationState; bunker: Bunker }>("application.project.unlink", {
+        bunker_id: bunker.id,
+        project_id: project.id,
+        source_id: source.id,
+      });
+      applyConfiguration(value.configuration);
+      onBunker(value.bunker);
+      notify(`Unlinked ${trackerSummary(source)}. Its tickets stay in the Project.`);
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -264,7 +285,7 @@ export default function ConfigurationPanel({
         <button className="icon-control" onClick={onClose} aria-label="Back">←</button>
       </header>
       <nav>
-        {project && <button className={tab === "board" ? "selected" : ""} onClick={() => setTab("board")}>Board</button>}
+        {project && <button className={tab === "board" ? "selected" : ""} onClick={() => setTab("board")}>Boards</button>}
         {project && <button className={tab === "repositories" ? "selected" : ""} onClick={() => setTab("repositories")}>Repositories</button>}
         {!project && <button className={tab === "trackers" ? "selected" : ""} onClick={() => setTab("trackers")}>Trackers</button>}
         {!project && <button className={tab === "defaults" ? "selected" : ""} onClick={() => setTab("defaults")}>Defaults</button>}
@@ -280,9 +301,12 @@ export default function ConfigurationPanel({
 
       {state && project && tab === "board" && <section className="config-surface board-surface">
         <div className="config-heading">
-          <div><h3>Board</h3><p>{state.documents["tracker-source"] ? `Linked to ${trackerSummary(state.documents["tracker-source"].content)}.` : "Pick the board this Project mirrors. Tickets, fields, and mappings follow from it."}</p></div>
-          {state.documents["tracker-source"] && onSync && <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { await onSync(); } finally { setBusy(false); } }}>Sync tickets</button>}
+          <div><h3>Boards</h3><p>{linked.length ? `${linked.length === 1 ? "One board" : `${linked.length} boards`} linked. Tickets, fields, and mappings follow from them.` : "Pick the boards this Project mirrors. Tickets, fields, and mappings follow from them."}</p></div>
+          {linked.length > 0 && onSync && <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { await onSync(); } finally { setBusy(false); } }}>Sync tickets</button>}
         </div>
+        {linked.length > 0 && <ul className="linked-boards" aria-label="Linked boards">
+          {linked.map((source) => <li key={source.id || trackerSummary(source)}><span><strong>{trackerSummary(source)}</strong>{source.url && <small>{source.url}</small>}</span><button className="danger-control" disabled={!canWrite || busy || !source.id} onClick={() => unlinkBoard(source)}>Unlink</button></li>)}
+        </ul>}
         {!githubConnected && <div className="board-connect">
           <h4>Connect GitHub to see your boards</h4>
           <TrackerConnections compact providers={["github"]} trackers={trackers} connections={bunker.connections} bunkerId={bunker.id} onConnected={(next, connection, refreshed) => { onConnected?.(next, connection, refreshed); if (refreshed) onBunker(refreshed); }} onMessage={(message, isError) => isError ? setError(message) : notify(message)} />
@@ -295,8 +319,8 @@ export default function ConfigurationPanel({
             {boardNotes.map((note) => <p key={note} className="field-note">{note}</p>)}
             <ul className="board-list" aria-label="Boards">
               {boards.filter((board) => !boardFilter || board.title.toLowerCase().includes(boardFilter.toLowerCase())).map((board) => {
-                const current = state.documents["tracker-source"] ? sameBoard(state.documents["tracker-source"].content, board) : false;
-                const selected = choice ? sameBoard(choice, board) : current;
+                const current = linked.some((source) => sameBoard(source, board));
+                const selected = choice ? sameBoard(choice, board) : false;
                 return (
                   <li key={`${board.kind}-${board.owner}-${board.number}-${board.repository}`}>
                     <button type="button" className={selected ? "board-row selected" : "board-row"} aria-pressed={selected} disabled={!canWrite} onClick={() => setChoice(board)}>
@@ -311,7 +335,7 @@ export default function ConfigurationPanel({
             </ul>
             <div className="board-actions">
               <label className="check"><input type="checkbox" checked={tracker.include_comments} disabled={!canWrite} onChange={(event) => setTracker({ ...tracker, include_comments: event.target.checked })} />Include comments</label>
-              <button className="primary" disabled={!canWrite || busy || !choice || (state.documents["tracker-source"] ? sameBoard(state.documents["tracker-source"].content, choice) : false)} onClick={() => choice && linkBoard(choice)}>{busy ? "Linking…" : state.documents["tracker-source"] ? "Change board" : "Link board"}</button>
+              <button className="primary" disabled={!canWrite || busy || !choice || linked.some((source) => sameBoard(source, choice))} onClick={() => choice && linkBoard(choice)}>{busy ? "Linking…" : "Link board"}</button>
             </div>
           </>}
         </div>}

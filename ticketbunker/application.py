@@ -926,10 +926,20 @@ def command_project_link(
         str(configuration["documents"].get("integrations", {}).get("revision") or ""),
         {"providers": providers},
     )
+    sources, kind, revision = bunkerdb.tracker_sources(configuration["documents"])
+    key = (source["kind"], source["owner"], int(source["number"] or 0), source["repository"])
+    kept = [
+        item for item in sources
+        if (str(item.get("kind") or ""), str(item.get("owner") or ""), int(item.get("number") or 0), str(item.get("repository") or "")) != key
+    ]
+    existing = next((item for item in sources if item not in kept), None)
+    if existing and existing.get("id") and existing.get("id") != "legacy":
+        source["id"] = str(existing["id"])
+    kept.append(source)
     configuration = _apply_document(
-        bunker_id, project_id, "tracker-source",
-        str(configuration["documents"].get("tracker-source", {}).get("revision") or ""),
-        source,
+        bunker_id, project_id, "tracker-sources",
+        revision if kind == "tracker-sources" else "",
+        {"sources": kept},
     )
     return {
         "configuration": configuration,
@@ -941,7 +951,35 @@ def command_project_link(
             "labels_found": len(inspection.get("labels") or []),
             "items": int(inspection.get("items") or 0),
             "source": bunkerdb.tracker_summary(source),
+            "relinked": existing is not None,
         },
+    }
+
+
+@commands.register("application.project.unlink")
+def command_project_unlink(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Unlink one board. Tickets already synced from it stay in the Project."""
+    bunker_id = str(payload.get("bunker_id") or "")
+    project_id = str(payload.get("project_id") or "")
+    source_id = str(payload.get("source_id") or "").strip()
+    if not source_id:
+        raise commands.CommandRejected("board_required", "Choose a linked board to unlink.")
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id)
+    sources, kind, revision = bunkerdb.tracker_sources(configuration["documents"])
+    kept = [item for item in sources if str(item.get("id") or "") != source_id]
+    if len(kept) == len(sources):
+        raise commands.CommandRejected("board_unknown", "That board is not linked to this Project.")
+    configuration = _apply_document(
+        bunker_id, project_id, "tracker-sources",
+        revision if kind == "tracker-sources" else "",
+        {"sources": kept},
+    )
+    return {
+        "configuration": configuration,
+        "bunker": bunkerdb.get_bunker(bunker_id),
+        "bunkers": bunkerdb.list_bunkers(),
     }
 
 
@@ -982,17 +1020,16 @@ def command_project_sync(
     bunker_id = str(payload.get("bunker_id") or "")
     project_id = str(payload.get("project_id") or "")
     configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id)
-    document = configuration["documents"].get("tracker-source")
-    if not document:
+    sources, _kind, _revision = bunkerdb.tracker_sources(configuration["documents"])
+    if not sources:
         raise commands.CommandRejected(
-            "tracker_required", "Connect a tracker in Configure → Tracker, then sync."
+            "tracker_required", "Link a board in Configure → Boards, then sync."
         )
-    source = dict(document.get("content") or {})
-    provider = str(source.get("provider") or "")
-    if provider != "github":
+    unsupported = [item for item in sources if str(item.get("provider") or "") != "github"]
+    if unsupported:
         raise commands.CommandRejected(
             "tracker_unsupported",
-            "This version syncs GitHub. GitLab and Jira sync are coming.",
+            "This version syncs GitHub boards. GitLab and Jira sync are coming.",
         )
     token = projectconfig.credential_value("github")
     if not token:
@@ -1000,31 +1037,42 @@ def command_project_sync(
             "tracker_token_required",
             "Connect a GitHub token in Settings → Trackers, then sync again.",
         )
-    include_comments = bool(source.get("include_comments", True))
-    try:
-        entries = github.collect_entries(source, token, include_comments=include_comments)
-    except (github.GitHubError, ValueError) as exc:
-        raise commands.CommandRejected(
-            "tracker_unreachable",
-            f"GitHub sync stopped: {exc}. Check the token in Settings → Trackers and the board in Configure → Tracker, then retry.",
-        ) from exc
     record = _bunker_result(bunkerdb.project_record, bunker_id, project_id)
     integrations = configuration["documents"].get("integrations", {})
     providers = (integrations.get("content") or {}).get("providers") if isinstance(integrations, dict) else {}
     github_settings = providers.get("github") if isinstance(providers, dict) else {}
     mappings = github_settings.get("fields") if isinstance(github_settings, dict) else {}
-    try:
-        tickets = github.build_tickets(
-            entries,
-            mappings if isinstance(mappings, dict) else {},
-            project_key=str(record.get("key") or ""),
-            include_comments=include_comments,
-            bunker_ids=True,
-        )
-    except ValueError as exc:
-        raise commands.CommandRejected(
-            "tracker_ticket_invalid", f"GitHub sync stopped: {exc}."
-        ) from exc
+    tickets: list[dict[str, Any]] = []
+    for source in sources:
+        include_comments = bool(source.get("include_comments", True))
+        try:
+            entries = github.collect_entries(source, token, include_comments=include_comments)
+        except (github.GitHubError, ValueError) as exc:
+            raise commands.CommandRejected(
+                "tracker_unreachable",
+                f"GitHub sync stopped at {bunkerdb.tracker_summary(source)}: {exc}. Check the token in Settings → Trackers and the board in Configure → Boards, then retry.",
+            ) from exc
+        try:
+            tickets.extend(
+                github.build_tickets(
+                    entries,
+                    mappings if isinstance(mappings, dict) else {},
+                    project_key=str(record.get("key") or ""),
+                    include_comments=include_comments,
+                    bunker_ids=True,
+                )
+            )
+        except ValueError as exc:
+            raise commands.CommandRejected(
+                "tracker_ticket_invalid", f"GitHub sync stopped at {bunkerdb.tracker_summary(source)}: {exc}."
+            ) from exc
+    # The same issue may sit on two linked boards; keep one copy by identity.
+    unique: dict[str, dict[str, Any]] = {}
+    for ticket in tickets:
+        metadata = ticket.get("metadata") if isinstance(ticket.get("metadata"), dict) else {}
+        identity = str(metadata.get("source_identity") or "") or f"id:{ticket.get('id')}"
+        unique.setdefault(identity, ticket)
+    tickets = list(unique.values())
     proposal = _bunker_result(
         bunkerdb.propose_ticket_sync,
         bunker_id,
@@ -1037,7 +1085,7 @@ def command_project_sync(
         bunkerdb.apply_ticket_sync_change, bunker_id, proposal, accepted=accepted
     )
     return {
-        "sync": {**result, "provider": provider, "source": bunkerdb.tracker_summary(source)},
+        "sync": {**result, "provider": "github", "source": bunkerdb.trackers_summary(sources), "boards": len(sources)},
         "bunker": bunkerdb.get_bunker(bunker_id),
         "bunkers": bunkerdb.list_bunkers(),
     }

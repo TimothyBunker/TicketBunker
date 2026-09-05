@@ -663,15 +663,43 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
         command,
         cwd=str(repo),
         env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         **platform_services.current().headless_process_options(),
     )
+    output = completed.stdout or ""
+    if output.strip():
+        print(output.rstrip(), flush=True)
     if completed.returncode != 0:
         latest, _ = _git(repo, "rev-parse", "HEAD")
         if latest and latest != payload.get("head"):
             return False, "HEAD changed during synthesis; press Update synthesis to use the newer state"
-        return False, f"{profile['harness']} synthesis failed"
+        return False, failure_detail(output, profile["harness"])
     _record_input_fingerprint(repo, bunker, branch, fingerprint, head)
     return True, f"published {branch} through {profile['harness']}"
+
+
+def failure_detail(output: str, harness: str) -> str:
+    """Name what stopped a synthesis from the run's own output, bounded.
+
+    Provider and harness messages ("usage limit has been reached", "Bad
+    credentials") are what a person acts on; file paths and generic exit
+    lines are not.
+    """
+    skip = ("error: harness exited", "form left at", "draft:", "transcript:", "session complete")
+    candidates = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and not any(marker in line for marker in skip)
+    ]
+    for line in reversed(candidates):
+        lowered = line.casefold()
+        if any(word in lowered for word in ("error", "limit", "denied", "unauthori", "credential", "quota", "stopped", "rejected", "timed out", "not found")):
+            return f"{harness} synthesis failed: {line[:240]}"
+    if candidates:
+        return f"{harness} synthesis failed: {candidates[-1][:240]}"
+    return f"{harness} synthesis failed"
 
 
 def run_worker(repo: Path, *, debounce: float = DEBOUNCE_SECONDS, once: bool = False) -> int:

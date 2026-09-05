@@ -531,8 +531,12 @@ lightweight database references. Opening a result is the deliberate point
 where the full ticket snapshot is composed. Local-only, shared, and imported
 legacy Bunkers use the same query contract.
 
-Per-ticket pages remain organized around completing one ticket. The singular page has
-an explicit **Ticket / Agent** contract. Ticket is the default Jira-like issue
+Per-ticket pages remain organized around completing one ticket. The singular
+page keeps an explicit **Ticket / Agent** contract as two sections of one page
+in reading order rather than tabs: the ticket first, then **Agent work** under
+its own heading with a rule between them, so nothing is blended and nothing is
+hidden behind a control in the corner. Selecting a branch in the rail scrolls
+to Agent work with that report selected. Ticket is the Jira-like issue
 surface. The header names the source project before the ticket, then presents
 the mapped status as the sole lifecycle ground truth beside labels and the
 source's updated time. Description and optional acceptance criteria read as
@@ -960,18 +964,21 @@ key, explicit branch assignments, repository binding, and mechanical timestamps
 remain locally owned. A semantically identical snapshot performs no write,
 adds no ticket-ledger event, and advances no local or remote revision.
 
-**Linking a board is one flow, and the token is the only thing typed.** A
+**Linking boards is one flow, and the token is the only thing typed.** A
 tracker is connected once at Bunker level (or in Settings) by pasting a
 personal access token; the app verifies it against the provider, keeps it in
 the machine-local credential file, and records the linked account in the
 Bunker's shared `connections` document when the member may write
 configuration. A Project's **Board** view then lists every board that token
 can see (GitHub Project boards for the account and its organisations, and
-repositories whose issues can be mirrored) and the user picks one. That choice
-becomes the Project's shared, revisioned `tracker-source` document (kind,
-owner, number or repository, title, link, whether to carry comments), which
+repositories whose issues can be mirrored) and the user picks one. A Project
+mirrors one or more boards: each link appends to the Project's shared,
+revisioned `tracker-sources` document (per board: a stable id, kind, owner,
+number or repository, title, link, whether to carry comments), unlinking
+removes one entry and keeps the tickets it already produced, and the document
 travels in the join snapshot so a new member's Project already knows its
-board. Linking first scans the board and builds the Project's model from what
+boards. Sync reads every linked board and keeps one copy of an issue that
+sits on two of them, by its tracker identity. Linking first scans the board and builds the Project's model from what
 it actually carries: Status options become the status enum in TicketBunker's
 vocabulary, every other single-select field becomes an enum with the board's
 options, and iteration, number, date, and text fields are added with mappings

@@ -1,4 +1,5 @@
 export type TrackerSource = {
+  id?: string;
   provider: string;
   kind: string;
   owner: string;
@@ -29,6 +30,7 @@ export type Project = {
   children?: Project[];
   ticket_count?: number;
   tracker?: TrackerSource | null;
+  trackers?: TrackerSource[];
 };
 
 export type Repository = {
@@ -224,6 +226,12 @@ export type ConfigurationState = {
       updated_at: string;
       content: TrackerSource;
     };
+    "tracker-sources"?: {
+      kind: "tracker-sources";
+      revision: string;
+      updated_at: string;
+      content: { sources: TrackerSource[] };
+    };
     connections?: {
       kind: "connections";
       revision: string;
@@ -232,6 +240,19 @@ export type ConfigurationState = {
     };
   };
 };
+
+export function linkedBoards(documents: ConfigurationState["documents"]): TrackerSource[] {
+  const plural = documents["tracker-sources"]?.content.sources;
+  if (plural) return plural;
+  const single = documents["tracker-source"]?.content;
+  return single ? [{ ...single, id: single.id || "legacy" }] : [];
+}
+
+export function trackersSummary(trackers: TrackerSource[] | null | undefined): string {
+  const values = (trackers || []).map(trackerSummary).filter(Boolean);
+  if (values.length === 0) return "";
+  return values.length === 1 ? values[0] : `${values[0]} +${values.length - 1} more`;
+}
 
 export function trackerSummary(tracker: TrackerSource | null | undefined): string {
   if (!tracker) return "";

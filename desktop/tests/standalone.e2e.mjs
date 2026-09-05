@@ -52,11 +52,11 @@ try {
   await page.getByLabel("Search tickets").waitFor();
   await page.getByRole("button", { name: "Configure" }).click();
   await page.getByRole("heading", { name: "Configuration" }).waitFor();
-  await page.getByRole("heading", { name: "Board", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Boards", exact: true }).waitFor();
   await page.getByRole("button", { name: "Repositories" }).click();
   await page.getByRole("table", { name: "Project repositories" }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-repositories.png"), fullPage: true });
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("button", { name: "Boards", exact: true }).click();
   await page.getByText("Adjust field mapping").click();
   await page.locator('.mapping-row input[value="title"]').first().waitFor();
   await page.getByRole("button", { name: "Publish mappings" }).click();
@@ -66,7 +66,6 @@ try {
   await page.locator(".ticket-row").first().click();
   await page.locator(".ticket-heading h1").waitFor();
   await page.screenshot({ path: output, fullPage: true });
-  await page.getByRole("button", { name: "Agent", exact: true }).click();
   await page.getByRole("heading", { name: "Agent work" }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-agent.png"), fullPage: true });
   for (const width of [900, 640]) {

@@ -48,7 +48,7 @@ and report provenance easier to reach. It should disappear into the task.
 5. Reveal depth progressively. Metadata, activity, and full reports remain available without crowding the default view.
 6. Keep one command model. CLI, HTTP, and viewer actions dispatch the same backend commands.
 7. Separate reading from auditing. In each report category, lead with concise evidence-bounded synthesis and keep that category's unchanged trail one disclosure away.
-8. Make provenance structural. Ticket-owned information and agent-owned information live behind explicit Ticket and Agent views; Combined and branch reports are selected, never visually blended.
+8. Make provenance structural. Ticket-owned information and agent-owned information live in explicit Ticket and Agent sections; Combined and branch reports are selected, never visually blended.
 9. Treat integrations as compositions. Presets accelerate setup, but custom integrations use the same field matrix and command contract.
 10. Make synthesis intentional. Ordinary checkout, commit, merge, and rebase events mark the affected ticket as changed without calling a model; the user starts synthesis from the ticket state hub when a new summary is useful.
 11. Make shared truth explicit. Render local ticket data immediately, synchronize remote Bunker state and Git refs independently, and name synthesis age, commits since, preserved state, and the next action whenever work stops.

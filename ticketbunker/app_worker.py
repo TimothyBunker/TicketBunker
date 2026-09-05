@@ -52,6 +52,7 @@ DESKTOP_ACTIONS = frozenset(
         "application.tracker.connect",
         "application.tracker.boards",
         "application.project.link",
+        "application.project.unlink",
         "credentials.state",
         "credentials.update",
         "application.invitation.inspect",

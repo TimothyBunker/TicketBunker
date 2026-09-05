@@ -483,3 +483,21 @@ class AutomaticAgentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailureDetailTests(unittest.TestCase):
+    def test_provider_lines_become_the_stop_reason(self) -> None:
+        output = (
+            "error: harness exited 1; form left at /tmp/x.form.md\n"
+            "Codex error: The usage limit has been reached\n"
+        )
+        self.assertEqual(
+            autoagent.failure_detail(output, "pi"),
+            "pi synthesis failed: Codex error: The usage limit has been reached",
+        )
+        self.assertEqual(autoagent.failure_detail("", "codex"), "codex synthesis failed")
+        self.assertEqual(
+            autoagent.failure_detail("session complete: published /a\nsomething else\n", "command"),
+            "command synthesis failed: something else",
+        )
+

@@ -604,15 +604,17 @@ def _project_tree(
     """
     counts = dict(ticket_counts or {})
     sources = dict(trackers or {})
-    nodes = {
-        str(row["id"]): {
+    nodes = {}
+    for row in rows:
+        project_id = str(row["id"])
+        linked = [dict(item) for item in sources.get(project_id) or []]
+        nodes[project_id] = {
             **dict(row),
             "children": [],
-            "ticket_count": int(counts.get(str(row["id"]), 0)),
-            "tracker": dict(sources[str(row["id"])]) if str(row["id"]) in sources else None,
+            "ticket_count": int(counts.get(project_id, 0)),
+            "tracker": linked[0] if linked else None,
+            "trackers": linked,
         }
-        for row in rows
-    }
     roots: list[dict[str, Any]] = []
     for node in nodes.values():
         parent_id = str(node.get("parent_id") or "")
@@ -664,15 +666,22 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
             "SELECT project_id, COUNT(*) AS total FROM tickets GROUP BY project_id"
         ).fetchall()
     }
-    trackers = {
-        str(item["scope_id"]): _payload_object(item["content_json"])
-        for item in connection.execute(
-            """
-            SELECT scope_id, content_json FROM config_documents
-            WHERE scope_type = 'project' AND kind = 'tracker-source'
-            """
-        ).fetchall()
-    }
+    trackers: dict[str, list[dict[str, Any]]] = {}
+    tracker_rows = connection.execute(
+        """
+        SELECT scope_id, kind, content_json FROM config_documents
+        WHERE scope_type = 'project' AND kind IN ('tracker-source', 'tracker-sources')
+        """
+    ).fetchall()
+    for item in tracker_rows:
+        if str(item["kind"]) == "tracker-sources":
+            raw = _payload_object(item["content_json"]).get("sources")
+            trackers[str(item["scope_id"])] = [dict(value) for value in raw if isinstance(value, Mapping)] if isinstance(raw, list) else []
+    for item in tracker_rows:
+        scope_id = str(item["scope_id"])
+        if str(item["kind"]) == "tracker-source" and scope_id not in trackers:
+            single = _payload_object(item["content_json"])
+            trackers[scope_id] = [{**single, "id": "legacy"}] if single else []
     connections_row = connection.execute(
         """
         SELECT content_json FROM config_documents
@@ -942,7 +951,7 @@ def get_configuration(
             SELECT kind, revision, content_json, updated_at
             FROM config_documents
             WHERE scope_type = ? AND scope_id = ?
-              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'connections')
+              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'tracker-sources', 'connections')
             ORDER BY kind
             """,
             (scope_type, scope_id),
@@ -1086,16 +1095,16 @@ def propose_configuration(
     """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
-    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "connections"}:
-        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Tracker, or Connections to publish.")
+    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "tracker-sources", "connections"}:
+        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Boards, or Connections to publish.")
     if not isinstance(content, Mapping):
         raise BunkerDatabaseError("Configuration content must be one object.")
     with _database(bunker_id) as connection:
         scope_type, scope_id, bunker = _config_scope(
             connection, bunker_id, project_id
         )
-        if document_kind == "tracker-source" and scope_type != "project":
-            raise BunkerDatabaseError("A tracker belongs to one Project, not to Bunker defaults.")
+        if document_kind in {"tracker-source", "tracker-sources"} and scope_type != "project":
+            raise BunkerDatabaseError("Boards belong to one Project, not to Bunker defaults.")
         if document_kind == "connections" and scope_type != "bunker":
             raise BunkerDatabaseError("Tracker connections belong to the Bunker, not to one Project.")
         mode = str(bunker.get("mode") or "local")
@@ -1123,6 +1132,8 @@ def propose_configuration(
             )
         if document_kind == "tracker-source":
             normalized = _validated_tracker_source(content)
+        elif document_kind == "tracker-sources":
+            normalized = _validated_tracker_sources(content)
         elif document_kind == "connections":
             normalized = _validated_connections(content)
         elif document_kind == "ticket-fields":
@@ -1294,7 +1305,8 @@ def replace_configuration(
 TRACKER_PROVIDERS = {"github": "GitHub"}
 CONNECTION_PROVIDERS = {"github": "GitHub", "gitlab": "GitLab", "jira": "Jira"}
 TRACKER_KINDS = {"project": "Project board", "issues": "Repository issues"}
-CREATABLE_DOCUMENTS = {"tracker-source", "connections"}
+CREATABLE_DOCUMENTS = {"tracker-source", "tracker-sources", "connections"}
+MAX_TRACKER_SOURCES = 20
 _GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 _GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
@@ -1341,6 +1353,61 @@ def _validated_tracker_source(content: Mapping[str, Any]) -> dict[str, Any]:
         "url": url,
         "include_comments": bool(content.get("include_comments", True)),
     }
+
+
+def _validated_tracker_sources(content: Mapping[str, Any]) -> dict[str, Any]:
+    """Every board one Project mirrors; each keeps a stable id for unlinking."""
+    raw = content.get("sources")
+    if not isinstance(raw, list):
+        raise BunkerDatabaseError("Linked boards must be a list.")
+    if len(raw) > MAX_TRACKER_SOURCES:
+        raise BunkerDatabaseError(f"A Project may link at most {MAX_TRACKER_SOURCES} boards.")
+    sources: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, int, str]] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise BunkerDatabaseError("Each linked board must be an object.")
+        validated = _validated_tracker_source(item)
+        key = (validated["provider"], validated["kind"], validated["owner"], validated["number"], validated["repository"])
+        if key in seen:
+            raise BunkerDatabaseError(f"{tracker_summary(validated)} is linked twice.")
+        seen.add(key)
+        raw_id = str(item.get("id") or "").strip()
+        validated["id"] = _id(raw_id, "board") if raw_id else str(uuid.uuid4())
+        sources.append(validated)
+    return {"sources": sources}
+
+
+def tracker_sources(documents: Mapping[str, Any]) -> tuple[list[dict[str, Any]], str, str]:
+    """The linked boards of a configuration snapshot: (sources, kind, revision).
+
+    ``tracker-sources`` is canonical; a single ``tracker-source`` written by
+    an earlier version is read as a one-item list until it is rewritten.
+    """
+    plural = documents.get("tracker-sources")
+    if isinstance(plural, Mapping):
+        content = plural.get("content") if isinstance(plural.get("content"), Mapping) else {}
+        raw = content.get("sources") if isinstance(content, Mapping) else []
+        return (
+            [dict(item) for item in raw if isinstance(item, Mapping)] if isinstance(raw, list) else [],
+            "tracker-sources",
+            str(plural.get("revision") or ""),
+        )
+    single = documents.get("tracker-source")
+    if isinstance(single, Mapping) and isinstance(single.get("content"), Mapping) and single["content"]:
+        source = dict(single["content"])
+        source.setdefault("id", "legacy")
+        return [source], "tracker-source", str(single.get("revision") or "")
+    return [], "tracker-sources", ""
+
+
+def trackers_summary(sources: Iterable[Mapping[str, Any]]) -> str:
+    items = [tracker_summary(source) for source in sources]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return f"{items[0]} +{len(items) - 1} more"
 
 
 def _validated_connections(content: Mapping[str, Any]) -> dict[str, Any]:

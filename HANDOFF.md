@@ -96,8 +96,11 @@ exercise unless a live boundary is explicitly called out.
   (`ticketbunker/credentials.py`); Bunker databases hold references.
   `tests/test_service.py` and `SharedBunkerTests` in `tests/test_application.py`
   drive the owner and member flows against the in-process service.
-- Each Project can own a `tracker-source` document (GitHub Project board or
-  repository issues, with title and link). `application.tracker.connect`
+- Each Project links one or more boards in its `tracker-sources` document
+  (per board: id, kind, owner, number or repository, title, link); a single
+  `tracker-source` from earlier builds is read as a one-item list.
+  `application.project.link` appends, `application.project.unlink` removes,
+  and sync reads every board, keeping one copy per tracker identity. `application.tracker.connect`
   verifies a token with `integrations/github.py` `discover`, keeps it through
   `credentials.update`, and records the account in the Bunker's `connections`
   document; `application.tracker.boards` lists what the token can see and the
@@ -120,7 +123,10 @@ exercise unless a live boundary is explicitly called out.
   Synthesize works on tickets that came from a board with no `.tb` layout.
   `application.bunker.sync` reconciles a replica from the service snapshot
   (`bunkerdb.apply_snapshot`); the Bunker page pulls on open and on Sync now.
-  Ticket pages show each branch report's verification stamp and record time.
+  Ticket pages show each branch report's verification stamp and record time,
+  present Ticket and Agent work as two sections of one page rather than tabs,
+  and a failed synthesis names the harness or provider line that stopped it
+  (for example a usage limit) instead of a bare "synthesis failed".
   `tests/test_bunkerruntime.py` runs the stub harness end to end on a local and
   a shared Bunker.
 - Existing companion-backed projects appear in a separate Migration section.

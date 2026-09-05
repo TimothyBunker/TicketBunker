@@ -176,7 +176,8 @@ describe("Bunker and Project boundaries", () => {
   });
 
   it("syncs a Project's tracker board from the Project page", async () => {
-    const tracked = { ...project, tracker: { provider: "github", kind: "project", owner: "example", number: 8, repository: "", include_comments: true } };
+    const board = { id: "board-1", provider: "github", kind: "project", owner: "example", number: 8, repository: "", include_comments: true };
+    const tracked = { ...project, tracker: board, trackers: [board] };
     const withTracker = { ...bunker, projects: [tracked] };
     const notify = vi.fn();
     const onState = vi.fn();
@@ -210,7 +211,7 @@ describe("Bunker and Project boundaries", () => {
     expect(screen.getByText("No board linked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect a board" }));
-    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Boards" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Connect GitHub to see your boards" })).toBeInTheDocument();
     expect(screen.getByLabelText("GitHub token")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeInTheDocument();
@@ -241,12 +242,15 @@ describe("Bunker and Project boundaries", () => {
         return Promise.resolve({
           configuration: {
             ...configuration,
-            documents: { ...configuration.documents, "tracker-source": { kind: "tracker-source", revision: "local:1", updated_at: "", content: { provider: "github", ...board, include_comments: true } } },
+            documents: { ...configuration.documents, "tracker-sources": { kind: "tracker-sources", revision: "local:1", updated_at: "", content: { sources: [{ id: "board-1", provider: "github", ...board, include_comments: true }] } } },
           },
           bunker,
           bunkers: [bunker],
           link: { summary: ["Status: Todo, In Progress, Done", "12 items"], items: 12, fields_found: 1 },
         });
+      }
+      if (action === "application.project.unlink") {
+        return Promise.resolve({ configuration, bunker, bunkers: [bunker] });
       }
       throw new Error(`Unexpected command ${action}`);
     });
@@ -268,9 +272,15 @@ describe("Bunker and Project boundaries", () => {
       "application.project.link",
       expect.objectContaining({ bunker_id: bunker.id, project_id: project.id, include_comments: true, board: expect.objectContaining({ kind: "project", owner: "example", number: 8, title: "Voxel ECS" }) }),
     ));
-    expect(await screen.findByText(/Linked to GitHub · Voxel ECS/)).toBeInTheDocument();
+    expect(await screen.findByText(/One board linked/)).toBeInTheDocument();
     expect(screen.getByText(/Built from the board: Status: Todo, In Progress, Done/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync tickets" })).toBeInTheDocument();
+    const linkedList = screen.getByRole("list", { name: "Linked boards" });
+    expect(within(linkedList).getByText("GitHub · Voxel ECS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Link board" })).toBeDisabled();
+    fireEvent.click(within(linkedList).getByRole("button", { name: "Unlink" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.unlink", { bunker_id: bunker.id, project_id: project.id, source_id: "board-1" }));
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Linked boards" })).not.toBeInTheDocument());
     expect(screen.getByText("Adjust field mapping")).toBeInTheDocument();
   });
 

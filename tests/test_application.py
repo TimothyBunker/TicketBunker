@@ -711,7 +711,7 @@ class SharedBunkerTests(unittest.TestCase):
                     "application.project.link",
                     {"bunker_id": created["id"], "project_id": project_id, "board": {"kind": "project", "owner": "example", "number": 8, "repository": "", "title": "Voxel ECS", "url": ""}},
                 )
-            self.assertEqual(linked["configuration"]["documents"]["tracker-source"]["content"]["title"], "Voxel ECS")
+            self.assertEqual(bunkerdb.tracker_sources(linked["configuration"]["documents"])[0][0]["title"], "Voxel ECS")
             with mock.patch.object(github, "collect_entries", return_value=[github_entry(4), github_entry(5)]):
                 synced = self.dispatch(
                     "application.project.sync", {"bunker_id": created["id"], "project_id": project_id}
@@ -1016,7 +1016,10 @@ class TrackerConnectionTests(TrackerSyncTests):
             )
         inspect.assert_called_once()
         documents = result["configuration"]["documents"]
-        self.assertEqual(documents["tracker-source"]["content"]["title"], "Voxel ECS")
+        sources, kind, _revision = bunkerdb.tracker_sources(documents)
+        self.assertEqual(kind, "tracker-sources")
+        self.assertEqual([item["title"] for item in sources], ["Voxel ECS"])
+        self.assertTrue(sources[0]["id"])
         by_key = {field["key"]: field for field in documents["ticket-fields"]["content"]["fields"]}
         self.assertEqual(by_key["status"]["values"], ["todo", "in-progress", "done"])
         self.assertEqual(by_key["priority"]["values"], ["P0", "P1"])
@@ -1036,6 +1039,36 @@ class TrackerConnectionTests(TrackerSyncTests):
         self.assertEqual(detail["ticket"]["priority"], "P1")
         self.assertEqual(detail["ticket"]["sprint"], "Sprint 3")
         self.assertEqual(detail["ticket"]["status"], "in-progress")
+
+        # A second board links alongside the first; sync reads both and keeps
+        # one copy of an issue that sits on both.
+        repository_board = discovery()["boards"][1]
+        with mock.patch.object(github, "inspect_board", return_value={"kind": "issues", "title": "example/voxel", "url": repository_board["url"], "items": 3, "fields": [], "labels": ["bug"]}):
+            second = self.dispatch(
+                "application.project.link",
+                {"bunker_id": created["id"], "project_id": project_id, "board": repository_board},
+            )
+        sources, _kind, _revision = bunkerdb.tracker_sources(second["configuration"]["documents"])
+        self.assertEqual([item["title"] for item in sources], ["Voxel ECS", "example/voxel"])
+        self.assertEqual(len(second["bunker"]["projects"][0]["trackers"]), 2)
+        by_source = {"project": [entry], "issues": [github_entry(4), github_entry(7)]}
+        with mock.patch.object(github, "collect_entries", side_effect=lambda source, token, include_comments=True: by_source[source["kind"]]):
+            synced = self.dispatch("application.project.sync", {"bunker_id": created["id"], "project_id": project_id})["sync"]
+        self.assertEqual(synced["boards"], 2)
+        self.assertEqual((synced["created"], synced["unchanged"]), (1, 1))
+        listed = self.dispatch("application.ticket.list", {"bunker_id": created["id"], "project_id": project_id})
+        self.assertEqual({item["id"] for item in listed["tickets"]}, {"ECS-4", "ECS-7"})
+
+        unlinked = self.dispatch(
+            "application.project.unlink",
+            {"bunker_id": created["id"], "project_id": project_id, "source_id": sources[0]["id"]},
+        )
+        remaining, _kind, _revision = bunkerdb.tracker_sources(unlinked["configuration"]["documents"])
+        self.assertEqual([item["title"] for item in remaining], ["example/voxel"])
+        self.assertEqual(unlinked["bunker"]["projects"][0]["tracker"]["title"], "example/voxel")
+        with self.assertRaises(commands.CommandRejected) as gone:
+            self.dispatch("application.project.unlink", {"bunker_id": created["id"], "project_id": project_id, "source_id": sources[0]["id"]})
+        self.assertEqual(gone.exception.code, "board_unknown")
 
     def test_boards_need_a_token_first(self) -> None:
         with self.assertRaises(commands.CommandRejected) as missing:

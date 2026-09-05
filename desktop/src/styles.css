@@ -194,7 +194,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .repository-empty { padding: 22px 0; border-bottom: 1px solid var(--soft-line); color: var(--muted); font-size: 10px; text-align: center; }
 
 .ticket-shell { min-height: 100vh; background: #fff; }
-.ticket-header { position: sticky; z-index: 10; top: 0; height: 132px; display: grid; grid-template-columns: 105px minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 22px 30px 0; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .97); }
+.ticket-header { position: sticky; z-index: 10; top: 0; height: 132px; display: grid; grid-template-columns: 105px minmax(0, 1fr); align-items: start; gap: 18px; padding: 22px 30px 0; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .97); }
 .back-control { padding: 0; border-color: transparent; color: #627086; background: transparent; }
 .back-control:hover { color: var(--blue); background: transparent; }
 .ticket-heading > p { margin: 0 0 4px; color: #6d7a8e; font-size: 10px; }
@@ -377,6 +377,12 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 details.advanced { margin-top: 10px; padding: 8px 0; border-top: 1px solid var(--soft-line); }
 details.advanced summary { cursor: pointer; color: #3f4c60; font-size: 11px; font-weight: 700; }
 details.advanced > *:not(summary) { margin-top: 10px; }
+.linked-boards { margin: 0 0 18px; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.linked-boards li { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.linked-boards li > span { min-width: 0; display: grid; gap: 2px; }
+.linked-boards strong { font-size: 12px; }
+.linked-boards small { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#agent-work { margin-top: 36px; padding-top: 30px; border-top: 1px solid var(--line); scroll-margin-top: 140px; }
 .report-provenance { margin: -6px 0 12px; color: var(--muted); font-size: 10px; }
 .tracker-line { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 .tracker-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin-bottom: 14px; }
