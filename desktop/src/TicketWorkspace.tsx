@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Markdown, { TRUST_LABELS } from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
@@ -83,6 +83,13 @@ function branchCompare(branch: TicketDetail["branches"][number]): string {
   return `${parts.join(", ")} of ${branch.base}`;
 }
 
+function shortTime(value: unknown): ReactNode {
+  const raw = String(value || "");
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return raw || <span className="fact-empty">Unknown</span>;
+  return <>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(timestamp)}<small> · {relativeTime(raw)}</small></>;
+}
+
 function TicketTab({
   detail,
   trackers,
@@ -95,6 +102,7 @@ function TicketTab({
   copySource: (path: string, line: number) => void;
 }) {
   const ticket = detail.ticket;
+  const link = sourceLink(detail);
   const known = new Set([
     "id", "key", "title", "summary", "description", "status", "state", "type", "issue_type",
     "priority", "assignee", "reporter", "author", "labels", "tags", "created", "created_at",
@@ -103,24 +111,24 @@ function TicketTab({
   const metadata = Object.entries(ticket).filter(([key, value]) => !known.has(key) && value !== "" && value !== null && value !== undefined);
   return (
     <article className="ticket-body">
-      <section className="description">
+      <section id="description" className="description">
         <Markdown onOpenSource={openSource} onCopySource={copySource}>
           {String(ticket.description || "No description was provided.")}
         </Markdown>
       </section>
-      <section className="ticket-details">
+      <section id="details" className="ticket-details">
         <h2>Details</h2>
-        <dl>
-          <div><dt>Type</dt><dd>{capitalize(ticket.type)}</dd></div>
-          <div><dt>Priority</dt><dd>{capitalize(ticket.priority)}</dd></div>
-          <div><dt>Assignee</dt><dd>{text(ticket.assignee)}</dd></div>
-          <div><dt>Reporter</dt><dd>{text(ticket.reporter)}</dd></div>
-          <div><dt>Labels</dt><dd>{ticket.labels.length ? <span className="ticket-labels inline">{ticket.labels.map((value) => <span key={value}>{value}</span>)}</span> : "—"}</dd></div>
-          <div><dt>Repository</dt><dd>{detail.repositories.map((value) => value.name).join(", ") || "—"}</dd></div>
-          <div><dt>Created</dt><dd>{absoluteTime(ticket.created || ticket.created_at)}</dd></div>
-          <div><dt>Updated</dt><dd>{absoluteTime(ticket.updated || ticket.updated_at)}</dd></div>
-          <div><dt>Boards</dt><dd>{(trackers || []).length ? trackersSummary(trackers) : "No board linked"}</dd></div>
-          <div><dt>Source</dt><dd>{SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)}</dd></div>
+        <dl className="facts-grid">
+          <div className="fact"><dt>Assignee</dt><dd>{ticket.assignee ? String(ticket.assignee) : <span className="fact-empty">Unassigned</span>}</dd></div>
+          <div className="fact"><dt>Reporter</dt><dd>{ticket.reporter ? String(ticket.reporter) : <span className="fact-empty">Unknown</span>}</dd></div>
+          <div className="fact"><dt>Type</dt><dd>{capitalize(ticket.type)}</dd></div>
+          <div className="fact"><dt>Priority</dt><dd>{ticket.priority ? capitalize(ticket.priority) : <span className="fact-empty">Not set</span>}</dd></div>
+          <div className="fact"><dt>Created</dt><dd>{shortTime(ticket.created || ticket.created_at)}</dd></div>
+          <div className="fact"><dt>Updated</dt><dd>{shortTime(ticket.updated || ticket.updated_at)}</dd></div>
+          <div className="fact"><dt>Labels</dt><dd>{ticket.labels.length ? <span className="ticket-labels inline">{ticket.labels.map((value) => <span key={value}>{value}</span>)}</span> : <span className="fact-empty">None</span>}</dd></div>
+          <div className="fact"><dt>Source</dt><dd>{SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)}{link && <> · <a href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a></>}</dd></div>
+          <div className="fact"><dt>{detail.repositories.length === 1 ? "Repository" : "Repositories"}</dt><dd>{detail.repositories.length ? detail.repositories.map((value) => value.name).join(", ") : <span className="fact-empty">None attached</span>}</dd></div>
+          <div className="fact"><dt>{(trackers || []).length === 1 ? "Board" : "Boards"}</dt><dd>{(trackers || []).length ? trackersSummary(trackers) : <span className="fact-empty">None linked</span>}</dd></div>
         </dl>
       </section>
       {detail.comments.length > 0 && (
@@ -457,6 +465,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [error, setError] = useState("");
   const [scope, setScope] = useState("");
+  const [section, setSection] = useState("description");
   const [chatOpen, setChatOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [editor, setEditor] = useState<SourceDraft | null>(null);
@@ -469,6 +478,26 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       .catch((reason) => setError(String(reason)));
   }
   useEffect(load, [bunker.id, reference.id]);
+  useEffect(() => {
+    if (!detail || editor) return;
+    const targets = ["description", "details", "agent-work"].map((id) => document.getElementById(id)).filter((value): value is HTMLElement => Boolean(value));
+    if (targets.length === 0 || typeof IntersectionObserver === "undefined") return;
+    const visible = new Map<string, number>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) visible.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+      const ordered = targets.map((target) => target.id);
+      const best = ordered.filter((id) => (visible.get(id) || 0) > 0)[0];
+      if (best) setSection(best);
+    }, { rootMargin: "-140px 0px -55% 0px", threshold: [0, 0.1, 0.5] });
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  }, [detail, editor]);
+
+  function jumpTo(id: string) {
+    setEditor(null);
+    window.requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   useEffect(() => {
     if (!detail) return;
     const withReports = detail.reports.filter((value) => value.scope.startsWith("branch:")).map((value) => value.scope.slice(7));
@@ -516,6 +545,9 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       <header className="ticket-header">
         <button className="back-control" onClick={onBack}>← Tickets</button>
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
+        {!editor && <nav className="section-jumps" aria-label="Sections">
+          {[["description", "Ticket"], ["details", "Details"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
+        </nav>}
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">

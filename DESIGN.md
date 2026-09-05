@@ -545,19 +545,27 @@ page keeps an explicit **Ticket / Agent** contract as two sections of one page
 in reading order rather than tabs: the ticket first, then **Agent work** under
 its own heading with a rule between them, so nothing is blended and nothing is
 hidden behind a control in the corner. Selecting a branch in the rail scrolls
-to Agent work with that report selected. Ticket is the Jira-like issue
-surface. The header names the source project before the ticket, then presents
-the mapped status as the sole lifecycle ground truth beside labels and the
-source's updated time. Description and optional acceptance criteria read as
+to Agent work with that report selected. The sticky header carries a
+persistent **Ticket / Details / Agent work** section control: each button
+scrolls to its section, and the one for the section currently under the
+reader's eye stays selected, so the reader can jump between the ticket, its
+facts, and the agent's report from anywhere on the page without tabs. Ticket
+is the Jira-like issue surface. The header names the source project before the
+ticket, then presents the mapped status as the sole lifecycle ground truth
+beside labels and the source's updated time. Description and optional acceptance criteria read as
 constrained rich text, including indentation-preserving nested ordered and
 unordered lists. **Activity is mirrored and read-only**: legacy comments
 plus provider-neutral `activity` entries (`comment`, `history`, `worklog`, `log`,
 `note`, or an integration-defined kind) retain author, text, time, and source;
 the viewer has no authoring control.
 
-One **Details** section follows the reading flow. Base ticket fields and useful
-custom/source fields stay in that list. Transport IDs, provider flags, and raw
-source state move into a native Metadata disclosure; duplicated source titles,
+One **Details** section follows the reading flow as a grid of labelled facts
+rather than a two-column definition list: assignee, reporter, type, priority,
+created and updated (calendar date with relative age), labels, source with its
+outbound link, attached repositories, and linked boards. An absent value says
+what is absent (Unassigned, Not set, None linked) instead of a dash. Transport
+IDs, provider flags, and raw source state move into a native Metadata
+disclosure; duplicated source titles,
 timestamps already promoted into the header/details, mapped status fields, and
 project ordinals are omitted. Classification is semantic (project, timestamp,
 status, ID, URL), never a GitHub/Jira/GitLab-specific view branch. Nested provider
