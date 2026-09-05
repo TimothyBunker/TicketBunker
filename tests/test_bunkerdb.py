@@ -787,3 +787,19 @@ class TicketBranchTests(unittest.TestCase):
         self.assertEqual(theirs["ahead"], 1)
         self.assertNotIn("origin/tim/ECS-4-position", by_name)
 
+    def test_a_branch_named_by_a_report_folds_even_without_the_key(self) -> None:
+        subprocess.run(["git", "-C", str(self.repo), "branch", "feature/no-key"], check=True, capture_output=True)
+        proposal = bunkerdb.propose_report_publication(
+            self.bunker_id, ticket_id="ECS-4", repository_id=bunkerdb.get_bunker(self.bunker_id)["repositories"][0]["id"],
+            branch="feature/no-key", child="# child\n", master="# master\n",
+        )
+        bunkerdb.apply_report_publication(self.bunker_id, proposal)
+
+        detail = bunkerdb.get_ticket(self.bunker_id, "ECS-4")
+        by_name = {branch["name"]: branch for branch in detail["branches"]}
+
+        self.assertIn("feature/no-key", by_name)
+        self.assertTrue(by_name["feature/no-key"]["local"])
+        self.assertFalse(by_name["feature/no-key"]["remote"])
+        self.assertEqual(len([b for b in detail["branches"] if b["name"] == "feature/no-key"]), 1)
+

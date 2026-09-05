@@ -159,6 +159,15 @@ class ViewerTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        # Opening a ticket page queues a background refresh that writes below
+        # .tb; let it finish before the directory disappears under it.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with viewer.truth._LOCK:
+                pending = bool(viewer.truth._RUNNING)
+            if not pending:
+                break
+            time.sleep(0.05)
         self.temp.cleanup()
 
     def test_ticket_page_is_simple_linked_and_escaped(self) -> None:

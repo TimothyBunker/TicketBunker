@@ -1558,14 +1558,19 @@ def list_tickets(
     }
 
 
-def _repository_branches(repository: Mapping[str, Any], ticket_id: str) -> list[dict[str, Any]]:
-    """One entry per branch name that carries the ticket key.
+def _repository_branches(
+    repository: Mapping[str, Any], ticket_id: str, extra_names: Iterable[str] = ()
+) -> list[dict[str, Any]]:
+    """One entry per branch name that carries the ticket key or is named.
 
-    Local heads and remote-tracking refs for the same name fold into one row
-    that says where the branch exists (local, origin, both), which one is
-    checked out, how far it is ahead of and behind the Project's base, and who
-    last committed to it. The read touches only local refs; it never fetches.
+    ``extra_names`` are branches tied to the ticket by a report or an explicit
+    assignment even though their names carry no key. Local heads and
+    remote-tracking refs for the same name fold into one row that says where
+    the branch exists (local, origin, both), which one is checked out, how far
+    it is ahead of and behind the Project's base, and who last committed to
+    it. The read touches only local refs; it never fetches.
     """
+    named = {str(value) for value in extra_names if str(value)}
     raw_path = str(repository.get("local_path") or "")
     if not raw_path:
         return []
@@ -1598,7 +1603,7 @@ def _repository_branches(repository: Mapping[str, Any], ticket_id: str) -> list[
             remote_name, _, name = short.partition("/")
             if not name:
                 continue
-        if needle not in name.casefold():
+        if needle not in name.casefold() and name not in named:
             continue
         entry = groups.setdefault(
             name,
@@ -1800,9 +1805,15 @@ def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     reference = _ticket_reference(dict(row), project)
     reports = [dict(value) for value in report_rows]
     repositories = [dict(value) for value in repository_rows]
+    assigned = payload.get("assigned_branches")
+    named = {
+        str(value.get("scope") or "").removeprefix("branch:")
+        for value in reports
+        if str(value.get("scope") or "").startswith("branch:")
+    } | {str(value) for value in (assigned if isinstance(assigned, list) else []) if value}
     branches: list[dict[str, Any]] = []
     for repository in repositories:
-        branches.extend(_repository_branches(repository, ticket_id))
+        branches.extend(_repository_branches(repository, ticket_id, named))
     known = {(str(value["repository_id"]), str(value["name"])) for value in branches}
     repositories_by_id = {str(value["id"]): value for value in repositories}
     for report in reports:
