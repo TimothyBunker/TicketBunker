@@ -721,3 +721,69 @@ class RemoteContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TicketBranchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.environment = mock.patch.dict(os.environ, {"TB_DATA_HOME": str(self.root / "app-data")})
+        self.environment.start()
+        self.repo = self.root / "source"
+        self.repo.mkdir()
+        run = lambda *args: subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+        run("init", "-q", "-b", "main")
+        run("config", "user.name", "Tim")
+        run("config", "user.email", "tim@example.test")
+        (self.repo / "README.md").write_text("hello\n", encoding="utf-8")
+        run("add", "README.md")
+        run("commit", "-q", "-m", "initial")
+        run("remote", "add", "origin", "https://github.com/example/coal.git")
+        run("checkout", "-q", "-b", "tim/ECS-4-position")
+        (self.repo / "position.py").write_text("POSITION = 1\n", encoding="utf-8")
+        run("add", "position.py")
+        run("commit", "-q", "-m", "position")
+        head = run("rev-parse", "HEAD")
+        run("update-ref", "refs/remotes/origin/tim/ECS-4-position", head)
+        run("update-ref", "refs/remotes/origin/ada/ECS-4-mesh", head)
+        run("update-ref", "refs/remotes/origin/main", run("rev-parse", "main"))
+        run("branch", "--set-upstream-to=origin/tim/ECS-4-position", "tim/ECS-4-position")
+        created = bunkerdb.create_bunker("Engineering", project_key="ECS")
+        self.bunker_id = created["id"]
+        project_id = created["projects"][0]["id"]
+        configuration = bunkerdb.get_configuration(self.bunker_id, project_id=project_id)
+        configuration = bunkerdb.replace_repository_bindings(
+            self.bunker_id, project_id=project_id,
+            expected_revision=configuration["repositories"]["revision"],
+            repositories=[{"name": "Coal", "canonical_remote": "github.com/example/coal", "default_branch": "main"}],
+        )
+        with mock.patch.object(bunkerdb, "_fetch_repository"):
+            bunkerdb.attach_repository(self.bunker_id, project_id=project_id, local_path=str(self.repo), binding_id=configuration["repositories"]["items"][0]["id"])
+        proposal = bunkerdb.propose_ticket_sync(
+            self.bunker_id, project_id=project_id,
+            tickets=[{"id": "ECS-4", "title": "Position", "status": "todo"}], source_kind="manual",
+        )
+        bunkerdb.apply_ticket_sync_change(self.bunker_id, proposal)
+
+    def tearDown(self) -> None:
+        self.environment.stop()
+        self.temporary.cleanup()
+
+    def test_local_and_remote_refs_fold_into_one_branch_with_state(self) -> None:
+        detail = bunkerdb.get_ticket(self.bunker_id, "ECS-4")
+        by_name = {branch["name"]: branch for branch in detail["branches"]}
+
+        self.assertEqual(list(by_name), ["tim/ECS-4-position", "ada/ECS-4-mesh"])
+        mine = by_name["tim/ECS-4-position"]
+        self.assertTrue(mine["current"] and mine["local"] and mine["remote"])
+        self.assertEqual(mine["remotes"], ["origin"])
+        self.assertEqual(mine["upstream"], "origin/tim/ECS-4-position")
+        self.assertEqual((mine["ahead"], mine["behind"], mine["base"]), (1, 0, "main"))
+        self.assertEqual(mine["last_author"], "Tim")
+        self.assertTrue(mine["last_commit_at"])
+        theirs = by_name["ada/ECS-4-mesh"]
+        self.assertFalse(theirs["local"] or theirs["current"])
+        self.assertTrue(theirs["remote"])
+        self.assertEqual(theirs["ahead"], 1)
+        self.assertNotIn("origin/tim/ECS-4-position", by_name)
+

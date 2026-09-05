@@ -2,7 +2,7 @@ import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "rea
 import Markdown from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
-import type { Bunker, SourceDraft, TicketDetail, TicketReference } from "./types";
+import { trackerSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
 type Props = {
   bunker: Bunker;
@@ -34,12 +34,63 @@ function agentProject(detail: TicketDetail): string {
   return detail.ticket.source_kind === "legacy-embedded" ? "" : detail.project.key;
 }
 
+function flattenProjects(projects: Project[]): Project[] {
+  return projects.flatMap((project) => [project, ...flattenProjects(project.children || [])]);
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  jira: "Jira",
+  manual: "Entered here",
+  remote: "Shared Bunker",
+  "legacy-embedded": "Imported from a .tb folder",
+  "legacy-companion": "Imported from a companion repository",
+};
+
+function absoluteTime(value: unknown): string {
+  const raw = String(value || "");
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return raw || "—";
+  return `${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp)} · ${relativeTime(raw)}`;
+}
+
+function capitalize(value: unknown): string {
+  const raw = String(value || "");
+  return raw ? raw[0].toUpperCase() + raw.slice(1) : "—";
+}
+
+function sourceLink(detail: TicketDetail): { href: string; label: string } | null {
+  const reference = String(detail.ticket.source_reference || "");
+  if (!/^https:\/\//.test(reference)) return null;
+  const host = new URL(reference).host;
+  const label = host.includes("github.com") ? "Open in GitHub" : host.includes("gitlab") ? "Open in GitLab" : host.includes("atlassian") ? "Open in Jira" : `Open on ${host}`;
+  return { href: reference, label };
+}
+
+function branchState(branch: TicketDetail["branches"][number]): string {
+  if (branch.current) return branch.remote ? "Checked out · on origin" : "Checked out · local only";
+  if (branch.local && branch.remote) return "Local and origin";
+  if (branch.local) return "Local only · not pushed";
+  if (branch.remote) return "On origin · not checked out";
+  return "Report only · branch not found";
+}
+
+function branchCompare(branch: TicketDetail["branches"][number]): string {
+  if (branch.ahead === null || branch.ahead === undefined) return "";
+  const parts = [`${branch.ahead} ahead`];
+  if (branch.behind) parts.push(`${branch.behind} behind`);
+  return `${parts.join(", ")} of ${branch.base}`;
+}
+
 function TicketTab({
   detail,
+  tracker,
   openSource,
   copySource,
 }: {
   detail: TicketDetail;
+  tracker?: Project["tracker"];
   openSource: (path: string, line: number) => void;
   copySource: (path: string, line: number) => void;
 }) {
@@ -60,13 +111,16 @@ function TicketTab({
       <section className="ticket-details">
         <h2>Details</h2>
         <dl>
-          <div><dt>Type</dt><dd>{text(ticket.type)}</dd></div>
-          <div><dt>Priority</dt><dd>{text(ticket.priority)}</dd></div>
+          <div><dt>Type</dt><dd>{capitalize(ticket.type)}</dd></div>
+          <div><dt>Priority</dt><dd>{capitalize(ticket.priority)}</dd></div>
           <div><dt>Assignee</dt><dd>{text(ticket.assignee)}</dd></div>
           <div><dt>Reporter</dt><dd>{text(ticket.reporter)}</dd></div>
-          <div><dt>Created</dt><dd>{text(ticket.created || ticket.created_at)}</dd></div>
+          <div><dt>Labels</dt><dd>{ticket.labels.length ? <span className="ticket-labels inline">{ticket.labels.map((value) => <span key={value}>{value}</span>)}</span> : "—"}</dd></div>
           <div><dt>Repository</dt><dd>{detail.repositories.map((value) => value.name).join(", ") || "—"}</dd></div>
-          <div><dt>Source</dt><dd>{text(ticket.source_kind)}</dd></div>
+          <div><dt>Created</dt><dd>{absoluteTime(ticket.created || ticket.created_at)}</dd></div>
+          <div><dt>Updated</dt><dd>{absoluteTime(ticket.updated || ticket.updated_at)}</dd></div>
+          <div><dt>Board</dt><dd>{tracker ? trackerSummary(tracker) : "No board linked"}</dd></div>
+          <div><dt>Source</dt><dd>{SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)}</dd></div>
         </dl>
       </section>
       {detail.comments.length > 0 && (
@@ -218,7 +272,7 @@ function TicketRail({
   return (
     <aside className="ticket-rail">
       <section className="state-hub">
-        <header><h2>Lifecycle</h2></header>
+        <header><h2>Synthesis</h2></header>
         <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
         {Boolean(synthesis.log) && <details className="diagnostic-path"><summary>Diagnostic location</summary><code>{String(synthesis.log)}</code><button onClick={() => navigator.clipboard.writeText(String(synthesis.log)).then(() => notify("Diagnostic path copied")).catch(() => notify("Copy was unavailable; the full path is shown above.", true))}>Copy path</button></details>}
         {repoRoot && synthesis.status !== "updating" && <button className="wide-action" disabled={busy} onClick={synthesize}>{synthesis.status === "current" ? "Synthesize again" : String(synthesis.action || "Synthesize")}</button>}
@@ -226,7 +280,17 @@ function TicketRail({
       <section className="branches-panel">
         <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" onClick={() => setCreating(!creating)}>+</button></header>
         <button className={scope === "combined" ? "branch-item selected" : "branch-item"} onClick={() => onScope("combined")}><span>Combined</span><small>{detail.reports.filter((value) => value.scope.startsWith("branch:")).length} reports</small></button>
-        {detail.branches.map((branch) => <button key={branch.name} className={scope === branch.name ? "branch-item selected" : "branch-item"} onClick={() => onScope(branch.name)}><span>{branch.name}</span><small>{branch.current ? "Current branch" : branch.remote ? "Fetched" : "Local"}</small></button>)}
+        {detail.branches.map((branch) => {
+          const compare = branchCompare(branch);
+          const when = branch.last_commit_at ? `${branch.last_author ? `${branch.last_author} · ` : ""}${relativeTime(branch.last_commit_at)}` : "";
+          return (
+            <button key={branch.name} className={scope === branch.name ? "branch-item selected" : "branch-item"} onClick={() => onScope(branch.name)} title={branch.upstream ? `Tracks ${branch.upstream}` : undefined}>
+              <span className="branch-name">{branch.current && <i className="state-dot ready" />}{branch.name}</span>
+              <small>{[branchState(branch), compare].filter(Boolean).join(" · ")}</small>
+              {when && <small>{when}</small>}
+            </button>
+          );
+        })}
         {creating && !candidate && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setCandidate({ name: String(data.get("name") || ""), base: String(data.get("base") || "") }); }}><label>Short description<input name="name" placeholder="position-system" required /></label><label>Branch from<select name="base">{detail.repositories.map((repo) => <option key={repo.id} value={repo.default_branch || "main"}>{repo.default_branch || "main"}</option>)}</select></label><button className="primary">Review branch</button></form>}
         {candidate && <div className="confirmation"><strong>Create this branch?</strong><p>TicketBunker will require a clean worktree, switch to <code>{candidate.base}</code>, fast-forward it when possible, then create the ticket branch.</p><div><button onClick={() => setCandidate(null)}>Back</button><button className="primary" disabled={busy} onClick={createBranch}>Create branch</button></div></div>}
       </section>
@@ -425,16 +489,18 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   if (error) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;
+  const link = sourceLink(detail);
+  const tracker = flattenProjects(bunker.projects).find((value) => value.id === detail.project.id)?.tracker;
   return (
     <div className="ticket-shell">
       <header className="ticket-header">
         <button className="back-control" onClick={onBack}>← Tickets</button>
-        <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>Updated {relativeTime(String(ticket.updated || ""))}</small></div></div>
+        <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
         <nav className="ticket-tabs"><button className={tab === "ticket" ? "selected" : ""} onClick={() => setTab("ticket")}>Ticket</button><button className={tab === "agent" ? "selected" : ""} onClick={() => setTab("agent")}>Agent</button></nav>
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : tab === "ticket" ? <TicketTab detail={detail} openSource={openSource} copySource={copySource} /> : <AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} />}
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : tab === "ticket" ? <TicketTab detail={detail} tracker={tracker} openSource={openSource} copySource={copySource} /> : <AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} />}
         </main>
         <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setTab("agent"); }} onReload={load} notify={notify} />
       </div>

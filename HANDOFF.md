@@ -256,7 +256,7 @@ new Bunkers.
   Jira-shaped read surface: project, title, mapped status, labels, source update
   time, rich description/acceptance criteria with nested list rendering,
   activity, useful details, and a Metadata disclosure for transport fields.
-- One Lifecycle and Branches rail persists beside both tabs. Agent work owns
+- One Synthesis and Branches rail persists beside both tabs. Agent work owns
   only the center Agent surface. Combined is the mechanically generated master
   and separates each branch visibly;
   Who/What/Where/Why synthesis appears before each collapsible full evidence

@@ -146,7 +146,16 @@ export type TicketDetail = {
   branches: Array<{
     name: string;
     current: boolean;
+    local: boolean;
     remote: boolean;
+    remotes: string[];
+    upstream: string;
+    commit: string;
+    last_commit_at: string;
+    last_author: string;
+    ahead: number | null;
+    behind: number | null;
+    base: string;
     repository_id: string;
     repository_name: string;
   }>;

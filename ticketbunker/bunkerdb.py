@@ -1558,27 +1558,103 @@ def list_tickets(
 
 
 def _repository_branches(repository: Mapping[str, Any], ticket_id: str) -> list[dict[str, Any]]:
+    """One entry per branch name that carries the ticket key.
+
+    Local heads and remote-tracking refs for the same name fold into one row
+    that says where the branch exists (local, origin, both), which one is
+    checked out, how far it is ahead of and behind the Project's base, and who
+    last committed to it. The read touches only local refs; it never fetches.
+    """
     raw_path = str(repository.get("local_path") or "")
     if not raw_path:
         return []
     root = Path(raw_path)
     current = _git_value(root, "branch", "--show-current")
-    raw = _git_value(root, "branch", "--all", "--format=%(refname:short)")
+    listing = _git_value(
+        root,
+        "for-each-ref",
+        "--format=%(refname:short)%09%(refname)%09%(objectname:short)%09%(committerdate:iso-strict)%09%(authorname)%09%(upstream:short)",
+        "refs/heads",
+        "refs/remotes",
+    )
     needle = ticket_id.casefold()
-    values: list[dict[str, Any]] = []
-    for name in sorted({line.strip() for line in raw.splitlines() if line.strip()}):
-        if name.endswith("/HEAD") or needle not in name.casefold():
+    repository_id = str(repository.get("id") or "")
+    repository_name = str(repository.get("name") or root.name)
+    groups: dict[str, dict[str, Any]] = {}
+    for line in listing.splitlines():
+        # The final line loses its trailing tab to the output strip when the
+        # last field (upstream) is empty; pad rather than drop that ref.
+        parts = (line.split("\t") + [""] * 6)[:6]
+        if not parts[0] or not parts[1]:
             continue
-        values.append(
+        short, full, sha, date, author, upstream = parts
+        if short.endswith("/HEAD"):
+            continue
+        is_remote = full.startswith("refs/remotes/")
+        name = short
+        remote_name = ""
+        if is_remote:
+            remote_name, _, name = short.partition("/")
+            if not name:
+                continue
+        if needle not in name.casefold():
+            continue
+        entry = groups.setdefault(
+            name,
             {
                 "name": name,
-                "current": name == current,
-                "remote": name.startswith("remotes/") or name.startswith("origin/"),
-                "repository_id": str(repository.get("id") or ""),
-                "repository_name": str(repository.get("name") or root.name),
-            }
+                "current": False,
+                "local": False,
+                "remote": False,
+                "remotes": [],
+                "upstream": "",
+                "commit": "",
+                "last_commit_at": "",
+                "last_author": "",
+                "ahead": None,
+                "behind": None,
+                "base": "",
+                "repository_id": repository_id,
+                "repository_name": repository_name,
+            },
         )
-    return values
+        if is_remote:
+            entry["remote"] = True
+            if remote_name not in entry["remotes"]:
+                entry["remotes"].append(remote_name)
+            if not entry["local"]:
+                entry.update(commit=sha, last_commit_at=date, last_author=author)
+        else:
+            entry["local"] = True
+            entry["current"] = name == current
+            entry["upstream"] = upstream
+            entry.update(commit=sha, last_commit_at=date, last_author=author)
+    base = str(repository.get("default_branch") or "main")
+    base_ref = ""
+    if _git_value(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{base}"):
+        base_ref = base
+    elif _git_value(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{base}"):
+        base_ref = f"origin/{base}"
+    for entry in groups.values():
+        ref = entry["name"] if entry["local"] else f"{entry['remotes'][0]}/{entry['name']}"
+        if base_ref and ref != base_ref:
+            counts = _git_value(root, "rev-list", "--left-right", "--count", f"{base_ref}...{ref}")
+            pieces = counts.split()
+            if len(pieces) == 2 and all(piece.isdigit() for piece in pieces):
+                entry["behind"] = int(pieces[0])
+                entry["ahead"] = int(pieces[1])
+                entry["base"] = base_ref
+    return sorted(
+        groups.values(),
+        key=lambda item: (0 if item["current"] else 1, item["last_commit_at"] and -_iso_order(item["last_commit_at"]), item["name"]),
+    )
+
+
+def _iso_order(value: str) -> float:
+    try:
+        return datetime.datetime.fromisoformat(str(value)).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
@@ -1736,7 +1812,16 @@ def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
                 {
                     "name": name,
                     "current": False,
+                    "local": False,
                     "remote": False,
+                    "remotes": [],
+                    "upstream": "",
+                    "commit": "",
+                    "last_commit_at": "",
+                    "last_author": "",
+                    "ahead": None,
+                    "behind": None,
+                    "base": "",
                     "repository_id": repository_id,
                     "repository_name": str(repository.get("name") or ""),
                 }
