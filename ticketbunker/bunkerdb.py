@@ -22,6 +22,7 @@ from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
 from . import config, layout, platform_services, project as companion, remote
+from .processors import anchorcheck
 
 
 SCHEMA_VERSION = 3
@@ -1713,9 +1714,14 @@ def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
     if branch_root.is_dir():
         for path in sorted(branch_root.glob("*.md")):
             try:
-                report_values.append((f"branch:{path.stem}", path.read_text(encoding="utf-8")))
+                text = path.read_text(encoding="utf-8")
             except OSError:
                 continue
+            # Legacy files are named by branch slug; the report scope carries
+            # the real branch name so it folds with the checkout's refs.
+            stamp = anchorcheck.verified_stamp(text)
+            branch = str(stamp.get("branch") or "") or path.stem.replace("__", "/")
+            report_values.append((f"branch:{branch}", text))
     now = _now()
     with _database(bunker_id) as connection:
         connection.execute(
