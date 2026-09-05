@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { command, OFFLINE_MESSAGE } from "./transport";
+import { command, OFFLINE_MESSAGE, STALE_SERVICE_MESSAGE } from "./transport";
 
 describe("browser transport", () => {
   const originalFetch = globalThis.fetch;
@@ -22,6 +22,15 @@ describe("browser transport", () => {
 
     window.removeEventListener("ticketbunker-service", listener);
     expect(events).toEqual([true]);
+  });
+
+  it("names a service older than the page instead of an unavailable command", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ ok: false, code: "command_unavailable", message: "That command is not available to the desktop application." }),
+    } as unknown as Response);
+
+    await expect(command("application.project.link")).rejects.toThrow(STALE_SERVICE_MESSAGE);
   });
 
   it("passes typed rejections through unchanged", async () => {

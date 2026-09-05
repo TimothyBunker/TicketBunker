@@ -27,6 +27,7 @@ const browserSession = globalThis.crypto?.randomUUID?.().replaceAll("-", "") ||
   `browser${Date.now()}${Math.random().toString(16).slice(2)}`;
 
 export const OFFLINE_MESSAGE = "TicketBunker's local service is not running. Start it again, then reload this page.";
+export const STALE_SERVICE_MESSAGE = "This page is newer than the TicketBunker service behind it. Restart the service command in your terminal, then reload this page.";
 
 let offline = false;
 
@@ -116,8 +117,9 @@ export async function command<T>(
     throw reason;
   }
   setOffline(false);
-  const value = (await response.json()) as T & { ok?: boolean; message?: string };
+  const value = (await response.json()) as T & { ok?: boolean; code?: string; message?: string };
   if (!response.ok || value.ok === false) {
+    if (value.code === "command_unavailable") throw new Error(STALE_SERVICE_MESSAGE);
     throw new Error(value.message || "TicketBunker could not complete that action.");
   }
   return value;
