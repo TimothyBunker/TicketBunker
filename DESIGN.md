@@ -594,7 +594,10 @@ when, the harness, provider, and model that generated it, and when the Bunker
 recorded it. Work authors stay separate from that generator identity. Unknown generator fields
 stay absent instead of being guessed. Before the first report, Agent work shows
 only its empty state rather than a meaningless Combined selector. Trust tags
-render as chips. Ticket, Project, and Agent reading remains strictly read-only.
+render as chips that say what to trust rather than the on-disk word: Observed
+for pipeline facts, Verified for anchored [real] claims, and Speculation with
+its grounding rank (grounded, adjacent, ungrounded); a legend above the report
+explains each on hover. The bracket tags remain the report's stored form. Ticket, Project, and Agent reading remains strictly read-only.
 Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
 action, and the same ticket coworker is available from one bottom-right bubble.
 Selecting synthesis text or evidence inside a category's full trail reveals a

@@ -1,5 +1,5 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import Markdown from "./Markdown";
+import Markdown, { TRUST_LABELS } from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
@@ -207,6 +207,7 @@ function AgentTab({
         <div><h2>Agent work</h2><p>{scope === "all" ? `Every branch report, most recent first (${branchReports.length}).` : "This branch's report. Synthesis first; evidence stays one disclosure away."}</p></div>
         {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
       </div>
+      {reports.length > 0 && <p className="trust-legend"><span>Each claim carries how much to trust it:</span>{["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => <span key={key} className={`trust-chip ${key.startsWith("speculation") ? key.split(":")[1] : key}`} title={TRUST_LABELS[key].title}>{TRUST_LABELS[key].label}</span>)}</p>}
       {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
       {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
       {reports.map((report) => (
