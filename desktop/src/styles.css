@@ -287,7 +287,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .source-reference > button:first-child { min-height: 20px; padding: 0 3px; border: 0; color: #1f5e9f; background: transparent; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; font-weight: 650; }
 .source-reference .copy-source { width: 20px; min-width: 20px; min-height: 20px; padding: 0; border: 0; color: #8190a3; background: transparent; font-size: 10px; }
 
-.coworker-bubble { position: fixed; z-index: 20; right: 22px; bottom: 20px; width: 42px; min-width: 42px; height: 42px; padding: 0; border-color: #1c4f87; border-radius: 50%; color: #fff; background: #245d9f; box-shadow: 0 8px 24px rgba(28, 66, 110, .24); font-size: 21px; }
+.coworker-bubble { position: fixed; z-index: 20; right: 22px; bottom: 20px; width: 42px; min-width: 42px; height: 42px; padding: 0; border-color: #1c4f87; border-radius: 50%; color: #fff; background: #245d9f; box-shadow: 0 8px 24px rgba(28, 66, 110, .24); font-size: 21px;  display: grid; place-items: center; }
 .coworker-drawer { position: fixed; z-index: 20; top: 0; right: 0; width: min(390px, 100vw); height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; border-left: 1px solid #ccd4df; background: #fff; box-shadow: -14px 0 40px rgba(25, 41, 62, .12); }
 .coworker-drawer > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); }
 .coworker-drawer > header > div { display: grid; gap: 2px; }

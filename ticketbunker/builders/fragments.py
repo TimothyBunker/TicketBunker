@@ -135,6 +135,9 @@ Your stages, in order:
      by importance. Make observations readable without rewriting them all.
      Write verified source locations as `@[relative/path]:line` so the local
      viewer can open them directly. Do not use that form for unverified paths.
+     Cite this bunker's own files by their bunker-relative names, exactly
+     `ticket.json` or `observations/diff.json`, never with the bunker's
+     directory or an absolute path in front.
      The brief is agent-authored, so never label its claims [observation]:
      use anchored [real] for verified facts and ranked [speculation] for
      synthesis. The complete trail remains unchanged below it.

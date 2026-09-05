@@ -125,6 +125,7 @@ _CODE_MESSAGES = {
     "bunker_invalid": "The Bunker could not be published because its content did not validate.",
     "ticket_conflict": "Those tickets changed on the shared Bunker. Sync again.",
     "report_conflict": "That report changed on the shared Bunker. Sync, then synthesize again.",
+    "changes_invalid": "The service did not understand this change. It may be running an older TicketBunker: restart tb serve, then retry.",
 }
 
 

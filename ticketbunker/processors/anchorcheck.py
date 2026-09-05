@@ -87,7 +87,7 @@ def _resolves(repo: Path, refs: list[str], bunker: Path, path: str, line: int | 
             continue
         if line is None or line <= content.count("\n") + 1:
             return ref
-    local = bunker / clean
+    local = bunker / _bunker_relative(bunker, clean)
     if local.exists():
         if line is None or not local.is_file():
             return "bunker"
@@ -97,6 +97,26 @@ def _resolves(repo: Path, refs: list[str], bunker: Path, path: str, line: int | 
         except (OSError, UnicodeDecodeError):
             return None
     return None
+
+
+def _bunker_relative(bunker: Path, path: str) -> str:
+    """Normalize a bunker citation to the bunker's own layout.
+
+    Agents see the bunker's absolute location and sometimes cite
+    ``runtime/ECS-4_bunker/ticket.json`` or ``.tb/ECS-4_bunker/ticket.json``
+    instead of ``ticket.json``. Anything up to and including the bunker's
+    directory name is a prefix, not part of the anchor.
+    """
+    absolute = str(Path(bunker).resolve())
+    if path.startswith(absolute + "/"):
+        return path[len(absolute) + 1 :]
+    parts = path.split("/")
+    name = Path(bunker).name
+    if name in parts:
+        return "/".join(parts[parts.index(name) + 1 :])
+    if parts and parts[0] == ".tb":
+        return "/".join(parts[1:])
+    return path
 
 
 def verify(text: str, repo: Path, refs: list[str], bunker: Path) -> list[str]:

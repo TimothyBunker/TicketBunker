@@ -125,8 +125,13 @@ exercise unless a live boundary is explicitly called out.
   (`bunkerdb.apply_snapshot`); the Bunker page pulls on open and on Sync now.
   Ticket pages show each branch report's verification stamp and record time,
   present Ticket and Agent work as two sections of one page rather than tabs,
-  and a failed synthesis names the harness or provider line that stopped it
-  (for example a usage limit) instead of a bare "synthesis failed".
+  and a failed synthesis names its summary and first blocking finding, or the
+  provider line that stopped it (for example a usage limit), never a warning.
+  Bunker citations such as `runtime/ECS-4_bunker/ticket.json` normalize to
+  the bunker layout at the anchor gate; a report verified at the current
+  commit that the Bunker refused is shared on the next request without
+  another model run; a `changes_invalid` answer from the service tells the
+  user to restart an older `tb serve`.
   `tests/test_bunkerruntime.py` runs the stub harness end to end on a local and
   a shared Bunker.
 - Existing companion-backed projects appear in a separate Migration section.

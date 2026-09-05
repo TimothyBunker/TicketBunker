@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import agent_runtime, config, layout, platform_services
+from . import agent_runtime, commands, config, layout, platform_services
 from .ledger import Ledger
 from .processors import anchorcheck
 
@@ -594,6 +594,9 @@ def _profile(repo: Path, bunker: Path, branch: str) -> dict[str, str]:
 def _cli_env() -> dict[str, str]:
     env = dict(os.environ)
     env["TB_AGENT_ACTIVE"] = "1"
+    # The run's stdout and stderr share one log; unbuffered output keeps
+    # findings in the order they happened.
+    env["PYTHONUNBUFFERED"] = "1"
     package_parent = str(Path(__file__).resolve().parent.parent)
     env["PYTHONPATH"] = os.pathsep.join(
         value for value in (package_parent, env.get("PYTHONPATH", "")) if value
@@ -638,6 +641,9 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     prior = synthesis_input_state(repo, bunker, branch)
     if prior.get("status") == "current" and prior.get("published") == fingerprint:
         return True, f"synthesis already current for {branch}; provider was not called"
+    pending = _pending_verified_report(repo, bunker, branch, head, prior)
+    if pending is not None:
+        return pending
     command = [
         *base,
         "run",
@@ -680,18 +686,66 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
     return True, f"published {branch} through {profile['harness']}"
 
 
+def _pending_verified_report(
+    repo: Path, bunker: Path, branch: str, head: str, prior: dict[str, Any]
+) -> tuple[bool, str] | None:
+    """Share a report the model already produced for this exact commit.
+
+    When a run passed every gate but the Bunker (typically its service) did
+    not accept the report, the verified child sits in the runtime directory
+    with no recorded publication. The next request shares it instead of
+    paying for another model run.
+    """
+    from . import bunkerruntime
+
+    if bunkerruntime.marker(bunker) is None or prior.get("status") != "unchecked":
+        return None
+    report = layout.child_report(bunker, branch)
+    try:
+        stamp = anchorcheck.verified_stamp(report.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    commit = str(stamp.get("commit") or "")
+    if not commit or not head.startswith(commit):
+        return None
+    try:
+        bunkerruntime.publish_reports(bunker, branch, Ledger(layout.paths(bunker)["ledger"]))
+    except commands.CommandRejected as exc:
+        return False, (
+            f"the verified report for {branch} is kept on this computer, but the Bunker "
+            f"did not accept it: {exc.message}"
+        )
+    _record_input_fingerprint(repo, bunker, branch, input_fingerprint(repo, bunker, branch, head=head), head)
+    return True, f"shared the verified report for {branch}; provider was not called"
+
+
 def failure_detail(output: str, harness: str) -> str:
     """Name what stopped a synthesis from the run's own output, bounded.
 
-    Provider and harness messages ("usage limit has been reached", "Bad
-    credentials") are what a person acts on; file paths and generic exit
-    lines are not.
+    Blocking findings and the run's own summary come first; warnings never
+    do, because they do not stop a publish. Provider and harness messages
+    ("usage limit has been reached", "Bad credentials") are what a person
+    acts on; file paths and generic exit lines are not.
     """
-    skip = ("error: harness exited", "form left at", "draft:", "transcript:", "session complete")
+    skip = ("error: harness exited", "form left at", "draft:", "transcript:", "session complete", "Use View log")
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    errors = [line for line in lines if line.startswith("[error]")]
+    summary = next(
+        (
+            line for line in reversed(lines)
+            if line.startswith("Synthesis stopped") or "did not accept" in line
+        ),
+        "",
+    )
+    if errors:
+        first = errors[0][len("[error]"):].strip()
+        lead = summary or "the report failed its checks"
+        return f"{harness} synthesis failed: {lead[:150]} First finding: {first[:220]}"
+    if summary:
+        return f"{harness} synthesis failed: {summary[:240]}"
     candidates = [
-        line.strip()
-        for line in output.splitlines()
-        if line.strip() and not any(marker in line for marker in skip)
+        line for line in lines
+        if not line.startswith("[warn]") and not any(marker in line for marker in skip)
     ]
     for line in reversed(candidates):
         lowered = line.casefold()

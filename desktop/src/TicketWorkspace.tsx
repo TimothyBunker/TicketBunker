@@ -379,7 +379,11 @@ function CoworkerDrawer({
   }
 
   if (!repoRoot) return null;
-  if (!open) return <button className="coworker-bubble" aria-label="Ask ticket coworker" onClick={() => onOpen(true)}>⌁</button>;
+  if (!open) return (
+    <button className="coworker-bubble" aria-label="Ask ticket coworker" title="Ask the ticket coworker" onClick={() => onOpen(true)}>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.4 3.6c-.6.5-1.6.1-1.6-.8V5.5Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /><circle cx="9" cy="9.5" r="1.1" fill="currentColor" /><circle cx="12.5" cy="9.5" r="1.1" fill="currentColor" /><circle cx="16" cy="9.5" r="1.1" fill="currentColor" /></svg>
+    </button>
+  );
   const messages = (coworker?.messages || []) as Array<Record<string, unknown>>;
   const proposals = (coworker?.proposals || []) as Array<Record<string, unknown>>;
   return (

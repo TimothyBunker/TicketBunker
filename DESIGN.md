@@ -438,6 +438,15 @@ tool:
   session headlessly; the bootstrap extensions and command-fed agent do the
   rest. Branch creation and ordinary Git activity only mark synthesis as
   missing or changed.
+- A stopped synthesis names what stopped it, in this precedence: the run's
+  own summary plus the first blocking `[error]` finding, then a provider or
+  harness message such as a usage limit, never a `[warn]` line, which does
+  not block a publish. The worker log keeps the whole run in order.
+- When a run passed every gate but the Bunker (typically its service) did not
+  accept the report, the verified child stays in the runtime directory with no
+  recorded publication; the next Synthesize shares that report without
+  calling the provider again, as long as it was verified at the current
+  commit.
 - Synthesis failure is a user-request state, not merely a historical worker
   record. Only a run marked by the explicit Synthesize/Update/Retry command may
   render **Synthesis stopped** or a doctor warning. Failures persisted by older
@@ -730,7 +739,11 @@ bootstrap pipeline.
 publish (and at checkout import), each [real] claim's anchors are resolved
 against the source repo — the branch itself, then the exact baseline state
 (merge-base) the observations were computed from — and against the bunker's
-own files for observation anchors. A cited line number must fall inside the
+own files for observation anchors. A bunker citation is normalized to the
+bunker's layout first: anything up to and including the bunker's directory
+name, or an absolute prefix, is stripped, so `runtime/ECS-4_bunker/ticket.json`
+and `ticket.json` resolve the same way. The workflow preamble tells the agent
+to use the plain form. A cited line number must fall inside the
 file. A claim none of whose anchors resolve is rejected at the gate, and an
 accepted component is stamped (`tb:verified branch/commit/ts` plus known
 `harness/provider/model`, mechanical, never agent-authored) with the ref it was

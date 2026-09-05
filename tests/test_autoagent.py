@@ -501,3 +501,17 @@ class FailureDetailTests(unittest.TestCase):
             "command synthesis failed: something else",
         )
 
+    def test_blocking_findings_outrank_warnings_whatever_the_order(self) -> None:
+        output = (
+            "[error] [real] claim has no resolvable anchor (checked b, sha and the bunker): x.json — in: - [real] The ticket\n"
+            "Synthesis stopped after one automatic repair pass: the report still failed its safety checks; no shared report changed.\n"
+            "  draft:      /tmp/x.form.md\n"
+            "[warn] citation: section 'Why': grounded/adjacent speculation cites nothing checkable\n"
+        )
+        detail = autoagent.failure_detail(output, "pi")
+        self.assertTrue(detail.startswith("pi synthesis failed: Synthesis stopped after one automatic repair pass"))
+        self.assertIn("First finding: [real] claim has no resolvable anchor", detail)
+        self.assertNotIn("[warn]", detail)
+        only_warnings = "[warn] citation: something\nsession complete: published /a\n"
+        self.assertEqual(autoagent.failure_detail(only_warnings, "pi"), "pi synthesis failed")
+

@@ -140,6 +140,48 @@ class BunkerRuntimeTests(unittest.TestCase):
         self.assertEqual(detail["truth"]["synthesis"]["status"], "current")
         self.assertTrue(any(item["name"] == branch and item["current"] for item in detail["branches"]))
 
+    def test_bunker_citations_resolve_however_the_agent_spells_them(self) -> None:
+        from ticketbunker.processors import anchorcheck
+
+        info = bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        bunker = info["bunker"]
+        text = (
+            "## Who\n"
+            "- [real] The ticket names its assignee (@runtime/ECS-4_bunker/ticket.json).\n"
+            f"- [real] The ticket names its reporter ({bunker}/ticket.json).\n"
+            "- [real] Observations exist (.tb/ECS-4_bunker/observations/branch_resolution.json).\n"
+            "- [real] The plain form works (ticket.json).\n"
+            "- [real] A missing file still fails (observations/nothing.json).\n"
+        )
+        (bunker / "observations" / "branch_resolution.json").write_text("{}\n", encoding="utf-8")
+
+        errors = anchorcheck.verify(text, self.repo, ["main"], bunker)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("observations/nothing.json", errors[0])
+
+    def test_a_verified_report_the_bunker_did_not_accept_is_shared_without_another_run(self) -> None:
+        branch = self.start_work()
+        with mock.patch.object(autoagent, "_spawn_worker"):
+            self.dispatch("truth.synthesize", {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id})
+        self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
+        # Simulate the service having refused the publication: the verified
+        # child exists locally, nothing was recorded.
+        (self.repo / ".git" / autoagent.STATE_DIR / autoagent.FINGERPRINT_FILE).unlink()
+        with bunkerdb._database(self.bunker_id) as connection:
+            connection.execute("DELETE FROM reports WHERE ticket_id = 'ECS-4'")
+
+        with mock.patch.object(autoagent, "_spawn_worker"):
+            self.dispatch("truth.synthesize", {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id})
+        with mock.patch("ticketbunker.adapters.harness.run_session", side_effect=AssertionError("the provider must not run")):
+            status = autoagent.run_worker(self.repo, debounce=0, once=True)
+
+        last = autoagent.read_state(self.repo)["last"]
+        self.assertEqual((status, last["status"]), (0, "pass"), last.get("detail"))
+        self.assertIn("provider was not called", last["detail"])
+        detail = self.dispatch("application.ticket.get", {"bunker_id": self.bunker_id, "ticket_id": "ECS-4"})
+        self.assertEqual({report["scope"] for report in detail["reports"]}, {"combined", f"branch:{branch}"})
+
     def test_synthesis_requires_the_ticket_branch(self) -> None:
         with self.assertRaises(commands.CommandRejected) as rejected:
             self.dispatch("truth.synthesize", {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id})
