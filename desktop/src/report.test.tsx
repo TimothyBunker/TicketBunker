@@ -38,8 +38,10 @@ describe("standalone report presentation", () => {
 
     expect(container.querySelector("ul ul")?.textContent).toContain("Nested");
     fireEvent.click(screen.getByRole("button", { name: "@src/cache.py:4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
     expect(open).toHaveBeenCalledWith("src/cache.py", 4);
-    fireEvent.click(screen.getByRole("button", { name: /Copy absolute path/ }));
+    fireEvent.click(screen.getByRole("button", { name: "@src/cache.py:4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
     expect(copy).toHaveBeenCalledWith("src/cache.py", 4);
   });
 });

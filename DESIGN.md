@@ -407,7 +407,14 @@ ticket, `ticketbunker/bunkerruntime.py` projects the database row into
 exactly like a legacy ticket bunker, so the observation stages, context
 composition, harness session, lint and anchor gates, and master builder run
 unchanged. The projection is rewritten only when the ticket itself changes, so
-a rerun keeps its input fingerprint. Observations, session forms, transcripts,
+a rerun keeps its input fingerprint. A runtime that has no working copy of a
+report the Bunker has accepted (a replica, an imported copy, a machine that
+never ran synthesis for the ticket) is seeded with the accepted text when it
+is materialized, so the truth commands and the coworker read the same reports
+the page shows; an existing working copy is never overwritten, because the
+pipeline regenerates it and publication hands it back. The coworker session
+reads a Bunker ticket through this same runtime when the page passes the
+Bunker id. Observations, session forms, transcripts,
 inferences, and the ledger stay in that directory as this machine's evidence;
 the accepted reports are handed to the Bunker database by `publish_reports`
 and the database is the only shared truth. Nothing is written into the source
@@ -552,12 +559,18 @@ reader's eye stays selected, so the reader can jump between the ticket, its
 facts, and the agent's report from anywhere on the page without tabs. Ticket
 is the Jira-like issue surface. The header names the source project before the
 ticket, then presents the mapped status as the sole lifecycle ground truth
-beside labels and the source's updated time. Description and optional acceptance criteria read as
+beside labels and the source's updated time. Description, optional acceptance
+criteria, and optional notes each sit under a small heading and read as
 constrained rich text, including indentation-preserving nested ordered and
-unordered lists. **Activity is mirrored and read-only**: legacy comments
-plus provider-neutral `activity` entries (`comment`, `history`, `worklog`, `log`,
-`note`, or an integration-defined kind) retain author, text, time, and source;
-the viewer has no authoring control.
+unordered lists. **Activity is mirrored and read-only**: comments and
+provider-neutral `activity` entries (`comment`, `history`, `worklog`, `log`,
+`note`, or an integration-defined kind) render as one stream entry each with
+the author, the kind when it is not the section's default, a relative time
+with the absolute time on hover, the source link when the provider gave one,
+and the text as constrained rich text; a history entry without text shows its
+field change. The section headings count their entries. Whatever field names
+the provider used (`author` or `user`, `text` or `body`, `when` or `created`)
+read the same way; the viewer has no authoring control.
 
 One **Details** section follows the reading flow as a grid of labelled facts
 rather than a two-column definition list: assignee, reporter, type, priority,
@@ -605,7 +618,19 @@ only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips that say what to trust rather than the on-disk word: Observed
 for pipeline facts, Verified for anchored [real] claims, and Speculation with
 its grounding rank (grounded, adjacent, ungrounded); a legend above the report
-explains each on hover. The bracket tags remain the report's stored form. Ticket, Project, and Agent reading remains strictly read-only.
+explains each on hover. The bracket tags remain the report's stored form.
+
+**File references act on click, and selection never acts on its own.** Any
+reference a report or ticket carries in the forms the anchor checker accepts
+(`path:line` or `path` in a code span, `@path:line`, `@path`, or the older
+`@[path]:line`) renders as one reference control. Clicking it shows a small
+action toolbar beside it: **Open in editor** at that line, **Copy path** as an
+absolute path, and **Send to chat**, which quotes the reference into the
+coworker. A line number is optional and defaults to the first line. The same
+toolbar appears beside selected report text with **Send to chat** and
+**Copy**; selecting text no longer opens the chat by itself, and the toolbar
+never steals the selection, so copying a phrase stays a plain copy. Ticket,
+Project, and Agent reading remains strictly read-only.
 Each Who, What, Where, and Why synthesis has a small, accessible chat-bubble
 action, and the same ticket coworker is available from one bottom-right bubble.
 Selecting synthesis text or evidence inside a category's full trail reveals a

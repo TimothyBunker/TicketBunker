@@ -276,7 +276,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .branch-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; color: #718095; font-size: 9px; font-weight: 720; }
 .branch-divider::before, .branch-divider::after { content: ""; height: 1px; flex: 1; background: #d9dee5; }
 .synthesis-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
-.synthesis-card { min-width: 0; padding: 18px 19px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.synthesis-card { position: relative; min-width: 0; padding: 18px 19px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .synthesis-card > header { margin-bottom: 10px; }
 .synthesis-card h3 { color: #546278; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .synthesis-copy { min-height: 74px; }
@@ -296,9 +296,23 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .markdown li > ul, .markdown li > ol { margin-top: .2em; }
 .markdown pre { padding: 12px; border: 1px solid var(--line); background: #f5f6f8; overflow: auto; }
 .markdown blockquote { margin: .8em 0; padding-left: 12px; border-left: 2px solid #c9d3df; color: #687589; }
-.source-reference { display: inline-flex; align-items: center; vertical-align: baseline; }
-.source-reference > button:first-child { min-height: 20px; padding: 0 3px; border: 0; color: #1f5e9f; background: transparent; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; font-weight: 650; }
-.source-reference .copy-source { width: 20px; min-width: 20px; min-height: 20px; padding: 0; border: 0; color: #8190a3; background: transparent; font-size: 10px; }
+.source-reference { position: relative; display: inline-flex; align-items: center; vertical-align: baseline; }
+.source-reference > button.source-ref { min-height: 20px; padding: 0 2px; border: 0; border-radius: 3px; color: #1f5e9f; background: transparent; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; font-weight: 650; }
+.source-reference > button.source-ref code { padding: 1px 4px; border-radius: 3px; color: inherit; background: #eef3f9; font-size: inherit; }
+.source-reference > button.source-ref:hover code, .source-reference.open > button.source-ref code { background: #dbe7f5; }
+.source-reference .floating-actions { top: 100%; left: 0; margin-top: 5px; transform: none; }
+.floating-actions { position: absolute; z-index: 15; display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #c9d2de; border-radius: 7px; background: #fff; box-shadow: 0 6px 20px rgba(28, 43, 64, .16); white-space: nowrap; transform: translate(-50%, calc(-100% - 8px)); }
+.floating-actions button { min-height: 26px; padding: 0 10px; border: 0; border-radius: 4px; color: #1c3454; background: transparent; font-size: 10px; font-weight: 680; }
+.floating-actions button:hover { background: #eef3f9; }
+.floating-actions button:first-child { color: #fff; background: #245d9f; }
+.floating-actions button:first-child:hover { background: #1c4f87; }
+.description h2 { margin-bottom: 10px; font-size: 13px; }
+.description h2 + .markdown, .description h2 + p { margin-bottom: 22px; }
+.ticket-stream h2 small { margin-left: 6px; color: #8791a0; font-size: 10px; font-weight: 600; }
+.stream-entry header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.stream-entry header a { margin-left: auto; color: var(--blue); font-size: 9px; font-weight: 650; text-decoration: none; }
+.stream-kind { padding: 1px 6px; border-radius: 3px; color: #4d5a6e; background: #eef1f5; font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.stream-change { color: #526075; font-size: 11px; }
 
 .coworker-bubble { position: fixed; z-index: 20; right: 22px; bottom: 20px; width: 42px; min-width: 42px; height: 42px; padding: 0; border-color: #1c4f87; border-radius: 50%; color: #fff; background: #245d9f; box-shadow: 0 8px 24px rgba(28, 66, 110, .24); font-size: 21px;  display: grid; place-items: center; }
 .coworker-drawer { position: fixed; z-index: 20; top: 0; right: 0; width: min(390px, 100vw); height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; border-left: 1px solid #ccd4df; background: #fff; box-shadow: -14px 0 40px rgba(25, 41, 62, .12); }

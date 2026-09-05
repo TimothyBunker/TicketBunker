@@ -1,12 +1,24 @@
-import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import { Children, cloneElement, createContext, isValidElement, memo, useContext, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { sourceLinks } from "./report";
+import FloatingActions, { type FloatingAction } from "./FloatingActions";
+import { sourceLinks, sourceReference } from "./report";
+
+// What the page can do with one file reference. The ticket page provides
+// these once; every Markdown surface under it offers the same three actions.
+export type SourceActions = {
+  open?: (path: string, line: number) => void;
+  copy?: (path: string, line: number) => void;
+  ask?: (path: string, line: number) => void;
+};
+
+export const SourceActionsContext = createContext<SourceActions>({});
 
 type Props = {
   children: string;
   onOpenSource?: (path: string, line: number) => void;
   onCopySource?: (path: string, line: number) => void;
+  onAskSource?: (path: string, line: number) => void;
   compact?: boolean;
 };
 
@@ -58,56 +70,78 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
   return null;
 }
 
-export default function Markdown({
-  children,
-  onOpenSource,
-  onCopySource,
-  compact = false,
-}: Props) {
+// One file reference. Clicking it shows what can be done with it rather than
+// doing one thing: open the editor there, copy the absolute path, or send the
+// reference into the coworker chat.
+function SourceRef({ path, line, label }: { path: string; line: number; label: ReactNode }) {
+  const actions = useContext(SourceActionsContext);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const items: FloatingAction[] = [];
+  if (actions.open) items.push({ label: "Open in editor", onSelect: () => actions.open?.(path, line) });
+  if (actions.copy) items.push({ label: "Copy path", onSelect: () => actions.copy?.(path, line) });
+  if (actions.ask) items.push({ label: "Send to chat", onSelect: () => actions.ask?.(path, line) });
+  if (items.length === 0) return <>{label}</>;
   return (
-    <div className={compact ? "markdown compact" : "markdown"}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          li({ children: items, node: _node, ...rest }) {
-            const replaced = withChip(Children.toArray(items));
-            if (!replaced) return <li {...rest}>{items}</li>;
-            const tone = replaced.tone.startsWith("speculation") ? "speculation" : replaced.tone;
-            return <li {...rest} className={`claim claim-${tone}`}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
-          },
-          a({ href = "", children: label }) {
-            if (href.startsWith("#tb-source:")) {
-              const raw = href.slice("#tb-source:".length);
-              const split = raw.lastIndexOf(":");
-              const path = decodeURIComponent(raw.slice(0, split));
-              const line = Number(raw.slice(split + 1)) || 1;
-              return (
-                <span className="source-reference">
-                  <button type="button" onClick={() => onOpenSource?.(path, line)}>
-                    {label}
-                  </button>
-                  <button
-                    type="button"
-                    className="copy-source"
-                    aria-label={`Copy absolute path for ${path} line ${line}`}
-                    title="Copy absolute path"
-                    onClick={() => onCopySource?.(path, line)}
-                  >
-                    ⧉
-                  </button>
-                </span>
-              );
-            }
-            return (
-              <a href={href} target="_blank" rel="noreferrer">
-                {label}
-              </a>
-            );
-          },
-        }}
-      >
-        {sourceLinks(children)}
-      </ReactMarkdown>
-    </div>
+    <span ref={anchor} className={open ? "source-reference open" : "source-reference"}>
+      <button type="button" className="source-ref" aria-haspopup="true" aria-expanded={open} title={`${path}, line ${line}`} onClick={() => setOpen((value) => !value)}>
+        {label}
+      </button>
+      {open && <FloatingActions label={`Actions for ${path}`} actions={items} anchor={anchor} onClose={() => setOpen(false)} />}
+    </span>
   );
 }
+
+// The element map is one module-level object: react-markdown treats a new
+// component identity as a new element type and would rebuild the DOM on every
+// parent render, which drops any text selection the reader is holding.
+const COMPONENTS: Components = {
+  li({ children: items, node: _node, ...rest }) {
+    const replaced = withChip(Children.toArray(items));
+    if (!replaced) return <li {...rest}>{items}</li>;
+    const tone = replaced.tone.startsWith("speculation") ? "speculation" : replaced.tone;
+    return <li {...rest} className={`claim claim-${tone}`}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
+  },
+  code({ children: value, className, node: _node, ...rest }) {
+    const raw = String(value ?? "");
+    const reference = className || raw.includes("\n") ? null : sourceReference(raw);
+    if (reference) return <SourceRef path={reference.path} line={reference.line} label={<code {...rest}>{raw}</code>} />;
+    return <code className={className} {...rest}>{value}</code>;
+  },
+  a({ href = "", children: label }) {
+    if (href.startsWith("#tb-source:")) {
+      const raw = href.slice("#tb-source:".length);
+      const split = raw.lastIndexOf(":");
+      const path = decodeURIComponent(raw.slice(0, split));
+      const line = Number(raw.slice(split + 1)) || 1;
+      return <SourceRef path={path} line={line} label={label} />;
+    }
+    return (
+      <a href={href} target="_blank" rel="noreferrer">
+        {label}
+      </a>
+    );
+  },
+};
+
+const REMARK_PLUGINS = [remarkGfm];
+
+function Markdown({ children, onOpenSource, onCopySource, onAskSource, compact = false }: Props) {
+  const provided = useContext(SourceActionsContext);
+  const actions = useMemo<SourceActions>(
+    () => ({ open: onOpenSource || provided.open, copy: onCopySource || provided.copy, ask: onAskSource || provided.ask }),
+    [onOpenSource, onCopySource, onAskSource, provided],
+  );
+  const source = useMemo(() => sourceLinks(children), [children]);
+  return (
+    <SourceActionsContext.Provider value={actions}>
+      <div className={compact ? "markdown compact" : "markdown"}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+          {source}
+        </ReactMarkdown>
+      </div>
+    </SourceActionsContext.Provider>
+  );
+}
+
+export default memo(Markdown);

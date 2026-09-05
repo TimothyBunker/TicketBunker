@@ -303,11 +303,13 @@ new Bunkers.
   exact lint/anchor findings remain in private local `diagnostics.jsonl` and do
   not leak into coworker replies or command errors. It cannot edit source, run
   Git mutations, or write Combined directly.
-- `@[relative/path]:line` and verified inline-code `relative/path:line` report
-  anchors use the same clickable source control in Combined, child synthesis,
-  full trails, and coworker copy. The path remains selectable; a drag quotes
-  it into the contextual coworker action without also opening it, while a
-  path click or the adjacent Open button retains local-open behavior. The default is the
+- Every reference form the anchor checker accepts (`path:line` or `path` in a
+  code span, `@path:line`, `@path`, and the older `@[path]:line`) renders as
+  one reference control in Combined, child synthesis, full trails, the ticket
+  description, and coworker copy. Clicking it shows a small toolbar beside
+  it: Open in editor, Copy path, Send to chat. Selected report text gets the
+  same toolbar with Send to chat and Copy; selection never opens the chat by
+  itself and the toolbar never clears the selection. The default editor is the
   included source editor. `editor.read` confines paths and bounded UTF-8 content to the current
   checkout; `editor.save` requires the opened digest and atomically writes one
   file without staging or Git. A small clipboard control follows every source
@@ -522,9 +524,9 @@ exercise intentionally does not run an agent report.
 
 ## Remaining product work
 
-1. Retire the remaining legacy-only paths: the coworker session and the
-   `tb` ticket/comment/set commands still address companion layouts; route
-   them through the Bunker runtime and database the way reports now are, and
+1. Retire the remaining legacy-only paths: the `tb` ticket/comment/set
+   commands still address companion layouts; route them through the Bunker
+   runtime and database the way reports and the coworker session now are, and
    let `tb view` open a repository attached only through a Bunker.
 2. Extend the reference service and app with join requests and owner
    approval, member management (roles, removal), deploy recipes for platforms

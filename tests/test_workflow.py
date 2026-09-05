@@ -65,6 +65,17 @@ class TicketWorkflowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         config.GLOBAL_CONFIG = self.old_global_config
+        # Viewer actions queue a background refresh that writes below .git;
+        # let it finish before the directory disappears under it.
+        from ticketbunker import truth
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with truth._LOCK:
+                pending = bool(truth._RUNNING)
+            if not pending:
+                break
+            time.sleep(0.05)
         self.tmp.cleanup()
 
     def test_start_refreshes_base_creates_switches_and_initializes_session(self) -> None:

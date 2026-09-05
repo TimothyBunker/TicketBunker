@@ -200,10 +200,30 @@ def _messages(root: Path, project_key: str, ticket_id: str) -> list[dict[str, An
     return values
 
 
-def _ticket(root: Path, project_key: str, ticket_id: str) -> TicketSnapshot:
+def _ticket(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> TicketSnapshot:
+    if bunker_id:
+        # Bunker-owned tickets have no .tb/ database under the checkout; the
+        # coworker reads the same machine-local runtime projection the
+        # pipeline and truth commands use.
+        from . import bunkerruntime
+        from .api import RuntimeTicketDatabase
+
+        try:
+            bunkerruntime.materialize(bunker_id, ticket_id)
+        except Exception as exc:  # the database names the problem
+            raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
+        return RuntimeTicketDatabase(root, bunkerruntime.runtime_root(bunker_id)).get_ticket(
+            ticket_id, refresh_branches=True
+        )
     if project_key:
         return TicketCatalog(root).get_ticket(project_key, ticket_id)
-    return TicketDatabase(root).get_ticket(ticket_id, refresh_branches=True)
+    try:
+        return TicketDatabase(root).get_ticket(ticket_id, refresh_branches=True)
+    except FileNotFoundError as exc:
+        raise commands.CommandRejected(
+            "ticket_database_missing",
+            "This checkout has no ticket database. Open the ticket from its Bunker so the coworker can read it.",
+        ) from exc
 
 
 def _section(text: str, name: str) -> str:
@@ -648,12 +668,13 @@ def state(
     *,
     category: str = "what",
     scope: str = "combined",
+    bunker_id: str = "",
 ) -> dict[str, Any]:
     root = Path(root).resolve()
     category = category.casefold()
     if category not in CATEGORIES:
         category = "what"
-    ticket = _ticket(root, project_key, ticket_id)
+    ticket = _ticket(root, project_key, ticket_id, bunker_id)
     _scope_reports(ticket, scope)
     selected = [
         value
@@ -721,7 +742,8 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
             f"Keep the message under {MAX_MESSAGE_CHARS:,} characters, then retry.",
         )
     reference = _selected_reference(root, payload, category, scope)
-    ticket = _ticket(root, project_key, ticket_id)
+    bunker_id = str(payload.get("bunker_id") or "").strip()
+    ticket = _ticket(root, project_key, ticket_id, bunker_id)
     scoped_reports = _scope_reports(ticket, scope)
     if reference and reference["branch"] and not any(
         report.branch == reference["branch"] for report in scoped_reports
@@ -782,7 +804,7 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
                 "created_at": _now(),
             },
         )
-    return state(root, project_key, ticket_id, category=category, scope=scope)
+    return state(root, project_key, ticket_id, category=category, scope=scope, bunker_id=bunker_id)
 
 
 @commands.register("coworker.state")
@@ -796,7 +818,8 @@ def command_state(context: commands.CommandContext, payload: dict[str, Any]) -> 
         raise commands.CommandRejected(
             "coworker_category_invalid", "Choose Who, What, Where, or Why."
         )
-    return state(root, project_key, ticket_id, category=category, scope=scope)
+    bunker_id = str(payload.get("bunker_id") or "").strip()
+    return state(root, project_key, ticket_id, category=category, scope=scope, bunker_id=bunker_id)
 
 
 def _load_proposal(root: Path, project_key: str, ticket_id: str, proposal_id: str) -> dict[str, Any]:
@@ -824,7 +847,7 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
     proposal = _load_proposal(root, project_key, ticket_id, proposal_id)
     if proposal.get("status") != "pending":
         raise commands.CommandRejected("coworker_proposal_closed", "That proposal has already been handled.")
-    ticket = _ticket(root, project_key, ticket_id)
+    ticket = _ticket(root, project_key, ticket_id, str(payload.get("bunker_id") or "").strip())
     reports = {report.branch: report for report in ticket.reports}
     category = str(proposal.get("category") or "")
     scope = str(proposal.get("scope") or "combined")

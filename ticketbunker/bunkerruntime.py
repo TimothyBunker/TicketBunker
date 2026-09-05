@@ -56,12 +56,46 @@ def _write_if_changed(path: Path, text: str) -> bool:
     return True
 
 
+def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str) -> list[Path]:
+    """Copy the Bunker's accepted reports into a runtime that has none.
+
+    The database owns accepted reports; this machine's runtime holds the
+    working copies the pipeline, the truth commands, and the coworker read.
+    A runtime materialized on a machine that never ran synthesis for the
+    ticket (a replica, an imported copy) starts from the accepted text so
+    those readers see the same reports the page shows. An existing working
+    copy is never overwritten: the pipeline regenerates it and publication
+    hands it back to the database.
+    """
+    paths = layout.paths(root)
+    written: list[Path] = []
+    for report in reports:
+        content = str(report.get("content") or "")
+        scope = str(report.get("scope") or "")
+        owner = str(report.get("repository_id") or "")
+        if not content or (repository_id and owner and owner != repository_id):
+            continue
+        if scope == "combined":
+            target = paths["master"]
+        elif scope.startswith("branch:"):
+            target = layout.child_report(root, scope.removeprefix("branch:"))
+        else:
+            continue
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+        written.append(target)
+    return written
+
+
 def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     """Project one Bunker ticket into its runtime directory.
 
     Idempotent and cheap: the ticket file is rewritten only when the database
-    row changed. Returns the directory, the attached checkout, the base branch,
-    and the identities the publish step needs.
+    row changed, and accepted reports are copied in only where the runtime
+    has no working copy yet. Returns the directory, the attached checkout,
+    the base branch, and the identities the publish step needs.
     """
     detail = bunkerdb.get_ticket(bunker_id, ticket_id)
     repositories = [
@@ -96,6 +130,7 @@ def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
             payload[stamp] = existing[stamp]
     if not existing or _meaningful(existing) != _meaningful(payload) or existing.get("repo") != payload.get("repo"):
         layout.paths(root)["ticket"].write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _seed_reports(root, detail.get("reports") or [], str((repository or {}).get("id") or ""))
     info = {
         "bunker_id": bunker_id,
         "ticket_id": ticket_id,

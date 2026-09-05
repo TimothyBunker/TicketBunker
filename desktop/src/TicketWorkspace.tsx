@@ -1,5 +1,6 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import Markdown, { TRUST_LABELS } from "./Markdown";
+import FloatingActions from "./FloatingActions";
+import Markdown, { SourceActionsContext, TRUST_LABELS } from "./Markdown";
 import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
@@ -28,6 +29,49 @@ function text(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "string" || typeof value === "number") return String(value);
   return JSON.stringify(value, null, 2);
+}
+
+function personName(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["displayName", "name", "login", "username", "email"]) {
+      if (typeof record[key] === "string" && record[key]) return String(record[key]);
+    }
+  }
+  return "";
+}
+
+function stringField(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+// One mirrored comment or activity entry, whatever provider shaped it:
+// GitHub comments carry author/text/when/source, legacy comments carry
+// author/body/created, history entries carry field/from/to.
+function StreamEntry({ entry, fallbackKind }: { entry: Record<string, unknown>; fallbackKind: string }) {
+  const author = personName(entry.author ?? entry.user ?? entry.actor);
+  const when = stringField(entry, ["when", "created", "created_at", "timestamp", "time"]);
+  const kind = stringField(entry, ["kind", "event", "action"]) || fallbackKind;
+  const body = stringField(entry, ["text", "body", "detail", "message", "note"]);
+  const source = stringField(entry, ["source", "url", "html_url"]);
+  const field = stringField(entry, ["field"]);
+  const change = field ? `${field}: ${text(entry.from ?? entry.previous)} → ${text(entry.to ?? entry.value)}` : "";
+  return (
+    <article className={`stream-entry kind-${kind.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+      <header>
+        <strong>{author || "Unknown"}</strong>
+        {kind.toLowerCase() !== fallbackKind && <span className="stream-kind">{capitalize(kind)}</span>}
+        {when && <time dateTime={when} title={absoluteTime(when)}>{relativeTime(when)}</time>}
+        {/^https?:/.test(source) && <a href={source} target="_blank" rel="noreferrer">Open ↗</a>}
+      </header>
+      {body ? <Markdown compact>{body}</Markdown> : change ? <p className="stream-change">{change}</p> : <p className="fact-empty">No text</p>}
+    </article>
+  );
 }
 
 function agentProject(detail: TicketDetail): string {
@@ -107,14 +151,20 @@ function TicketTab({
     "id", "key", "title", "summary", "description", "status", "state", "type", "issue_type",
     "priority", "assignee", "reporter", "author", "labels", "tags", "created", "created_at",
     "updated", "updated_at", "project", "source_kind", "source_reference", "comments", "activity",
+    "acceptance_criteria", "acceptance", "notes", "note",
   ]);
+  const acceptance = stringField(ticket, ["acceptance_criteria", "acceptance"]);
+  const notes = stringField(ticket, ["notes", "note"]);
   const metadata = Object.entries(ticket).filter(([key, value]) => !known.has(key) && value !== "" && value !== null && value !== undefined);
   return (
     <article className="ticket-body">
       <section id="description" className="description">
-        <Markdown onOpenSource={openSource} onCopySource={copySource}>
-          {String(ticket.description || "No description was provided.")}
-        </Markdown>
+        <h2>Description</h2>
+        {ticket.description
+          ? <Markdown onOpenSource={openSource} onCopySource={copySource}>{String(ticket.description)}</Markdown>
+          : <p className="fact-empty">No description was provided.</p>}
+        {acceptance && <><h2>Acceptance criteria</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{acceptance}</Markdown></>}
+        {notes && <><h2>Notes</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{notes}</Markdown></>}
       </section>
       <section id="details" className="ticket-details">
         <h2>Details</h2>
@@ -132,10 +182,10 @@ function TicketTab({
         </dl>
       </section>
       {detail.comments.length > 0 && (
-        <section className="ticket-stream"><h2>Comments</h2>{detail.comments.map((comment, index) => <article key={index}><header><strong>{text(comment.author || comment.user)}</strong><time>{text(comment.created || comment.created_at)}</time></header><Markdown compact>{text(comment.body || comment.text)}</Markdown></article>)}</section>
+        <section id="comments" className="ticket-stream"><h2>Comments <small>{detail.comments.length}</small></h2>{detail.comments.map((comment, index) => <StreamEntry key={index} entry={comment} fallbackKind="comment" />)}</section>
       )}
       {detail.activity.length > 0 && (
-        <section className="ticket-stream"><h2>Activity</h2>{detail.activity.map((event, index) => <article key={index}><header><strong>{text(event.event || event.action || "Update")}</strong><time>{text(event.created || event.timestamp)}</time></header><p>{text(event.detail || event.message)}</p></article>)}</section>
+        <section id="activity" className="ticket-stream"><h2>Activity <small>{detail.activity.length}</small></h2>{detail.activity.map((event, index) => <StreamEntry key={index} entry={event} fallbackKind="update" />)}</section>
       )}
       {metadata.length > 0 && (
         <details className="metadata"><summary>Metadata</summary><dl>{metadata.map(([key, value]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{text(value)}</dd></div>)}</dl></details>
@@ -161,20 +211,48 @@ function SynthesisCard({
 }) {
   const value = reportTopic(report.content, topic);
   const synthesisRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const [menu, setMenu] = useState<{ top: number; left: number; text: string } | null>(null);
+  // Selecting text offers actions beside the selection; it never opens the
+  // chat by itself, so copying a phrase stays a plain copy.
   function selected(event: MouseEvent) {
+    // A press on the toolbar itself must not tear the toolbar down before
+    // its click lands.
+    if ((event.target as HTMLElement).closest?.(".floating-actions")) return;
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim() || "";
-    if (!selectedText || !synthesisRef.current?.contains(event.target as Node)) return;
+    if (!selection || !selectedText || selection.rangeCount === 0 || !synthesisRef.current?.contains(event.target as Node)) {
+      setMenu(null);
+      return;
+    }
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const card = cardRef.current?.getBoundingClientRect();
+    if (!card) return;
+    setMenu({ top: rect.top - card.top, left: Math.max(60, rect.left - card.left + rect.width / 2), text: selectedText.slice(0, 4000) });
+  }
+  function quote(selectedText: string) {
     onQuote({
       kind: "synthesis",
       category: topic,
       scope,
       branch: report.scope.startsWith("branch:") ? report.scope.slice(7) : "",
-      text: selectedText.slice(0, 4000),
+      text: selectedText,
     });
   }
   return (
-    <section className="synthesis-card" onMouseUp={selected}>
+    <section ref={cardRef} className="synthesis-card" onMouseUp={selected}>
+      {menu && (
+        <FloatingActions
+          label="Selection actions"
+          style={{ top: menu.top, left: menu.left }}
+          anchor={synthesisRef}
+          onClose={() => setMenu(null)}
+          actions={[
+            { label: "Send to chat", onSelect: () => quote(menu.text) },
+            { label: "Copy", onSelect: () => { navigator.clipboard?.writeText(menu.text).catch(() => undefined); } },
+          ]}
+        />
+      )}
       <header><h3>{topic[0].toUpperCase() + topic.slice(1)}</h3></header>
       <div ref={synthesisRef} className="synthesis-copy">
         {value.synthesis
@@ -319,6 +397,7 @@ function CoworkerDrawer({
   open,
   onOpen,
   detail,
+  bunkerId,
   repoRoot,
   scope,
   quote,
@@ -329,6 +408,7 @@ function CoworkerDrawer({
   open: boolean;
   onOpen: (value: boolean) => void;
   detail: TicketDetail;
+  bunkerId: string;
   repoRoot: string;
   scope: string;
   quote: Quote | null;
@@ -348,7 +428,7 @@ function CoworkerDrawer({
   }, [quote, onOpen]);
   useEffect(() => {
     if (!open || !repoRoot) return;
-    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot)
+    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot)
       .then(setCoworker)
       .catch((reason) => setError(String(reason)));
   }, [open, repoRoot, detail.project.key, detail.ticket.id, topic, scope]);
@@ -361,7 +441,7 @@ function CoworkerDrawer({
     setBusy(true);
     setError("");
     try {
-      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope, message, reference: quote }, repoRoot);
+      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope, message, reference: quote }, repoRoot);
       setCoworker(result);
       onQuote(null);
       form.reset();
@@ -375,10 +455,10 @@ function CoworkerDrawer({
   async function proposal(action: "accept" | "dismiss", id: string) {
     setBusy(true);
     try {
-      await command(`coworker.proposal.${action}`, { project: agentProject(detail), ticket: detail.ticket.id, proposal: id }, repoRoot);
+      await command(`coworker.proposal.${action}`, { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, proposal: id }, repoRoot);
       notify(action === "accept" ? "Report update accepted" : "Proposal dismissed");
       onReload();
-      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot);
+      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot);
       setCoworker(refreshed);
     } catch (reason) {
       setError(String(reason));
@@ -534,6 +614,11 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     setQuote({ ...value, scope, category: "what" });
     setChatOpen(true);
   }
+  function askSource(path: string, line: number) {
+    setQuote({ kind: "source", category: "what", scope: scope === "all" ? "combined" : scope, branch: "", text: `${path}:${line}`, path, line_start: line, line_end: line });
+    setChatOpen(true);
+  }
+  const sourceActions = useMemo(() => ({ open: openSource, copy: copySource, ask: askSource }), [repoRoot, scope]);
 
   if (error) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
@@ -551,14 +636,14 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <>
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
             <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
             <div id="agent-work"><AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} /></div>
-          </>}
+          </SourceActionsContext.Provider>}
         </main>
         <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
       </div>
-      <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} onReload={load} notify={notify} />
+      <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} onReload={load} notify={notify} />
     </div>
   );
 }

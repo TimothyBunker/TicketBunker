@@ -43,11 +43,46 @@ export function reportTopic(text: string, topic: Topic) {
   };
 }
 
+// One repository path the way reports and agents write it: a path with a
+// slash, or a bare file name with an extension, optionally followed by :line.
+// Mirrors the anchor checker's ANCHOR_RE so what the lint accepts is what the
+// page links.
+const PATH_PATTERN = "(?:[A-Za-z0-9_.-]*\\/[A-Za-z0-9_./-]+|[A-Za-z0-9_-]+\\.[A-Za-z][A-Za-z0-9]{0,7})";
+const REFERENCE_RE = new RegExp(`^(${PATH_PATTERN})(?::(\\d+))?$`);
+const MENTION_RE = new RegExp(`(^|[\\s(])@(${PATH_PATTERN})(?::(\\d+))?`, "g");
+const CODE_SPAN_RE = /(```[\s\S]*?```|`[^`\n]*`)/;
+
+export type SourceReference = { path: string; line: number };
+
+function link(label: string, path: string, line: number): string {
+  return `[${label}](#tb-source:${encodeURIComponent(path)}:${line})`;
+}
+
+/** Parse "src/app.py:12" or "README.md" into a reference; null for anything else. */
+export function sourceReference(text: string): SourceReference | null {
+  const value = text.trim().replace(/[.,;:]+$/, "");
+  const match = REFERENCE_RE.exec(value);
+  if (!match || !/[A-Za-z]/.test(match[1])) return null;
+  return { path: match[1], line: Number(match[2]) || 1 };
+}
+
+/** Turn @path:line mentions (either @[path]:line or @path:line) into source links, leaving code spans alone. */
 export function sourceLinks(text: string): string {
-  return text.replace(/@\[([^\]\n]+)\]:(\d+)/g, (_match, path: string, line: string) => {
-    const label = `@${path}:${line}`;
-    return `[${label}](#tb-source:${encodeURIComponent(path)}:${line})`;
-  });
+  return text
+    .split(CODE_SPAN_RE)
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+      return part
+        .replace(/@\[([^\]\n]+)\]:(\d+)/g, (_match, path: string, line: string) => link(`@${path}:${line}`, path, Number(line)))
+        .replace(MENTION_RE, (_match, lead: string, path: string, line?: string) => {
+          const trimmed = path.replace(/[.,;:]+$/, "");
+          const trailing = path.slice(trimmed.length);
+          if (!/[A-Za-z]/.test(trimmed)) return _match;
+          const label = line ? `@${trimmed}:${line}` : `@${trimmed}`;
+          return `${lead}${link(label, trimmed, Number(line) || 1)}${line ? "" : trailing}`;
+        });
+    })
+    .join("");
 }
 
 export function relativeTime(value: string): string {

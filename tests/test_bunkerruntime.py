@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ticketbunker import autoagent, bunkerdb, bunkerruntime, commands, config, credentials, remote
+from ticketbunker import autoagent, bunkerdb, bunkerruntime, commands, config, credentials, layout, remote
 from ticketbunker.service import server as service_server
 from ticketbunker.service import storage as service_storage
 
@@ -103,6 +103,21 @@ class BunkerRuntimeTests(unittest.TestCase):
     def dispatch(self, action: str, payload: dict) -> dict:
         return commands.dispatch(action, payload, self.context)
 
+    def test_coworker_reads_bunker_ticket(self) -> None:
+        self.start_work()
+        value = self.dispatch(
+            "coworker.state",
+            {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id, "category": "who", "scope": "combined"},
+        )
+        self.assertEqual(value["ticket"], "ECS-4")
+        self.assertEqual(value["messages"], [])
+        self.assertTrue(bunkerruntime.ticket_dir(self.bunker_id, "ECS-4").is_dir())
+
+    def test_coworker_names_missing_database_without_bunker(self) -> None:
+        with self.assertRaises(commands.CommandRejected) as caught:
+            self.dispatch("coworker.state", {"project": "", "ticket": "ECS-4", "category": "who", "scope": "combined"})
+        self.assertEqual(caught.exception.code, "ticket_database_missing")
+
     def start_work(self) -> str:
         branch = "Ada/ECS-4-automatic"
         git(self.repo, "checkout", "-q", "-b", branch)
@@ -139,6 +154,34 @@ class BunkerRuntimeTests(unittest.TestCase):
         self.assertEqual(detail["truth"]["companion"]["label"], "Bunker data")
         self.assertEqual(detail["truth"]["synthesis"]["status"], "current")
         self.assertTrue(any(item["name"] == branch and item["current"] for item in detail["branches"]))
+
+    def test_fresh_runtime_is_seeded_from_accepted_reports(self) -> None:
+        import shutil
+
+        branch = self.start_work()
+        with mock.patch.object(autoagent, "_spawn_worker"):
+            self.dispatch("truth.synthesize", {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id})
+        self.assertEqual(autoagent.run_worker(self.repo, debounce=0, once=True), 0)
+        runtime = bunkerruntime.ticket_dir(self.bunker_id, "ECS-4")
+        shutil.rmtree(runtime)
+
+        # Another machine, an imported copy, or a replica: the database has
+        # the reports and the runtime has nothing yet.
+        info = bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        child = layout.child_report(info["bunker"], branch)
+        self.assertTrue(child.is_file())
+        self.assertIn("<!-- tb:verified", child.read_text(encoding="utf-8"))
+        self.assertTrue(layout.paths(info["bunker"])["master"].is_file())
+        value = self.dispatch(
+            "coworker.state",
+            {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id, "category": "what", "scope": branch},
+        )
+        self.assertEqual(value["ticket"], "ECS-4")
+
+        # A working copy that already exists is left alone.
+        child.write_text("# local working copy\n", encoding="utf-8")
+        bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        self.assertEqual(child.read_text(encoding="utf-8"), "# local working copy\n")
 
     def test_bunker_citations_resolve_however_the_agent_spells_them(self) -> None:
         from ticketbunker.processors import anchorcheck
