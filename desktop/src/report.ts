@@ -60,6 +60,66 @@ function prefixOf(claim: string): { prefix: string; body: string; tag: string } 
   return { prefix: prefixed ? prefixed[1].toLowerCase() : "", body: prefixed ? rest.slice(prefixed[0].length) : rest, tag };
 }
 
+export type SourceNote = { line: number; endLine: number; label: string; tone: string; text: string; section: string };
+
+const NOTE_REF_RES = [
+  /@\[([^\]\n]+)\]:(\d+)(?:-(\d+))?/g,
+  /`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`/g,
+  /(?:^|[\s(])@([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?/g,
+];
+
+function samePath(cited: string, open: string): boolean {
+  const a = cited.replace(/^\.\//, "").replace(/^\/+/, "");
+  const b = open.replace(/^\.\//, "").replace(/^\/+/, "");
+  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+}
+
+/**
+ * Every claim in the report that anchors into ``path``, as a margin note:
+ * the line it points at, what kind of claim it is (Defect, Step, Where…),
+ * and the sentence with its tag and anchors stripped. Ordered by line.
+ */
+export function sourceNotes(text: string, path: string): SourceNote[] {
+  const notes: SourceNote[] = [];
+  const seen = new Set<string>();
+  let section = "";
+  let part = "";
+  for (const raw of text.split("\n")) {
+    if (/^## /.test(raw)) { section = raw.slice(3).trim(); part = ""; continue; }
+    if (/^### /.test(raw)) { part = raw.slice(4).trim(); continue; }
+    const claim = CLAIM_LINE_RE.exec(raw)?.[1];
+    if (!claim) continue;
+    const value = prefixOf(claim);
+    const tag = /^\[(observation|real|speculation|inference)\]/i.exec(value.tag)?.[1]?.toLowerCase() || "";
+    if (tag === "observation") continue;
+    const where = section.toLowerCase() === "reader brief" ? part : section;
+    const label = value.prefix ? value.prefix[0].toUpperCase() + value.prefix.slice(1) : where;
+    const tone = value.prefix === "defect" ? "defect" : value.prefix === "risk" ? "risk" : value.prefix === "step" || value.prefix === "next" ? "next" : tag === "real" ? "real" : "speculation";
+    const anchors: Array<[number, number]> = [];
+    for (const re of NOTE_REF_RES) {
+      re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(value.body))) {
+        if (samePath(match[1], path)) anchors.push([Number(match[2]), Number(match[3] || match[2])]);
+      }
+    }
+    if (anchors.length === 0) continue;
+    const prose = value.body
+      .replace(/@\[([^\]\n]+)\]:(\d+)(?:-(\d+))?/g, (_m, p: string, l: string, e?: string) => `${p.split("/").pop()}:${l}${e ? `-${e}` : ""}`)
+      .replace(/`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`/g, (_m, p: string, l: string, e?: string) => `\`${p.split("/").pop()}:${l}${e ? `-${e}` : ""}\``)
+      .replace(/(^|[\s(])@([A-Za-z0-9_./-]+)/g, (_m, lead: string, p: string) => `${lead}${p.split("/").pop()}`)
+      .replace(/\s+\(\s*\)\s*\.?$/, ".")
+      .trim();
+    for (const [line, endLine] of anchors) {
+      const key = `${line}:${prose}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      notes.push({ line, endLine: Math.max(line, endLine), label, tone, text: prose, section: where });
+    }
+  }
+  return notes.sort((a, b) => a.line - b.line);
+}
+
 /** Defect claims from the brief's What and the What evidence, tagged, in order. */
 export function defectClaims(text: string): string[] {
   const out: string[] = [];

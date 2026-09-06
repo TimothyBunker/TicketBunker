@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import Markdown from "./Markdown";
-import { reportTopic, planSteps } from "./report";
+import { reportTopic, planSteps, sourceNotes } from "./report";
 import { provenanceLine, verifiedStamp } from "./report";
 
 describe("standalone report presentation", () => {
@@ -75,5 +75,17 @@ describe("plan steps", () => {
     const defects = Array.from({ length: 10 }, (_, index) => `- [real] Defect: problem ${index + 1} (a.cpp:${index + 1}).`).join("\n");
     const steps = planSteps(`## Reader brief\n\n### What\n\n${defects}\n\n## What\n\n- [observation] x (diff).\n`);
     expect([...steps]).toEqual(["Fix the 10 defects listed above; the code will not build until they are gone."]);
+  });
+});
+
+
+describe("source notes", () => {
+  const report = "## Reader brief\n\n### Standing\n\n- [real] Verdict: blocked — it does not build (@[coal/a.cpp]:21).\n\n### What\n\n- [real] Defect: `coal/a.cpp:21` defines Pos3 twice; see @[coal/a.h]:7-9.\n\n### Plan\n\n- [real] Step: remove the second constructor (@[coal/a.cpp]:21).\n\n## Where\n\n- [observation] Edit already happened: coal/a.cpp (diff).\n- [speculation] grounded — Fix the conversions near @coal/a.cpp:40 first.\n";
+  it("collects anchored claims for one file with their kind and line", () => {
+    const notes = sourceNotes(report, "coal/a.cpp");
+    expect(notes.map((note) => [note.line, note.label, note.tone])).toEqual([[21, "Standing", "real"], [21, "Defect", "defect"], [21, "Step", "next"], [40, "Where", "speculation"]]);
+    expect(notes[1].text).toBe("`a.cpp:21` defines Pos3 twice; see a.h:7-9.");
+    expect(sourceNotes(report, "coal/a.h")).toEqual([{ line: 7, endLine: 9, label: "Defect", tone: "defect", text: "`a.cpp:21` defines Pos3 twice; see a.h:7-9.", section: "What" }]);
+    expect(sourceNotes(report, "other.cpp")).toEqual([]);
   });
 });

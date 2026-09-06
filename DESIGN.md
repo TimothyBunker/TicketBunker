@@ -642,7 +642,7 @@ in reading order rather than tabs: the ticket first, then **Agent work** under
 its own heading with a rule between them, so nothing is blended and nothing is
 hidden behind a control in the corner. Selecting a branch in the rail scrolls
 to Agent work with that report selected. The sticky header carries a
-persistent **Ticket / Details / Agent work** section control: each button
+persistent **Details / Description / Agent work** section control: each button
 scrolls to its section, and the one for the section currently under the
 reader's eye stays selected, so the reader can jump between the ticket, its
 facts, and the agent's report from anywhere on the page without tabs. Ticket
@@ -661,7 +661,7 @@ field change. The section headings count their entries. Whatever field names
 the provider used (`author` or `user`, `text` or `body`, `when` or `created`)
 read the same way; the viewer has no authoring control.
 
-One **Details** section follows the reading flow as a grid of labelled facts
+A **Details** section leads the ticket, before the description, as a grid of labelled facts
 rather than a two-column definition list: assignee, reporter, type, priority,
 created and updated (calendar date with relative age), labels, source with its
 outbound link, attached repositories, and linked boards. An absent value says
@@ -725,6 +725,18 @@ carries a Defects block above the plan when the report recorded any, so the
 verified errors read as one list instead of being scattered through What. The
 stored report stays plain Markdown with tagged lines; the page renders it
 with components, and no agent-authored markup is ever executed.
+
+**The editor opens on the line and shows what the report said about it.**
+Opening a reference scrolls the source editor to that line and flashes it
+for a moment. Every claim in the branch report that anchors into the open
+file becomes a margin note beside the lines it cites, in the manner of a
+shared document's comments: the cited lines are tinted (red for a Defect),
+the note names its kind (Defect, Step, Where, Standing…) and line, shows the
+claim as prose, and offers Ask about this, which quotes those lines into the
+coworker. Hovering a note brightens its lines; notes that would overlap slide
+down. Notes come from the selected branch report, or from every branch report
+when All branches is selected. The editor is a textarea over a mirror of the
+text, one element per line, so highlighting never alters the file.
 
 **File references act on click, and selection never acts on its own.** Any
 reference a report or ticket carries in the forms the anchor checker accepts

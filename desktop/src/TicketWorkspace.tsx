@@ -1,7 +1,7 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
-import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type ChatTopic, type Topic } from "./report";
+import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
@@ -158,14 +158,6 @@ function TicketTab({
   const metadata = Object.entries(ticket).filter(([key, value]) => !known.has(key) && value !== "" && value !== null && value !== undefined);
   return (
     <article className="ticket-body">
-      <section id="description" className="description">
-        <h2>Description</h2>
-        {ticket.description
-          ? <Markdown onOpenSource={openSource} onCopySource={copySource}>{String(ticket.description)}</Markdown>
-          : <p className="fact-empty">No description was provided.</p>}
-        {acceptance && <><h2>Acceptance criteria</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{acceptance}</Markdown></>}
-        {notes && <><h2>Notes</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{notes}</Markdown></>}
-      </section>
       <section id="details" className="ticket-details">
         <h2>Details</h2>
         <dl className="facts-grid">
@@ -180,6 +172,14 @@ function TicketTab({
           <div className="fact"><dt>{detail.repositories.length === 1 ? "Repository" : "Repositories"}</dt><dd>{detail.repositories.length ? detail.repositories.map((value) => value.name).join(", ") : <span className="fact-empty">None attached</span>}</dd></div>
           <div className="fact"><dt>{(trackers || []).length === 1 ? "Board" : "Boards"}</dt><dd>{(trackers || []).length ? trackersSummary(trackers) : <span className="fact-empty">None linked</span>}</dd></div>
         </dl>
+      </section>
+      <section id="description" className="description">
+        <h2>Description</h2>
+        {ticket.description
+          ? <Markdown onOpenSource={openSource} onCopySource={copySource}>{String(ticket.description)}</Markdown>
+          : <p className="fact-empty">No description was provided.</p>}
+        {acceptance && <><h2>Acceptance criteria</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{acceptance}</Markdown></>}
+        {notes && <><h2>Notes</h2><Markdown onOpenSource={openSource} onCopySource={copySource}>{notes}</Markdown></>}
       </section>
       {detail.comments.length > 0 && (
         <section id="comments" className="ticket-stream"><h2>Comments <small>{detail.comments.length}</small></h2>{detail.comments.map((comment, index) => <StreamEntry key={index} entry={comment} fallbackKind="comment" />)}</section>
@@ -638,9 +638,13 @@ function CoworkerDrawer({
   );
 }
 
+// The editor is a textarea over a mirror of the same text, one element per
+// line, so lines can be highlighted and the report's claims about this file
+// can sit in a margin beside the lines they cite.
 function SourceEditor({
   draft,
   projectRoot,
+  notes,
   onBack,
   onDraft,
   onQuote,
@@ -648,6 +652,7 @@ function SourceEditor({
 }: {
   draft: SourceDraft;
   projectRoot: string;
+  notes: SourceNote[];
   onBack: () => void;
   onDraft: (draft: SourceDraft) => void;
   onQuote: (quote: Quote) => void;
@@ -655,15 +660,58 @@ function SourceEditor({
 }) {
   const [content, setContent] = useState(draft.content);
   const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState<number>(0);
+  const [active, setActive] = useState<number | null>(null);
+  const [noteTops, setNoteTops] = useState<number[]>([]);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const noteRefs = useRef<Array<HTMLElement | null>>([]);
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const notedLines = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const note of notes) for (let line = note.line; line <= note.endLine; line += 1) if (!map.has(line) || note.tone === "defect") map.set(line, note.tone);
+    return map;
+  }, [notes]);
+
+  function lineTop(line: number): number {
+    const element = mirror.current?.children[line - 1] as HTMLElement | undefined;
+    return element ? element.offsetTop : 0;
+  }
+  function goTo(line: number, flash = true) {
+    const top = lineTop(line);
+    scroller.current?.scrollTo({ top: Math.max(0, top - 140), behavior: "smooth" });
+    if (flash) {
+      setTarget(line);
+      window.setTimeout(() => setTarget((value) => (value === line ? 0 : value)), 1800);
+    }
+    const input = editor.current;
+    if (input) {
+      const offset = lines.slice(0, Math.max(0, line - 1)).join("\n").length + (line > 1 ? 1 : 0);
+      input.setSelectionRange(offset, offset);
+    }
+  }
+
   useEffect(() => {
     setContent(draft.content);
-    const lineStart = draft.content.split("\n").slice(0, Math.max(0, draft.line - 1)).join("\n").length + (draft.line > 1 ? 1 : 0);
-    requestAnimationFrame(() => {
-      editor.current?.focus();
-      editor.current?.setSelectionRange(lineStart, lineStart);
-    });
+    // Wait one frame so the mirror has laid out the new text.
+    requestAnimationFrame(() => requestAnimationFrame(() => { editor.current?.focus({ preventScroll: true }); goTo(draft.line); }));
   }, [draft]);
+
+  // Notes sit beside their lines; when two would overlap, the later one
+  // slides down. Measured after render, so long notes push their neighbours.
+  useLayoutEffect(() => {
+    const tops: number[] = [];
+    let floor = 0;
+    notes.forEach((note, index) => {
+      const wanted = lineTop(note.line);
+      const top = Math.max(wanted, floor);
+      tops.push(top);
+      floor = top + (noteRefs.current[index]?.offsetHeight || 0) + 6;
+    });
+    setNoteTops(tops);
+  }, [notes, lines, draft.settings.line_wrap]);
+
   async function save() {
     setBusy(true);
     try {
@@ -686,10 +734,50 @@ function SourceEditor({
     const end = start + selected.split("\n").length - 1;
     onQuote({ kind: "source", category: "what", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: selected.slice(0, 4000) });
   }
+  function askAboutNote(note: SourceNote) {
+    const text = lines.slice(note.line - 1, note.endLine).join("\n");
+    onQuote({ kind: "source", category: note.tone === "defect" || note.section === "What" ? "what" : "standing", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: note.line, line_end: note.endLine, unsaved: content !== draft.content, text: text.slice(0, 4000) || note.text });
+  }
+  const wrap = Boolean(draft.settings.line_wrap);
   return (
-    <section className="source-editor">
-      <header><button className="back-control" onClick={onBack}>← Ticket</button><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}</small></div><div><button onClick={quoteSelection}>Ask about selection</button><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
-      <textarea ref={editor} value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} wrap={draft.settings.line_wrap ? "soft" : "off"} style={{ tabSize: draft.settings.tab_size || 4 }} />
+    <section className={notes.length ? "source-editor annotated" : "source-editor"}>
+      <header><button className="back-control" onClick={onBack}>← Ticket</button><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}{notes.length > 0 && ` · ${notes.length} note${notes.length === 1 ? "" : "s"} from the report`}</small></div><div><button onClick={quoteSelection}>Ask about selection</button><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
+      <div ref={scroller} className="editor-scroll">
+        <div className={wrap ? "editor-surface wrap" : "editor-surface"} style={{ tabSize: draft.settings.tab_size || 4 }}>
+          <div className="editor-gutter" aria-hidden="true">{lines.map((_, index) => <div key={index} className={notedLines.has(index + 1) ? `gutter-line noted ${notedLines.get(index + 1)}` : "gutter-line"} style={{ height: lineTop(index + 2) - lineTop(index + 1) || undefined }}>{index + 1}</div>)}</div>
+          <div className="editor-stack">
+            <div ref={mirror} className="editor-mirror" aria-hidden="true">
+              {lines.map((line, index) => {
+                const number = index + 1;
+                const classes = ["mirror-line"];
+                if (notedLines.has(number)) classes.push("noted", notedLines.get(number) || "");
+                if (target === number) classes.push("target");
+                if (active !== null && notes[active] && number >= notes[active].line && number <= notes[active].endLine) classes.push("active");
+                return <div key={index} className={classes.join(" ")}>{line || " "}</div>;
+              })}
+            </div>
+            <textarea ref={editor} value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} wrap={wrap ? "soft" : "off"} rows={lines.length} />
+          </div>
+          {notes.length > 0 && (
+            <aside className="editor-notes" aria-label="Report notes for this file">
+              {notes.map((note, index) => (
+                <article
+                  key={`${note.line}-${index}`}
+                  ref={(element) => { noteRefs.current[index] = element; }}
+                  className={`editor-note ${note.tone}${active === index ? " active" : ""}`}
+                  style={{ top: noteTops[index] ?? lineTop(note.line) }}
+                  onMouseEnter={() => setActive(index)}
+                  onMouseLeave={() => setActive((value) => (value === index ? null : value))}
+                >
+                  <header><span className={`note-label ${note.tone}`}>{note.label}</span><button type="button" onClick={() => goTo(note.line)}>{note.endLine > note.line ? `Lines ${note.line}–${note.endLine}` : `Line ${note.line}`}</button></header>
+                  <Markdown compact>{note.text}</Markdown>
+                  <footer><button type="button" onClick={() => askAboutNote(note)}>Ask about this</button></footer>
+                </article>
+              ))}
+            </aside>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -698,7 +786,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [error, setError] = useState("");
   const [scope, setScope] = useState("");
-  const [section, setSection] = useState("description");
+  const [section, setSection] = useState("details");
   const [chatOpen, setChatOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [editor, setEditor] = useState<SourceDraft | null>(null);
@@ -729,7 +817,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   }, [synthesisStatus, bunker.id, reference.id]);
   useEffect(() => {
     if (!detail || editor) return;
-    const targets = ["description", "details", "agent-work"].map((id) => document.getElementById(id)).filter((value): value is HTMLElement => Boolean(value));
+    const targets = ["details", "description", "agent-work"].map((id) => document.getElementById(id)).filter((value): value is HTMLElement => Boolean(value));
     if (targets.length === 0 || typeof IntersectionObserver === "undefined") return;
     const visible = new Map<string, number>();
     const observer = new IntersectionObserver((entries) => {
@@ -790,6 +878,13 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   }
   const sourceActions = useMemo(() => ({ open: openSource, copy: copySource, ask: askSource }), [repoRoot, scope]);
 
+  const editorNotes = useMemo<SourceNote[]>(() => {
+    if (!editor || !detail) return [];
+    const branchReports = detail.reports.filter((value) => value.scope.startsWith("branch:"));
+    const chosen = scope !== "all" ? branchReports.filter((value) => value.scope === `branch:${scope}`) : branchReports;
+    const source = chosen.length ? chosen : branchReports;
+    return source.flatMap((report) => sourceNotes(report.content, editor.path));
+  }, [editor?.path, detail, scope]);
   if (error) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;
@@ -801,12 +896,12 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
         <button className="back-control" onClick={onBack}>← Tickets</button>
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
         {!editor && <nav className="section-jumps" aria-label="Sections">
-          {[["description", "Ticket"], ["details", "Details"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
+          {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
         </nav>}
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
             <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
             <div id="agent-work"><AgentTab detail={detail} bunkerId={bunker.id} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} notify={notify} /></div>
           </SourceActionsContext.Provider>}

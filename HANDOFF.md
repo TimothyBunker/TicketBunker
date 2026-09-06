@@ -328,6 +328,10 @@ new Bunkers.
   head (`check` stage); outcomes prefill What and State and a failure asks
   for a blocked verdict. The Checks tab detects suggestions from the
   repository root's manifests; `application.project.checks.detect`.
+- Details leads the ticket page, then Description. The source editor scrolls
+  to and flashes the opened line, and shows the report's anchored claims for
+  the open file as margin notes beside tinted lines (`sourceNotes` in
+  `report.ts`), each with Ask about this.
 - The report page reads first: trust tags are muted words in a fixed column,
   references show file name and line, the four cards share one fixed height
   with the body scrolling and Full trail pinned to the bottom, and Standing

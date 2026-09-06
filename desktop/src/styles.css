@@ -207,7 +207,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .facts-grid dd a { color: var(--blue); font-weight: 650; text-decoration: none; }
 .facts-grid dd a:hover { text-decoration: underline; }
 .fact-empty { color: #97a1b1; font-style: italic; }
-#description, #details { scroll-margin-top: 140px; }
+#description, #details, #agent-work { scroll-margin-top: 140px; }
 .back-control { padding: 0; border-color: transparent; color: #627086; background: transparent; }
 .back-control:hover { color: var(--blue); background: transparent; }
 .ticket-heading > p { margin: 0 0 4px; color: #6d7a8e; font-size: 10px; }
@@ -252,8 +252,8 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .confirmation > div { display: flex; justify-content: flex-end; gap: 6px; }
 
 .ticket-body, .agent-work { max-width: 900px; margin: 0 auto; }
-.description { padding-bottom: 28px; border-bottom: 1px solid var(--line); }
-.ticket-details { padding: 30px 0 22px; }
+.ticket-details { padding: 4px 0 22px; border-bottom: 1px solid var(--line); }
+.description { padding: 26px 0 28px; border-bottom: 1px solid var(--line); }
 .ticket-details h2, .ticket-stream h2 { margin-bottom: 13px; font-size: 13px; }
 .ticket-details dl:not(.facts-grid) { display: grid; grid-template-columns: 1fr 1fr; column-gap: 38px; }
 .ticket-details dl:not(.facts-grid) div { grid-template-columns: 90px minmax(0, 1fr); }
@@ -350,7 +350,45 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .source-editor > header strong { overflow: hidden; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .source-editor > header small { color: #7d899a; font-size: 8px; }
 .source-editor > header > div:last-child { display: flex; gap: 6px; }
-.source-editor > textarea { height: 100%; padding: 16px 18px; border: 0; border-radius: 0; background: #151b25; color: #e2e8f0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.55; resize: none; }
+.editor-scroll { min-height: 0; overflow: auto; background: #151b25; }
+.editor-surface { --code-font: ui-monospace, SFMono-Regular, Consolas, monospace; --code-size: 12px; --code-line: 1.55; display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: start; min-height: 100%; padding: 16px 0 40vh; }
+.source-editor.annotated .editor-surface { grid-template-columns: 52px minmax(0, 1fr) 300px; }
+.editor-gutter { position: sticky; left: 0; z-index: 2; padding-right: 10px; color: #4f5b6e; background: #151b25; font-family: var(--code-font); font-size: 11px; line-height: var(--code-line); text-align: right; user-select: none; }
+.gutter-line { padding: 0 4px; border-right: 2px solid transparent; }
+.gutter-line.noted { color: #b9c5d6; border-right-color: #3b5f8f; }
+.gutter-line.noted.defect { border-right-color: #c94b4b; }
+.editor-stack { position: relative; min-width: 0; }
+.editor-mirror, .editor-stack > textarea { margin: 0; padding: 0 18px 0 14px; font-family: var(--code-font); font-size: var(--code-size); line-height: var(--code-line); tab-size: inherit; }
+.editor-mirror { color: transparent; white-space: pre; overflow: hidden; }
+.editor-surface.wrap .editor-mirror { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mirror-line { min-height: calc(var(--code-size) * var(--code-line)); border-radius: 2px; transition: background-color .25s ease; }
+.mirror-line.noted { background: rgba(59, 95, 143, .22); }
+.mirror-line.noted.defect { background: rgba(201, 75, 75, .22); }
+.mirror-line.active { background: rgba(59, 95, 143, .45); }
+.mirror-line.active.defect { background: rgba(201, 75, 75, .42); }
+.mirror-line.target { animation: line-flash 1.8s ease-out; }
+@keyframes line-flash { 0% { background: rgba(255, 214, 102, .55); } 60% { background: rgba(255, 214, 102, .35); } 100% { background: transparent; } }
+.mirror-line.target.noted { animation-name: line-flash-noted; }
+@keyframes line-flash-noted { 0% { background: rgba(255, 214, 102, .55); } 100% { background: rgba(59, 95, 143, .22); } }
+.editor-stack > textarea { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: transparent; color: #e2e8f0; caret-color: #ffd666; resize: none; overflow: hidden; white-space: pre; }
+.editor-surface.wrap .editor-stack > textarea { white-space: pre-wrap; overflow-wrap: anywhere; }
+.editor-stack > textarea:focus { outline: none; }
+.editor-notes { position: relative; min-height: 100%; padding: 0 14px 0 12px; border-left: 1px solid #263141; }
+.editor-note { position: absolute; left: 12px; right: 14px; padding: 8px 10px 6px; border: 1px solid #2c3950; border-left-width: 3px; border-radius: 6px; background: #1c2431; color: #d5dde8; font-size: 11px; transition: top .2s ease, border-color .15s ease; }
+.editor-note.defect { border-left-color: #c94b4b; }
+.editor-note.real { border-left-color: #4fa172; }
+.editor-note.next { border-left-color: #4a86d3; }
+.editor-note.risk { border-left-color: #d39b3a; }
+.editor-note.speculation { border-left-color: #b89a4a; }
+.editor-note.active, .editor-note:hover { border-color: #4a86d3; border-left-color: inherit; }
+.editor-note > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.editor-note > header button, .editor-note > footer button { min-height: 20px; padding: 0 4px; border: 0; color: #8fb3e6; background: transparent; font-size: 9.5px; font-weight: 650; }
+.editor-note > footer { margin-top: 4px; }
+.note-label { padding: 1px 6px; border-radius: 3px; background: #2c3950; font-size: 8.5px; font-weight: 760; letter-spacing: .05em; text-transform: uppercase; color: #c9d4e3; }
+.note-label.defect { background: #5a2626; color: #f3c2c2; }
+.editor-note .markdown.compact { color: #d5dde8; font-size: 11px; line-height: 1.5; }
+.editor-note .markdown.compact code { color: #ffd666; background: transparent; }
+.editor-note .markdown.compact p { margin: 0; }
 .direct-editor { width: 100vw; height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); background: #151b25; }
 .direct-editor > header { display: grid; grid-template-columns: 210px 84px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding-right: 14px; border-bottom: 1px solid #d9dee6; background: #fff; }
 .direct-editor > header .brand { border: 0; }
