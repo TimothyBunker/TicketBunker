@@ -139,7 +139,7 @@ Your stages, in order:
      Standing verdict blocked.
 2. **Write.** One report component per branch. Start with `## Reader brief`:
    `### Standing` first, then `### Who`, `### What`, `### Where`, `### Why`,
-   and `### Checklist` when the form offers one; then preserve the full
+   `### Checklist` when the form offers one, and `### Plan`; then preserve the full
    evidence sections `## Who`, `## What`, `## Where`, `## Why`, and
    `## State`.
    - **Standing** is the reader's first answer: where does this stand.
@@ -150,6 +150,12 @@ Your stages, in order:
      means something must be resolved before the work can continue, such as
      code that does not build; looks done means every checklist item is
      Done and nothing in the risk observations contradicts it.
+   - **Plan** turns the findings into what to do: three to seven ordered
+     `Step:` claims a person could follow from where the ticket stands,
+     each one imperative sentence with the place to act. Definite errors
+     and whatever stops the build come first, then the checklist's Missing
+     and Partial items, then verification. A step says what to do, never
+     merely restates a Defect or a checklist item.
    - **Checklist** judges each of the ticket's own items against the code
      on the branch: `Done:`, `Partial:`, `Missing:`, or `Unclear:` followed
      by the item text and its evidence. Done and Partial need an anchor;

@@ -33,7 +33,7 @@ type Props = {
 const CLAIM_RE = /^\s*\[(observation|real|speculation|inference)\]\s*(?:(grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?/i;
 // A proactive claim names its aspect after the tag: "Risk:" for something
 // that could cause the reader problems, "Next:" for one thing to do now.
-const ASPECT_RE = /^\s*(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect):\s*/i;
+const ASPECT_RE = /^\s*(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect|Step):\s*/i;
 
 export const ASPECT_LABELS: Record<string, { label: string; title: string }> = {
   defect: { label: "Defect", title: "An error the agent verified by reading both sides: a declaration that does not match its definition, a duplicate definition, a misspelled identifier, a missing import. Always anchored." },

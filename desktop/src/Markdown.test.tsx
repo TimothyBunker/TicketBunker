@@ -104,6 +104,9 @@ describe("standing and checklist", () => {
     render(<Markdown compact>{"- [real] Defect: PositionComponent.cpp defines the Pos3 constructor twice (src/p.cpp:21)."}</Markdown>);
     expect(screen.getByText("Defect")).toBeTruthy();
     expect(document.querySelector("li.claim-real.aspect-defect")).toBeTruthy();
+    render(<Markdown compact>{"- [real] Step: remove the duplicate constructor (src/p.cpp:21)."}</Markdown>);
+    expect(screen.queryByText(/Step:/)).toBeNull();
+    expect(document.querySelector("li.claim-real.aspect-step")).toBeTruthy();
     expect(document.querySelector("li.claim-real.aspect-missing")).toBeTruthy();
     expect(screen.queryByText(/Done:/)).toBeNull();
   });

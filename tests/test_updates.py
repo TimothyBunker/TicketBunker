@@ -22,6 +22,11 @@ REPORT = """\
 
 - [real] Defect: @[coal/components/position/PositionComponent.cpp]:21 defines the Pos3 constructor twice.
 
+### Plan
+
+- [real] Step: remove the duplicate Pos3 constructor (@[coal/components/position/PositionComponent.cpp]:21).
+- [speculation] grounded — Step: rebuild and run the position tests (check).
+
 ### Checklist
 
 - [real] Done: CommonTypes (@[coal/common/types/CommonTypes.h]:11).
@@ -46,6 +51,8 @@ class ComposeUpdateTests(unittest.TestCase):
         self.assertIn("- ✅ CommonTypes (`coal/common/types/CommonTypes.h:11`).", text)
         self.assertIn("- ❌ WorldPos3 and LocalPos3 (ticket).", text)
         self.assertEqual(value["defects"], ["`coal/components/position/PositionComponent.cpp:21` defines the Pos3 constructor twice."])
+        self.assertEqual(value["plan"], ["remove the duplicate Pos3 constructor (`coal/components/position/PositionComponent.cpp:21`).", "rebuild and run the position tests (check)."])
+        self.assertIn("**Plan:**\n1. remove the duplicate Pos3 constructor", text)
         self.assertIn("**Defects found:**\n- `coal/components/position/PositionComponent.cpp:21` defines the Pos3 constructor twice.", text)
         self.assertIn("_Synthesized by TicketBunker for ECS-2 on `bunker/ECS-2` at `53481efa04ad`._", text)
         for token in ("[real]", "[speculation]", "grounded —", "@["):

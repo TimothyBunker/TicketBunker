@@ -46,7 +46,7 @@ class ReaderBriefTests(unittest.TestCase):
         )
 
         self.assertIn("## Reader brief", form)
-        self.assertEqual(form.count("reader brief "), 6)  # Standing, Who, What, Where, Why, Checklist
+        self.assertEqual(form.count("reader brief "), 7)  # Standing, Who, What, Where, Why, Checklist, Plan
         self.assertEqual(form.count("highest apparent importance first"), 3)
         filled = fill(form)
         ok, findings = reportlint.gate(filled)
@@ -229,6 +229,18 @@ class StandingAndChecklistTests(unittest.TestCase):
         two = self.brief(what="- [real] Defect: one (`ticketbunker/viewer.py:1`).\n- [real] Defect: two (`ticketbunker/viewer.py:1`).")
         self.assertTrue(any("Defect: claims" in f.message for f in reportlint.lint(two)))
 
+    def test_plan_is_one_to_seven_ordered_steps(self) -> None:
+        good = "### Plan\n\n- [real] Step: remove the duplicate constructor (`ticketbunker/viewer.py:1`).\n- [speculation] grounded — Step: run the build (check).\n\n"
+        text = self.brief().replace("\n## Who\n", "\n" + good + "## Who\n", 1)
+        ok, findings = reportlint.gate(text)
+        self.assertTrue(ok, [str(f) for f in findings])
+        unlabeled = text.replace("- [real] Step: remove", "- [real] Remove")
+        self.assertIn("plan", {f.check for f in reportlint.lint(unlabeled)})
+        too_many = text.replace(good, "### Plan\n\n" + "- [real] Step: x (`ticketbunker/viewer.py:1`).\n" * 8 + "\n")
+        self.assertTrue(any("max 7" in f.message for f in reportlint.lint(too_many)))
+        empty = text.replace(good, "### Plan\n\nNothing to do.\n\n")
+        self.assertIn("plan", {f.check for f in reportlint.lint(empty)})
+
     def test_checklist_marks_each_item(self) -> None:
         good = (
             "- [real] Done: CommonTypes (`ticketbunker/viewer.py:1`).\n"
@@ -254,6 +266,9 @@ class StandingAndChecklistTests(unittest.TestCase):
         self.assertIn("Verdict:", brief)
         self.assertIn("### Checklist", brief)
         self.assertIn("1) Position component compiles; 2) Implemented › CommonTypes", brief)
+        self.assertIn("### Plan", brief)
+        self.assertLess(brief.index("### Checklist"), brief.index("### Plan"))
+        self.assertIn("### Plan", scaffold.build({"id": "X-1"}, {}, "b"))
         self.assertNotIn("1) [8/21/26]", brief)
         self.assertEqual(scaffold.checklist_items({"description": "Just a sentence here."}), ["Just a sentence here."])
         self.assertEqual(scaffold.checklist_items({"description": ""}), [])

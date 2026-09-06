@@ -19,11 +19,13 @@ BRIEF_PARTS = ("Who", "What", "Where", "Why")
 # without them stay admissible.
 STANDING_PART = "Standing"
 CHECKLIST_PART = "Checklist"
+PLAN_PART = "Plan"
+PLAN_STEP_LIMITS = (1, 7)
 VERDICTS = ("not started", "in progress", "blocked", "looks done")
 CHECKLIST_MARKS = ("done", "partial", "missing", "unclear")
 MAX_CHECKLIST_CLAIMS = 12
 BRIEF_CLAIM_LIMITS = {"Who": 2, "What": 2, "Where": 1, "Why": 2}
-BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170, "Standing": 110, "Checklist": 320}
+BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170, "Standing": 110, "Checklist": 320, "Plan": 260}
 # Each brief part may carry one proactive Risk claim and one Next claim on
 # top of its ordinary claims; they are what keeps a report task-oriented
 # without letting it sprawl.
@@ -50,10 +52,13 @@ _CLAIM_PREFIX = (
 VERDICT_RE = re.compile(_CLAIM_PREFIX + r"Verdict:\s*(not started|in progress|blocked|looks done)\b", re.IGNORECASE)
 STANDING_ASPECT_RE = re.compile(_CLAIM_PREFIX + r"(Next|Ask):", re.IGNORECASE)
 CHECKLIST_RE = re.compile(_CLAIM_PREFIX + r"(Done|Partial|Missing|Unclear):", re.IGNORECASE)
+STEP_RE = re.compile(_CLAIM_PREFIX + r"Step:", re.IGNORECASE)
 # Who is about people, so a [real] Who claim may rest on the ticket or the
-# people observations instead of a source path.
+# people observations instead of a source path. Standing, Checklist, and
+# Plan claims may likewise rest on a named observation.
 WHO_CITATION_RE = re.compile(
-    r"\([^)]*\b(?:ticket|authorship|people|comments?|config)\b[^)]*\)|ticket\.json|observations/(?:authorship|people)\.json",
+    r"\([^)]*\b(?:ticket|authorship|people|comments?|config|check|scan|diff|risk|locate|merge[_ ]history)\b[^)]*\)"
+    r"|ticket\.json|observations/[A-Za-z_]+\.json",
     re.IGNORECASE,
 )
 NOBODY_RE = re.compile(
@@ -204,6 +209,19 @@ def lint(text: str) -> list[Finding]:
             words = sum(len(line.split()) for line in brief[STANDING_PART] if line.strip())
             if words > BRIEF_WORD_LIMITS[STANDING_PART]:
                 findings.append(Finding("brief-length", "error", f"Reader brief 'Standing' is {words} words (max {BRIEF_WORD_LIMITS[STANDING_PART]})"))
+        if PLAN_PART in brief:
+            claims = [line for line in brief[PLAN_PART] if line.strip().startswith(("-", "*"))]
+            low, high = PLAN_STEP_LIMITS
+            if len(claims) < low:
+                findings.append(Finding("plan", "error", "Reader brief 'Plan' needs at least one Step: claim"))
+            if len(claims) > high:
+                findings.append(Finding("plan", "error", f"Reader brief 'Plan' has {len(claims)} steps (max {high})"))
+            for line in claims:
+                if not STEP_RE.match(line):
+                    findings.append(Finding("plan", "error", f"Reader brief 'Plan' claims begin Step:: {line.strip()[:80]}"))
+            words = sum(len(line.split()) for line in brief[PLAN_PART] if line.strip())
+            if words > BRIEF_WORD_LIMITS[PLAN_PART]:
+                findings.append(Finding("brief-length", "error", f"Reader brief 'Plan' is {words} words (max {BRIEF_WORD_LIMITS[PLAN_PART]})"))
         if CHECKLIST_PART in brief:
             claims = [line for line in brief[CHECKLIST_PART] if line.strip().startswith(("-", "*"))]
             if not claims:
@@ -236,7 +254,7 @@ def lint(text: str) -> list[Finding]:
     for name, is_who, body in groups:
         # Ask: claims in Standing and Missing:/Unclear: checklist items rest on
         # the ticket or on people, not on a source path.
-        people_cited = is_who or name.endswith(STANDING_PART) or name.endswith(CHECKLIST_PART)
+        people_cited = is_who or name.endswith(STANDING_PART) or name.endswith(CHECKLIST_PART) or name.endswith(PLAN_PART)
         claims = [l for l in body if l.strip().startswith(("-", "*"))]
         unlabeled = [l for l in claims if not STRATUM_RE.match(l)]
         if claims and unlabeled:

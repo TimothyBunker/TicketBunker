@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import Markdown from "./Markdown";
-import { reportTopic } from "./report";
+import { reportTopic, planSteps } from "./report";
 import { provenanceLine, verifiedStamp } from "./report";
 
 describe("standalone report presentation", () => {
@@ -57,3 +57,18 @@ describe("report provenance", () => {
   });
 });
 
+
+
+describe("plan steps", () => {
+  const withPlan = "## Reader brief\n\n### Standing\n\n- [real] Next: fix the header first (a.h:7).\n\n### What\n\n- [real] Defect: duplicate constructor (a.cpp:21).\n\n### Checklist\n\n- [real] Missing: WorldPos3 (ticket).\n\n### Plan\n\n- [real] Step: remove the duplicate constructor (a.cpp:21).\n- [speculation] grounded — Step: run the build (check).\n\n## What\n\n- [observation] x (diff).\n";
+  it("prefers the report's own plan", () => {
+    const steps = planSteps(withPlan);
+    expect(steps).toEqual(["[real] remove the duplicate constructor (a.cpp:21).", "[speculation] grounded — run the build (check)."]);
+    expect(steps.derived).toBeUndefined();
+  });
+  it("derives a plan from next, defects, and unfinished items when there is none", () => {
+    const steps = planSteps(withPlan.replace(/### Plan[\s\S]*?## What/, "## What"));
+    expect(steps.derived).toBe(true);
+    expect([...steps]).toEqual(["[real] fix the header first (a.h:7).", "[real] Fix: duplicate constructor (a.cpp:21).", "[real] Implement: WorldPos3 (ticket)."]);
+  });
+});

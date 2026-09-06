@@ -328,10 +328,13 @@ new Bunkers.
   for a blocked verdict. The Checks tab detects suggestions from the
   repository root's manifests; `application.project.checks.detect`.
 - The Reader brief opens with `### Standing` (one Verdict claim, optional
-  `Next:` and `Ask:`) and closes with `### Checklist` (one `Done:`/`Partial:`/
-  `Missing:`/`Unclear:` claim per ticket item) when the ticket has items. The
-  lint checks their shape; older reports without them stay admissible. The
-  page renders Standing above the four cards with the verdict as a pill.
+  `Next:` and `Ask:`), carries `### Checklist` (one `Done:`/`Partial:`/
+  `Missing:`/`Unclear:` claim per ticket item) when the ticket has items, and
+  closes with `### Plan` (one to seven ordered `Step:` claims). The lint checks
+  their shape; older reports without them stay admissible. The page renders
+  Standing as a section above the four cards with the verdict as a pill, the
+  plan numbered (derived from Next, Defects, and unfinished items when a
+  report has none), and the checklist marked.
 - The bootstrap runs nine stages: the six Git stages plus `locate`, `people` (recent
   authors of the touched files on the baseline, last committer on each other
   branch of the ticket) and `risk` (baseline overlap since the merge-base,

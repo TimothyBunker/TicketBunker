@@ -191,6 +191,16 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
             "whole tree at the branch head (what the code actually contains and whether it works), never against this "
             "branch's diff alone or the ticket's own wording; items: " + numbered
         ))
+    lines += ["", "### Plan", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief Plan: three to seven ordered `Step:` claims a person could follow to finish this ticket "
+        "from where it stands, each one imperative sentence naming the place to act (`- [real] Step: <do this> "
+        "(@[path]:line)`, or `[speculation] <rank> — Step:` when the place is inferred; a step without a source place "
+        "may cite the evidence it rests on, such as (check) or (ticket)); order them so each unblocks the next: definite "
+        "errors and anything that stops the code from building first, then the checklist's Missing and Partial items, "
+        "then verification (the configured check, or the build and tests this project uses); if the ticket looks done, "
+        "one step saying what to verify before closing it; never restate a Defect or checklist item without saying what to do"
+    ))
     lines.append("")
 
     lines += ["## Who", ""]

@@ -1,7 +1,7 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
-import { briefPart, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
+import { briefPart, planSteps, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
@@ -270,12 +270,14 @@ function SynthesisCard({
 }
 
 // The reader's first answers, above the four evidence questions: the verdict
-// and its reason, the first thing to do, whom to ask, and the ticket's own
-// items judged against the code.
+// and its reason, the first thing to do, whom to ask, the plan to finish,
+// and the ticket's own items judged against the code. A section with light
+// highlighting, not a panel: the verdict pill is the only strong colour.
 function Standing({ report, scope }: { report: TicketDetail["reports"][number]; scope: string }) {
   const standing = briefPart(report.content, "Standing");
   const checklist = briefPart(report.content, "Checklist");
-  if (!standing && !checklist) return null;
+  const plan = planSteps(report.content);
+  if (!standing && !checklist && plan.length === 0) return null;
   const claims = standing.split("\n").filter((line) => /^\s*[-*]\s/.test(line));
   const verdictLine = claims.find((line) => verdictOf(line.replace(/^\s*[-*]\s*/, "")));
   const verdict = verdictLine ? verdictOf(verdictLine.replace(/^\s*[-*]\s*/, "")) : null;
@@ -284,17 +286,24 @@ function Standing({ report, scope }: { report: TicketDetail["reports"][number]; 
   const verdictText = verdictLine && verdict ? verdictLine.replace(/^\s*[-*]\s*/, "").replace(/Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?/i, "") : "";
   return (
     <ReportPlaceContext.Provider value={place}>
-      <section className="standing">
+      <section className="standing" aria-label="Standing">
+        <h3 className="standing-eyebrow">Standing</h3>
         {verdict && (
           <div className={`verdict-row verdict-${verdict.verdict.replace(/\s+/g, "-")}`}>
             <span className="verdict-pill">{VERDICT_LABELS[verdict.verdict] || verdict.verdict}</span>
             <Markdown compact>{`- ${verdictText}`}</Markdown>
           </div>
         )}
-        {others && <Markdown compact>{others}</Markdown>}
+        {others && <div className="standing-lines"><Markdown compact>{others}</Markdown></div>}
+        {plan.length > 0 && (
+          <div className="plan">
+            <h3 className="standing-eyebrow">{plan.derived ? "Plan · from the findings" : "Plan"}</h3>
+            <ol>{plan.map((step, index) => <li key={index}><Markdown compact>{`- ${step}`}</Markdown></li>)}</ol>
+          </div>
+        )}
         {checklist && (
           <div className="checklist">
-            <h3>Checklist</h3>
+            <h3 className="standing-eyebrow">Checklist</h3>
             <Markdown compact>{checklist}</Markdown>
           </div>
         )}

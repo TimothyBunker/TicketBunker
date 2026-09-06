@@ -40,6 +40,60 @@ export function briefPart(text: string, label: string): string {
   return subsection(text, "Reader brief", label);
 }
 
+const CLAIM_LINE_RE = /^\s*[-*]\s+(\[(?:observation|real|speculation|inference)\].*)$/i;
+const TAG_RE = /^\[(observation|real|speculation|inference)\]\s*(?:(grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?/i;
+const PREFIX_RE = /^(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect|Step):\s*/i;
+
+function claimLines(block: string): string[] {
+  return block.split("\n").map((line) => CLAIM_LINE_RE.exec(line)?.[1] || "").filter(Boolean);
+}
+
+function prefixOf(claim: string): { prefix: string; body: string; tag: string } {
+  const tagged = TAG_RE.exec(claim);
+  const tag = tagged ? tagged[0] : "";
+  const rest = claim.slice(tag.length);
+  const prefixed = PREFIX_RE.exec(rest);
+  return { prefix: prefixed ? prefixed[1].toLowerCase() : "", body: prefixed ? rest.slice(prefixed[0].length) : rest, tag };
+}
+
+export type PlanSteps = string[] & { derived?: boolean };
+
+/**
+ * The report's plan as claim strings ("[real] do this (path:1)"), in order.
+ * A report with a `### Plan` supplies its own steps; older reports get one
+ * derived from Next, the Defects under What, and the checklist's Partial and
+ * Missing items, marked `derived` so the page can say so.
+ */
+export function planSteps(text: string): PlanSteps {
+  const own = claimLines(subsection(text, "Reader brief", "Plan"))
+    .map((claim) => prefixOf(claim))
+    .filter((value) => value.prefix === "step")
+    .map((value) => `${value.tag}${value.body}`);
+  if (own.length) return own;
+  const steps: PlanSteps = [];
+  const seen = new Set<string>();
+  const push = (tag: string, body: string) => {
+    const key = body.trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    steps.push(`${tag}${key}`);
+  };
+  for (const claim of claimLines(subsection(text, "Reader brief", "Standing"))) {
+    const value = prefixOf(claim);
+    if (value.prefix === "next") push(value.tag, value.body);
+  }
+  for (const claim of [...claimLines(subsection(text, "Reader brief", "What")), ...claimLines(section(text, "What"))]) {
+    const value = prefixOf(claim);
+    if (value.prefix === "defect") push(value.tag, `Fix: ${value.body}`);
+  }
+  for (const claim of claimLines(subsection(text, "Reader brief", "Checklist"))) {
+    const value = prefixOf(claim);
+    if (value.prefix === "missing" || value.prefix === "partial") push(value.tag, `${value.prefix === "missing" ? "Implement" : "Finish"}: ${value.body}`);
+  }
+  steps.derived = true;
+  return steps;
+}
+
 export function reportTopic(text: string, topic: Topic) {
   const label = topic[0].toUpperCase() + topic.slice(1);
   return {

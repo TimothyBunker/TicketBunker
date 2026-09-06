@@ -444,15 +444,22 @@ opens with a `### Standing` part: exactly one Verdict claim (`Verdict: not
 started | in progress | blocked | looks done — <the single most important
 finding, anchored>`), then at most one `Next:` and one `Ask:` claim. When the
 ticket carries items (acceptance criteria, then the description's bullets,
-deduplicated and bounded to twelve), the brief closes with a `### Checklist`
-part that judges each item against the code on the branch as `Done:`,
+deduplicated and bounded to twelve), the brief carries a `### Checklist`
+part that judges each item against the code at the branch head as `Done:`,
 `Partial:`, `Missing:`, or `Unclear:` with its evidence; Done and Partial need
-an anchor, Missing and Unclear may cite the ticket. The scaffold offers both
-parts as agent areas, the lint checks their shape, and reports published
-before they existed stay admissible. The viewer renders Standing above the
-four evidence cards: the verdict as a pill, its finding beside it, Next and
-Ask beneath, and the checklist with one mark per item; the four cards remain
-the audit trail.
+an anchor, Missing and Unclear may cite the ticket. The brief closes with a
+`### Plan`: one to seven ordered `Step:` claims a person could follow from
+where the ticket stands, each an imperative sentence with the place to act,
+definite errors and whatever stops the build first, then the checklist's
+Missing and Partial items, then verification. The scaffold offers all three
+as agent areas, the lint checks their shape, and reports published before
+they existed stay admissible. The viewer renders Standing as its own section
+above the four evidence cards, with the verdict pill and a tinted verdict row
+as the only strong highlighting: the finding beside the pill, Next and Ask
+beneath, the plan as a numbered list, and the checklist with one mark per
+item. A report without a Plan gets one derived on the page from Next, the
+Defects under What, and the checklist's Partial and Missing items, labelled
+as derived. The four cards remain the audit trail.
 
 **Definite errors are looked for, not stumbled on.** The Enrich stage tells
 the agent to open and read the located and touched files rather than grep

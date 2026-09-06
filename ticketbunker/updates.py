@@ -19,7 +19,7 @@ CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 VERDICT_RE = re.compile(r"^Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?", re.IGNORECASE)
-ASPECT_RE = re.compile(r"^(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect):\s*", re.IGNORECASE)
+ASPECT_RE = re.compile(r"^(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect|Step):\s*", re.IGNORECASE)
 BRACKET_REF_RE = re.compile(r"@\[([^\]\n]+)\]:(\d+)")
 MENTION_REF_RE = re.compile(r"(^|[\s(`])@([A-Za-z0-9_./-]+)")
 VERDICT_LABELS = {
@@ -104,6 +104,12 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
             text_value = body[aspect.end():].strip()
             if text_value not in defects:
                 defects.append(text_value)
+    steps: list[str] = []
+    for claim in _part(report_text, "Reader brief", "Plan"):
+        body = plain(claim)
+        aspect = ASPECT_RE.match(body)
+        if aspect and aspect.group(1).lower() == "step":
+            steps.append(body[aspect.end():].strip())
     items: list[dict[str, str]] = []
     for claim in checklist:
         body = plain(claim)
@@ -122,6 +128,10 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
         lines.append("")
         lines.append("**Defects found:**")
         lines.extend(f"- {defect}" for defect in defects)
+    if steps:
+        lines.append("")
+        lines.append("**Plan:**")
+        lines.extend(f"{index}. {step}" for index, step in enumerate(steps, 1))
     if items:
         lines.append("")
         for item in items:
@@ -137,6 +147,7 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
         "next": next_step,
         "ask": ask,
         "defects": defects,
+        "plan": steps,
         "checklist": items,
     }
 
