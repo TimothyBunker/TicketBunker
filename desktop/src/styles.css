@@ -549,3 +549,6 @@ details.advanced > *:not(summary) { margin-top: 10px; }
 .update-panel textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 12px; line-height: 1.5; resize: vertical; }
 .update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .update-actions a { color: var(--blue); font-size: 11px; font-weight: 650; text-decoration: none; }
+
+.aspect-chip.defect { color: #fff; border-color: #a83232; background: #a83232; }
+.markdown li.claim.aspect-defect .claim-text { color: #1c2a40; font-weight: 600; }

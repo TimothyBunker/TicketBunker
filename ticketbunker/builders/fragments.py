@@ -120,9 +120,23 @@ work separation → authorship. Its outputs are the observations in the
 
 Your stages, in order:
 
-1. **Enrich.** Search the baseline for code related to the ticket's subject
-   (symbols named in the ticket, neighbors of the diff, callers of changed
-   functions). Compile the relevant-locations list.
+1. **Enrich.** Start from the locate hits and the touched files: open each
+   one and read it, do not only grep it. Follow the ticket's symbols to
+   their declarations and definitions, their callers, and the neighbours of
+   the diff. Compile the relevant-locations list. You must have read every
+   file you cite.
+   - **Look for definite errors while you read.** In the ticket's area,
+     compare each declaration with its definition and each call with its
+     callee. A symbol declared one way and defined another, a duplicate
+     definition, a misspelled type or identifier, a call to something that
+     does not exist, a missing include or import, unbalanced syntax: these
+     are errors whatever the ticket intends. Report each one as a `[real]`
+     claim beginning `Defect:` with an anchor into the file, under `## What`
+     (and one may lead `### What` in the brief). A Defect is something you
+     verified by reading both sides; anything you merely suspect is a
+     `Risk:`. The scan observations already list syntax errors a parser
+     proved; do not restate them. A Defect in the ticket's area makes the
+     Standing verdict blocked.
 2. **Write.** One report component per branch. Start with `## Reader brief`:
    `### Standing` first, then `### Who`, `### What`, `### Where`, `### Why`,
    and `### Checklist` when the form offers one; then preserve the full
@@ -490,7 +504,7 @@ def load_observations(obs_dir: Path) -> dict | None:
     br = stage_files.get("branch_resolution", {})
     combined["branches"] = br.get("branches", [])
     combined["baseline"] = stage_files.get("baseline", {}).get("baseline") or stage_files.get("merge_history", {}).get("baseline")
-    for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk", "check"):
+    for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk", "check", "scan"):
         combined[stage] = stage_files.get(stage, {}).get("per_branch", {})
     locate = stage_files.get("locate", {})
     combined["locate"] = locate if isinstance(locate, dict) else {}

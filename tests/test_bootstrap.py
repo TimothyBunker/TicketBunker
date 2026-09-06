@@ -215,10 +215,33 @@ class PeopleAndRiskTests(unittest.TestCase):
         }
         form = scaffold.build({"id": "TB-7"}, observations, "b")
         self.assertIn("- [observation] Build check failed (exit 2) in 3.1s: `make` — first error: error: boom (check, observations/checks/b.build.log).", form)
-        self.assertIn("verdict is blocked", form.split("### Who", 1)[0])
+        self.assertIn("check FAILED on this branch", form.split("### Who", 1)[0])
         clean = scaffold.build({"id": "TB-7"}, {"check": {"b": {"test": {"command": "pytest", "exit": 0, "seconds": 1.0, "passed": True}}}}, "b")
         self.assertIn("- [observation] Test check passed in 1.0s: `pytest` (check).", clean)
-        self.assertNotIn("verdict is blocked", clean)
+        self.assertNotIn("check FAILED on this branch", clean)
+
+    def test_scan_proves_syntax_errors_in_touched_and_located_files(self) -> None:
+        from ticketbunker.builders import fragments, scaffold
+
+        (self.repo / "src" / "broken.py").write_text("def parse(:\n    return 1\n", encoding="utf-8")
+        (self.repo / "config.json").write_text('{"parse": tru}\n', encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "break things")
+        result = run_bootstrap(
+            repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger,
+            ticket_text={"title": "Parse blank lines"},
+        )
+        scan = result["scan"]["tim/TB-7-parser"]
+        self.assertIn("src/broken.py", scan["scanned"])
+        errors = {item["path"]: item for item in scan["syntax_errors"]}
+        self.assertEqual(set(errors), {"src/broken.py", "config.json"})
+        self.assertEqual(errors["src/broken.py"]["line"], 1)
+        self.assertEqual(errors["config.json"]["kind"], "json")
+        self.assertEqual(result["scan"]["lin/TB-7-spike"]["syntax_errors"], [])
+        form = scaffold.build({"id": "TB-7", "title": "Parse blank lines"}, fragments.load_observations(self.observations), "tim/TB-7-parser")
+        self.assertIn("- [observation] Syntax error in src/broken.py:1 — ", form)
+        self.assertIn("the scan found a definite syntax error", form.split("### Who", 1)[0])
+        self.assertIn("Defect:", form.split("\n## What\n", 1)[1].split("\n## Where\n", 1)[0])
 
     def test_scaffold_prefills_people_and_risk_evidence(self) -> None:
         from ticketbunker.builders import fragments, scaffold

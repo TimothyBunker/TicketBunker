@@ -18,6 +18,10 @@ REPORT = """\
 
 - [real] TimothyBunker is the assignee (ticket).
 
+### What
+
+- [real] Defect: @[coal/components/position/PositionComponent.cpp]:21 defines the Pos3 constructor twice.
+
 ### Checklist
 
 - [real] Done: CommonTypes (@[coal/common/types/CommonTypes.h]:11).
@@ -41,6 +45,8 @@ class ComposeUpdateTests(unittest.TestCase):
         self.assertIn("**Ask:** TimothyBunker, the only person on it (people).", text)
         self.assertIn("- ✅ CommonTypes (`coal/common/types/CommonTypes.h:11`).", text)
         self.assertIn("- ❌ WorldPos3 and LocalPos3 (ticket).", text)
+        self.assertEqual(value["defects"], ["`coal/components/position/PositionComponent.cpp:21` defines the Pos3 constructor twice."])
+        self.assertIn("**Defects found:**\n- `coal/components/position/PositionComponent.cpp:21` defines the Pos3 constructor twice.", text)
         self.assertIn("_Synthesized by TicketBunker for ECS-2 on `bunker/ECS-2` at `53481efa04ad`._", text)
         for token in ("[real]", "[speculation]", "grounded —", "@["):
             self.assertNotIn(token, text)

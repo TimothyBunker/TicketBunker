@@ -454,6 +454,22 @@ four evidence cards: the verdict as a pill, its finding beside it, Next and
 Ask beneath, and the checklist with one mark per item; the four cards remain
 the audit trail.
 
+**Definite errors are looked for, not stumbled on.** The Enrich stage tells
+the agent to open and read the located and touched files rather than grep
+them, and while reading to compare each declaration with its definition and
+each call with its callee. An error that holds whatever the ticket intends
+(a declaration that does not match its definition, a duplicate definition, a
+misspelled type or identifier, a call to something that does not exist, a
+missing include or import, unbalanced syntax) is recorded as a `Defect:`
+claim: always `[real]`, always anchored, under `## What`, with at most one
+leading the brief's What. The lint refuses a Defect that is speculative or
+unanchored; a suspicion is a `Risk:`. A Defect makes the Standing verdict
+blocked with that defect as the finding, and the drafted tracker update lists
+the defects found. Before the agent reads anything, the `scan` stage parses
+every touched and located Python, JSON, and TOML file at the branch head with
+the standard library and prefills each syntax error as an `[observation]`
+under What, so what a parser can prove never depends on the model.
+
 **Does it work is an observation.** A Project (or the Bunker default) may
 publish a `checks` document: a build command, a test command, and a timeout
 between thirty seconds and an hour. When one is configured, the `check` stage

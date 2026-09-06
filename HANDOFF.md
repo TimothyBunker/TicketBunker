@@ -313,6 +313,11 @@ new Bunkers.
   stage places ticket terms on the baseline so the agent starts from hits.
   While a synthesis runs the page polls and shows phase, tool calls, and
   elapsed time, then re-reads once when it stops.
+- The agent reads the located and touched files and records definite errors
+  as `Defect:` claims ([real] and anchored, lint-enforced; a suspicion is a
+  Risk). A Defect blocks the Standing verdict and appears in the drafted
+  update. The `scan` stage parses touched and located Python/JSON/TOML files
+  at the branch head and prefills syntax errors as observations.
 - Agent work has Draft update: `application.ticket.update.draft` composes a
   tracker comment from the report's Standing and Checklist (`updates.py`),
   and `application.ticket.update.post` posts the edited text to the GitHub

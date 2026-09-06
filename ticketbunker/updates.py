@@ -19,7 +19,7 @@ CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 VERDICT_RE = re.compile(r"^Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?", re.IGNORECASE)
-ASPECT_RE = re.compile(r"^(Risk|Next|Ask|Done|Partial|Missing|Unclear):\s*", re.IGNORECASE)
+ASPECT_RE = re.compile(r"^(Risk|Next|Ask|Done|Partial|Missing|Unclear|Defect):\s*", re.IGNORECASE)
 BRACKET_REF_RE = re.compile(r"@\[([^\]\n]+)\]:(\d+)")
 MENTION_REF_RE = re.compile(r"(^|[\s(`])@([A-Za-z0-9_./-]+)")
 VERDICT_LABELS = {
@@ -43,6 +43,19 @@ def _part(text: str, parent: str, heading: str) -> list[str]:
             continue
         if inside_parent and line.startswith("### "):
             inside = line[4:].strip().casefold() == heading.casefold()
+            continue
+        if inside and re.match(r"^\s*[-*]\s", line):
+            lines.append(line)
+    return lines
+
+
+def _section_claims(text: str, heading: str) -> list[str]:
+    """Claim lines of one top-level ``## heading``."""
+    inside = False
+    lines: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            inside = line[3:].strip().casefold() == heading.casefold()
             continue
         if inside and re.match(r"^\s*[-*]\s", line):
             lines.append(line)
@@ -83,6 +96,14 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
             next_step = body[aspect.end():].strip()
         elif aspect and aspect.group(1).lower() == "ask" and not ask:
             ask = body[aspect.end():].strip()
+    defects: list[str] = []
+    for claim in [*_part(report_text, "Reader brief", "What"), *_section_claims(report_text, "What")]:
+        body = plain(claim)
+        aspect = ASPECT_RE.match(body)
+        if aspect and aspect.group(1).lower() == "defect":
+            text_value = body[aspect.end():].strip()
+            if text_value not in defects:
+                defects.append(text_value)
     items: list[dict[str, str]] = []
     for claim in checklist:
         body = plain(claim)
@@ -97,6 +118,10 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
         lines.append(f"**Next:** {next_step}")
     if ask:
         lines.append(f"**Ask:** {ask}")
+    if defects:
+        lines.append("")
+        lines.append("**Defects found:**")
+        lines.extend(f"- {defect}" for defect in defects)
     if items:
         lines.append("")
         for item in items:
@@ -111,6 +136,7 @@ def compose(report_text: str, *, ticket_id: str, branch: str, commit: str = "") 
         "finding": finding,
         "next": next_step,
         "ask": ask,
+        "defects": defects,
         "checklist": items,
     }
 

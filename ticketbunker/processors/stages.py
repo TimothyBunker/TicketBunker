@@ -76,6 +76,13 @@ CONTRACTS: dict[str, StageContract] = {
         process="Extract identifier-like and distinctive terms from the ticket text; git grep each on the baseline; rank files by distinct terms matched, bounded.",
         desired_outcome="Ticket-wide: the terms searched and the files on the baseline that mention them, with match counts and the terms each file matched.",
     ),
+    "scan": StageContract(
+        name="scan",
+        purpose="Catch the errors a parser can prove before the agent reads anything.",
+        inputs="Per-branch touched files plus the ticket-wide located files, read at each branch head.",
+        process="Parse each Python, JSON, and TOML file with the standard library; record every syntax error with its line and message.",
+        desired_outcome="Per branch: the files scanned and every definite syntax error found, or an empty list.",
+    ),
     "check": StageContract(
         name="check",
         purpose="Run the team's own build and test commands so 'does it work' is an observation, not a guess.",
@@ -486,6 +493,58 @@ def run_bootstrap(
         return payload
 
     observations["locate"] = run_stage(CONTRACTS["locate"], ledger, stage_locate)
+
+    SCAN_MAX_FILES = 40
+    SCAN_MAX_BYTES = 1_000_000
+
+    def _syntax_error(path: str, text: str) -> dict | None:
+        suffix = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+        try:
+            if suffix in {"py", "pyi"}:
+                compile(text, path, "exec")
+            elif suffix == "json":
+                json.loads(text)
+            elif suffix == "toml":
+                try:
+                    import tomllib
+                except ImportError:  # Python 3.10
+                    return None
+                tomllib.loads(text)
+            else:
+                return None
+        except SyntaxError as exc:
+            return {"path": path, "line": exc.lineno or 1, "message": (exc.msg or "syntax error").strip(), "kind": "python"}
+        except json.JSONDecodeError as exc:
+            return {"path": path, "line": exc.lineno, "message": exc.msg, "kind": "json"}
+        except Exception as exc:  # tomllib.TOMLDecodeError carries no line number
+            return {"path": path, "line": 1, "message": str(exc).splitlines()[0][:200], "kind": "toml"}
+        return None
+
+    def stage_scan() -> dict:
+        located = [item["path"] for item in (observations["locate"].get("files") or [])]
+        result = {}
+        for br in bases:
+            touched = [f["path"] for f in (diffs.get(br, {}).get("files") or [])]
+            candidates: list[str] = []
+            for path in [*touched, *located]:
+                if path not in candidates and path.rsplit(".", 1)[-1].lower() in {"py", "pyi", "json", "toml"}:
+                    candidates.append(path)
+            candidates = candidates[:SCAN_MAX_FILES]
+            errors: list[dict] = []
+            scanned: list[str] = []
+            for path in candidates:
+                text, status = git_status(repo, ["show", f"{br}:{path}"], ledger, "scan")
+                if status != 0 or len(text.encode("utf-8", errors="replace")) > SCAN_MAX_BYTES:
+                    continue
+                scanned.append(path)
+                found = _syntax_error(path, text)
+                if found:
+                    errors.append(found)
+            result[br] = {"scanned": scanned, "syntax_errors": errors}
+        _write_observation(obs_dir, "scan", {"per_branch": result})
+        return result
+
+    observations["scan"] = run_stage(CONTRACTS["scan"], ledger, stage_scan)
 
     CHECK_LOG_LINES = 200
     ERROR_LINE_RE = re.compile(r"\b(error|failed|failure|fatal|traceback|exception|assert)\b", re.IGNORECASE)

@@ -27,7 +27,7 @@ BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170, "Standin
 # Each brief part may carry one proactive Risk claim and one Next claim on
 # top of its ordinary claims; they are what keeps a report task-oriented
 # without letting it sprawl.
-ASPECT_LIMITS = {"risk": 1, "next": 1}
+ASPECT_LIMITS = {"risk": 1, "next": 1, "defect": 1}
 # Tags: observation (pipeline fact) / real (agent-located, checkable) /
 # speculation (interpretation, ranked by grounding). [inference] is accepted
 # as a deprecated alias of [speculation].
@@ -37,9 +37,12 @@ PATHLIKE_RE = re.compile(r"[\w.-]+/[\w./-]+|[\w-]+\.\w{1,8}(:\d+)?")
 GROUNDING_RE = re.compile(r"\b(grounded|adjacent|ungrounded)\b", re.IGNORECASE)
 ASPECT_RE = re.compile(
     r"^\s*[-*]?\s*\[(?:observation|real|speculation|inference)\]\s*"
-    r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?(Risk|Next):",
+    r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?(Risk|Next|Defect):",
     re.IGNORECASE,
 )
+# A Defect is an error the agent proved by reading; it is always [real] and
+# always anchored. A suspicion is a Risk.
+DEFECT_RE = re.compile(r"^\s*[-*]?\s*\[(observation|real|speculation|inference)\]\s*(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?Defect:", re.IGNORECASE)
 _CLAIM_PREFIX = (
     r"^\s*[-*]?\s*\[(?:observation|real|speculation|inference)\]\s*"
     r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?"
@@ -122,7 +125,7 @@ def lint(text: str) -> list[Finding]:
                     Finding("brief-schema", "error", f"Reader brief '{name}' needs at least one tagged claim")
                 )
                 continue
-            aspects: dict[str, int] = {"risk": 0, "next": 0}
+            aspects: dict[str, int] = {"risk": 0, "next": 0, "defect": 0}
             plain = 0
             for line in claims:
                 aspect = ASPECT_RE.match(line)
@@ -248,6 +251,15 @@ def lint(text: str) -> list[Finding]:
             if tag == "real" and not PATHLIKE_RE.search(l) and not (people_cited and WHO_CITATION_RE.search(l)):
                 findings.append(
                     Finding("real-anchor", "error", f"section '{name}': [real] claim names no path/line to check: {l.strip()[:80]}")
+                )
+            defect = DEFECT_RE.match(l)
+            if defect and (defect.group(1).lower() != "real" or not PATHLIKE_RE.search(l)):
+                findings.append(
+                    Finding(
+                        "defect",
+                        "error",
+                        f"section '{name}': a Defect: is an error you verified by reading, so it must be a [real] claim with an anchor; use Risk: for a suspicion: {l.strip()[:80]}",
+                    )
                 )
             if is_who and tag in ("real", "speculation", "inference") and NOBODY_RE.search(l):
                 findings.append(

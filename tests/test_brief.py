@@ -187,13 +187,13 @@ class WhoAndProactiveClaimTests(unittest.TestCase):
 
 
 class StandingAndChecklistTests(unittest.TestCase):
-    def brief(self, standing: str = "", checklist: str = "") -> str:
+    def brief(self, standing: str = "", checklist: str = "", what: str = "- [speculation] grounded — one file changed (diff).") -> str:
         parts = "## Reader brief\n\n"
         if standing:
             parts += "### Standing\n\n" + standing + "\n\n"
         parts += (
             "### Who\n\n- [real] Tim is the assignee (ticket).\n\n"
-            "### What\n\n- [speculation] grounded — one file changed (diff).\n\n"
+            "### What\n\n" + what + "\n\n"
             "### Where\n\n- [real] Start in `ticketbunker/viewer.py:1`.\n\n"
             "### Why\n\n- [speculation] grounded — the ticket wants a clearer report (ticket).\n\n"
         )
@@ -217,6 +217,17 @@ class StandingAndChecklistTests(unittest.TestCase):
         self.assertIn("standing", {f.check for f in reportlint.lint(self.brief(standing=stray))})
         bad_value = "- [speculation] grounded — Verdict: stuck — nope (`ticketbunker/viewer.py:1`)."
         self.assertIn("standing", {f.check for f in reportlint.lint(self.brief(standing=bad_value))})
+
+    def test_a_defect_is_always_verified_and_anchored(self) -> None:
+        good = self.brief(what="- [speculation] grounded — one file changed (diff).\n- [real] Defect: the Pos3 constructor is defined twice (`ticketbunker/viewer.py:1`).")
+        self.assertNotIn("defect", {f.check for f in reportlint.lint(good)})
+        speculative = self.brief(what="- [speculation] grounded — Defect: probably defined twice (`ticketbunker/viewer.py:1`).")
+        self.assertIn("defect", {f.check for f in reportlint.lint(speculative)})
+        unanchored = self.brief(what="- [real] Defect: defined twice somewhere.")
+        checks = {f.check for f in reportlint.lint(unanchored)}
+        self.assertIn("defect", checks)
+        two = self.brief(what="- [real] Defect: one (`ticketbunker/viewer.py:1`).\n- [real] Defect: two (`ticketbunker/viewer.py:1`).")
+        self.assertTrue(any("Defect: claims" in f.message for f in reportlint.lint(two)))
 
     def test_checklist_marks_each_item(self) -> None:
         good = (

@@ -115,6 +115,8 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     rk = observations.get("risk", {}).get(branch, {})
     lo = observations.get("locate", {}) or {}
     ck = observations.get("check", {}).get(branch, {}) or {}
+    sc = observations.get("scan", {}).get(branch, {}) or {}
+    syntax_errors = [item for item in (sc.get("syntax_errors") or []) if isinstance(item, dict)]
     check_lines = _check_lines(ck)
     check_failed = any(not outcome.get("passed") for outcome in ck.values() if isinstance(outcome, dict))
     no_branch_work = not (ws.get("work_commits") or []) and not (df.get("files") or [])
@@ -138,6 +140,9 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         "and at most one `Ask:` claim (whom to talk to and why, citing (ticket) or (people)); nothing else in this part"
         + ("; a configured build or test check FAILED on this branch (see the check observations under What), so the "
            "verdict is blocked and its finding is that first error unless the code proves otherwise" if check_failed else "")
+        + ("; the scan found a definite syntax error (see the scan observations under What), so the verdict is blocked "
+           "and its finding is that error" if syntax_errors else "")
+        + "; if you record any Defect: claim under What, the verdict is blocked and its finding is that defect"
         + ("; this branch has no work commits and no diff, so do not report the empty diff as the finding: judge the "
            "tree at the branch head against the ticket (the work may already live on the baseline) and say what state "
            "that code is in" if no_branch_work else "")
@@ -155,8 +160,9 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines.append(AGENT_AREA.format(
         instruction="reader brief What: one or two concise [real]/[speculation] claims explaining the most "
         "important work or result in plain language, highest apparent importance first, grounded in the "
-        "diff and observations; optionally one 'Risk:' claim (a bug, regression, or untested change you can "
-        "point at) and one 'Next:' claim (one concrete thing to do about the work)"
+        "diff and observations; optionally one 'Defect:' claim ([real], anchored: an error you verified by reading, "
+        "see the What area below), one 'Risk:' claim (a bug, regression, or untested change you suspect) and one "
+        "'Next:' claim (one concrete thing to do about the work)"
     ))
     lines += ["", "### Where", ""]
     lines.append(AGENT_AREA.format(
@@ -250,6 +256,8 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(f"- [observation] Full patch text: {df['patch']}"
                      + (" (truncated)" if df.get("patch_truncated") else "") + " (diff).")
     lines.extend(check_lines)
+    for item in syntax_errors:
+        lines.append(f"- [observation] Syntax error in {item['path']}:{item['line']} — {item['message']} (scan).")
     for path, count in sorted((rk.get("added_markers") or {}).items()):
         lines.append(f"- [observation] Added {count} TODO/FIXME-style marker(s) in {path} (risk).")
     if rk.get("source_touched_without_tests"):
@@ -261,6 +269,9 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
                      "as [real] finds with anchors and [speculation] with grounding" if no_branch_work else
                      "characterize the actual code changes from the patch — what the code does, not just which "
                      "files moved; [speculation] with grounding")
+        + "; read the located and touched files and record every definite error you can prove by reading both sides "
+        "(declaration vs definition, call vs callee, duplicate definition, misspelled identifier, missing include or "
+        "import) as `- [real] Defect: <what is wrong> (@[path]:line)`; a Defect is verified, a suspicion is a 'Risk:'"
         + "; optionally one 'Risk:' claim pointing at a bug, regression, or untested path, and one 'Next:' claim"
     ))
     lines.append("")
