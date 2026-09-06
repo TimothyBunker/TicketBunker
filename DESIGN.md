@@ -454,6 +454,21 @@ four evidence cards: the verdict as a pill, its finding beside it, Next and
 Ask beneath, and the checklist with one mark per item; the four cards remain
 the audit trail.
 
+**Does it work is an observation.** A Project (or the Bunker default) may
+publish a `checks` document: a build command, a test command, and a timeout
+between thirty seconds and an hour. When one is configured, the `check` stage
+adds a detached scratch worktree at the synthesized branch's head under the
+runtime directory, runs the build and then the test there with the team's own
+shell commands, and records per command whether it passed, the exit code,
+the seconds it took, the first error line, and a bounded log under
+`observations/checks/`; a failed build skips the test. The worktree is
+removed afterwards and the user's checkout is never touched. The form
+prefills the outcome into What and State, and a failure tells the Standing
+area that the verdict is blocked with that first error as the finding. The
+Project configuration's Checks tab offers detection from the repository
+root's manifests (CMake, Cargo, Go, npm, pytest, make) as suggestions the
+owner confirms; nothing runs until the document is published.
+
 **Proactive, but bounded.** A report should tell the reader what could bite
 them and what to do next, inside the same four questions rather than in a
 new section. Each Reader brief part may carry, on top of its ordinary claims,

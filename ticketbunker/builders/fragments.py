@@ -139,7 +139,11 @@ Your stages, in order:
    - **Checklist** judges each of the ticket's own items against the code
      on the branch: `Done:`, `Partial:`, `Missing:`, or `Unclear:` followed
      by the item text and its evidence. Done and Partial need an anchor;
-     Missing and Unclear may cite (ticket).
+     Missing and Unclear may cite (ticket). The tag and its grounding rank
+     come first as on every claim: `- [speculation] grounded — Missing: ...`.
+     Judge against the whole tree at the branch head, never against this
+     branch's diff alone: a branch with no commits may still describe code
+     that already lives on the baseline.
    Prefix each claim line with `[observation]`, `[real]`, or
    `[speculation]`. Section rules:
    - **Reader brief**: prioritize instead of inventorying. Write one or two
@@ -486,7 +490,7 @@ def load_observations(obs_dir: Path) -> dict | None:
     br = stage_files.get("branch_resolution", {})
     combined["branches"] = br.get("branches", [])
     combined["baseline"] = stage_files.get("baseline", {}).get("baseline") or stage_files.get("merge_history", {}).get("baseline")
-    for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk"):
+    for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk", "check"):
         combined[stage] = stage_files.get(stage, {}).get("per_branch", {})
     locate = stage_files.get("locate", {})
     combined["locate"] = locate if isinstance(locate, dict) else {}

@@ -238,6 +238,12 @@ export type ConfigurationState = {
       updated_at: string;
       content: { providers: Record<string, { account: string; name?: string }> };
     };
+    checks?: {
+      kind: "checks";
+      revision: string;
+      updated_at: string;
+      content: { build: string; test: string; timeout_seconds: number };
+    };
   };
 };
 

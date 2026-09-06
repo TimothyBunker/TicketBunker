@@ -530,3 +530,13 @@ details.advanced > *:not(summary) { margin-top: 10px; }
 .aspect-chip.missing { color: #8a1c1c; border-color: #e3b4b4; background: #fff5f5; }
 .aspect-chip.unclear { color: #4d5a6e; border-color: #cfd6df; background: #f4f6f9; }
 .markdown li.claim.aspect-done .claim-text, .markdown li.claim.aspect-partial .claim-text, .markdown li.claim.aspect-missing .claim-text, .markdown li.claim.aspect-unclear .claim-text { color: #2a3648; }
+
+.checks-form { display: grid; gap: 12px; margin-bottom: 12px; }
+.checks-form label { display: grid; gap: 4px; color: #4d5a6e; font-size: 10px; font-weight: 700; }
+.checks-form input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.check-suggestions { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.check-suggestions li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--soft-line); border-radius: 6px; background: #fafbfc; }
+.check-suggestions li > div { display: grid; gap: 3px; min-width: 0; }
+.check-suggestions small { color: var(--muted); font-size: 9px; }
+.check-suggestions code { font-size: 10px; color: #233249; overflow-wrap: anywhere; }
+.quiet-note { margin: 10px 0 0; color: var(--muted); font-size: 11px; }

@@ -179,6 +179,47 @@ class PeopleAndRiskTests(unittest.TestCase):
         self.assertGreaterEqual(hit["matches"], 1)
         self.assertTrue((self.observations / "locate.json").is_file())
 
+    def test_check_runs_configured_commands_in_a_scratch_worktree(self) -> None:
+        import sys
+
+        failing = f"{sys.executable} -c \"import sys; print('compiling'); print('error: boom at parse.py:2'); sys.exit(2)\""
+        result = run_bootstrap(
+            repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger,
+            checks={"build": failing, "test": "echo never", "timeout_seconds": 60}, check_branch="tim/TB-7-parser",
+        )
+        outcome = result["check"]["tim/TB-7-parser"]
+        self.assertFalse(outcome["build"]["passed"])
+        self.assertEqual(outcome["build"]["exit"], 2)
+        self.assertEqual(outcome["build"]["first_error"], "error: boom at parse.py:2")
+        self.assertNotIn("test", outcome, "a failed build skips the test command")
+        self.assertTrue((self.observations.parent / outcome["build"]["log"]).is_file())
+        self.assertFalse((self.observations.parent / "checks" / "tim__TB-7-parser").exists(), "the worktree is removed")
+        listed = subprocess.run(["git", "-C", str(self.repo), "worktree", "list"], capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("tim__TB-7-parser", listed)
+
+        passing = run_bootstrap(
+            repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger,
+            checks={"test": f"{sys.executable} -c \"import pathlib; assert pathlib.Path('src/parse.py').exists(); print('ok')\""},
+            check_branch="tim/TB-7-parser",
+        )
+        self.assertTrue(passing["check"]["tim/TB-7-parser"]["test"]["passed"])
+
+        unconfigured = run_bootstrap(repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger)
+        self.assertEqual(unconfigured["check"], {})
+
+    def test_scaffold_reports_check_outcomes_and_asks_for_a_blocked_verdict(self) -> None:
+        from ticketbunker.builders import scaffold
+
+        observations = {
+            "check": {"b": {"build": {"command": "make", "exit": 2, "seconds": 3.1, "passed": False, "timed_out": False, "first_error": "error: boom", "log": "observations/checks/b.build.log"}}},
+        }
+        form = scaffold.build({"id": "TB-7"}, observations, "b")
+        self.assertIn("- [observation] Build check failed (exit 2) in 3.1s: `make` — first error: error: boom (check, observations/checks/b.build.log).", form)
+        self.assertIn("verdict is blocked", form.split("### Who", 1)[0])
+        clean = scaffold.build({"id": "TB-7"}, {"check": {"b": {"test": {"command": "pytest", "exit": 0, "seconds": 1.0, "passed": True}}}}, "b")
+        self.assertIn("- [observation] Test check passed in 1.0s: `pytest` (check).", clean)
+        self.assertNotIn("verdict is blocked", clean)
+
     def test_scaffold_prefills_people_and_risk_evidence(self) -> None:
         from ticketbunker.builders import fragments, scaffold
 

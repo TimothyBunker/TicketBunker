@@ -951,7 +951,7 @@ def get_configuration(
             SELECT kind, revision, content_json, updated_at
             FROM config_documents
             WHERE scope_type = ? AND scope_id = ?
-              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'tracker-sources', 'connections')
+              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'tracker-sources', 'connections', 'checks')
             ORDER BY kind
             """,
             (scope_type, scope_id),
@@ -1095,8 +1095,8 @@ def propose_configuration(
     """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
-    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "tracker-sources", "connections"}:
-        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Boards, or Connections to publish.")
+    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "tracker-sources", "connections", "checks"}:
+        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Boards, Connections, or Checks to publish.")
     if not isinstance(content, Mapping):
         raise BunkerDatabaseError("Configuration content must be one object.")
     with _database(bunker_id) as connection:
@@ -1136,6 +1136,8 @@ def propose_configuration(
             normalized = _validated_tracker_sources(content)
         elif document_kind == "connections":
             normalized = _validated_connections(content)
+        elif document_kind == "checks":
+            normalized = _validated_checks(content)
         elif document_kind == "ticket-fields":
             normalized = _validated_ticket_fields(content)
             available = {str(value["key"]) for value in normalized["fields"]}
@@ -1305,7 +1307,7 @@ def replace_configuration(
 TRACKER_PROVIDERS = {"github": "GitHub"}
 CONNECTION_PROVIDERS = {"github": "GitHub", "gitlab": "GitLab", "jira": "Jira"}
 TRACKER_KINDS = {"project": "Project board", "issues": "Repository issues"}
-CREATABLE_DOCUMENTS = {"tracker-source", "tracker-sources", "connections"}
+CREATABLE_DOCUMENTS = {"checks", "tracker-source", "tracker-sources", "connections"}
 MAX_TRACKER_SOURCES = 20
 _GITHUB_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 _GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -1408,6 +1410,38 @@ def trackers_summary(sources: Iterable[Mapping[str, Any]]) -> str:
     if len(items) == 1:
         return items[0]
     return f"{items[0]} +{len(items) - 1} more"
+
+
+CHECK_COMMAND_MAX = 500
+CHECK_TIMEOUT_DEFAULT = 600
+CHECK_TIMEOUT_RANGE = (30, 3600)
+
+
+def _validated_checks(content: Mapping[str, Any]) -> dict[str, Any]:
+    """Build and test commands the pipeline runs in a scratch worktree at the
+    branch head before the agent writes. Commands are the team's own, run in
+    their own checkout; the document only bounds their shape and duration."""
+    normalized: dict[str, Any] = {}
+    for name in ("build", "test"):
+        value = content.get(name)
+        if value is None or value == "":
+            normalized[name] = ""
+            continue
+        if not isinstance(value, str) or "\n" in value:
+            raise BunkerDatabaseError(f"The {name} check must be one command line.")
+        if len(value) > CHECK_COMMAND_MAX:
+            raise BunkerDatabaseError(f"Keep the {name} check under {CHECK_COMMAND_MAX} characters.")
+        normalized[name] = value.strip()
+    timeout = content.get("timeout_seconds", CHECK_TIMEOUT_DEFAULT)
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError) as exc:
+        raise BunkerDatabaseError("The check timeout must be a whole number of seconds.") from exc
+    low, high = CHECK_TIMEOUT_RANGE
+    if not low <= timeout <= high:
+        raise BunkerDatabaseError(f"Choose a check timeout between {low} and {high} seconds.")
+    normalized["timeout_seconds"] = timeout
+    return normalized
 
 
 def _validated_connections(content: Mapping[str, Any]) -> dict[str, Any]:

@@ -89,6 +89,19 @@ def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str)
     return written
 
 
+def _checks_for(bunker_id: str, project_id: str) -> dict[str, Any]:
+    """The Project's build/test checks, falling back to the Bunker default."""
+    for scope in ((project_id or None), None):
+        try:
+            documents = bunkerdb.get_configuration(bunker_id, project_id=scope).get("documents") or {}
+        except bunkerdb.BunkerDatabaseError:
+            continue
+        content = (documents.get("checks") or {}).get("content")
+        if isinstance(content, dict) and (content.get("build") or content.get("test")):
+            return dict(content)
+    return {}
+
+
 def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     """Project one Bunker ticket into its runtime directory.
 
@@ -134,6 +147,7 @@ def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     info = {
         "bunker_id": bunker_id,
         "ticket_id": ticket_id,
+        "checks": _checks_for(bunker_id, str(detail["project"].get("id") or "")),
         "project_id": str(detail["project"].get("id") or ""),
         "project_key": str(detail["project"].get("key") or ""),
         "repository_id": str(repository.get("id") or "") if repository else "",

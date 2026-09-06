@@ -113,6 +113,31 @@ class BunkerRuntimeTests(unittest.TestCase):
         self.assertEqual(value["messages"], [])
         self.assertTrue(bunkerruntime.ticket_dir(self.bunker_id, "ECS-4").is_dir())
 
+    def test_checks_travel_from_configuration_to_the_runtime_marker(self) -> None:
+        from ticketbunker import checks
+
+        (self.repo / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+        detected = self.dispatch("application.project.checks.detect", {"bunker_id": self.bunker_id, "project_id": self.project_id})
+        self.assertEqual([item["tool"] for item in detected["suggestions"]], ["pytest"])
+        self.assertEqual(checks.detect(self.repo)[0]["test"], "python3 -m pytest -x -q")
+
+        self.assertEqual(bunkerruntime.materialize(self.bunker_id, "ECS-4")["checks"], {})
+        published = self.dispatch(
+            "application.bunker.configuration.replace",
+            {"bunker_id": self.bunker_id, "project_id": self.project_id, "kind": "checks", "expected_revision": "",
+             "content": {"build": "", "test": "python3 -m pytest -x -q", "timeout_seconds": 120}},
+        )
+        self.assertEqual(published["documents"]["checks"]["content"]["test"], "python3 -m pytest -x -q")
+        info = bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        self.assertEqual(info["checks"]["test"], "python3 -m pytest -x -q")
+        self.assertEqual(json.loads((info["bunker"] / bunkerruntime.MARKER).read_text())["checks"]["timeout_seconds"], 120)
+        with self.assertRaises(commands.CommandRejected):
+            self.dispatch(
+                "application.bunker.configuration.replace",
+                {"bunker_id": self.bunker_id, "project_id": self.project_id, "kind": "checks",
+                 "expected_revision": published["documents"]["checks"]["revision"], "content": {"build": "make", "timeout_seconds": 5}},
+            )
+
     def test_coworker_names_missing_database_without_bunker(self) -> None:
         with self.assertRaises(commands.CommandRejected) as caught:
             self.dispatch("coworker.state", {"project": "", "ticket": "ECS-4", "category": "who", "scope": "combined"})

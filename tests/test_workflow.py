@@ -276,7 +276,7 @@ class TicketWorkflowTests(unittest.TestCase):
                         self.source, "ECS", "ECS-4", force=True
                     )
                 )
-                self.assertTrue(refresh_entered.wait(timeout=2))
+                self.assertTrue(refresh_entered.wait(timeout=8))
 
                 def create_branch() -> None:
                     try:

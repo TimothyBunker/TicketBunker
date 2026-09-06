@@ -1010,6 +1010,28 @@ def publish_ticket_reports(
     return {**result, "shared": proposal["mode"] == "remote"}
 
 
+@commands.register("application.project.checks.detect")
+def command_project_checks_detect(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Suggest build/test commands from the Project's attached checkout."""
+    from . import checks as checks_mod
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    project_id = str(payload.get("project_id") or "")
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id or None)
+    roots = [
+        str(item.get("local_path") or "")
+        for item in (configuration.get("repositories") or {}).get("items") or []
+        if str(item.get("local_path") or "")
+    ]
+    suggestions: list[dict[str, Any]] = []
+    for root in roots:
+        for suggestion in checks_mod.detect(root):
+            suggestions.append({**suggestion, "repository": root})
+    return {"repositories": roots, "suggestions": suggestions}
+
+
 @commands.register("application.project.sync")
 def command_project_sync(
     _context: commands.CommandContext, payload: dict[str, Any]

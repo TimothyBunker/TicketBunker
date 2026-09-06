@@ -5,7 +5,11 @@ import { linkedBoards, trackerSummary, type Board, type Bunker, type Configurati
 
 const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", "user", "enum", "tags", "url"];
 const EMPTY_TRACKER: TrackerSource = { provider: "github", kind: "project", owner: "", number: 0, repository: "", include_comments: true, title: "", url: "" };
-export type ConfigurationTab = "board" | "repositories" | "trackers" | "defaults";
+export type ConfigurationTab = "board" | "repositories" | "checks" | "trackers" | "defaults";
+
+type ChecksContent = { build: string; test: string; timeout_seconds: number };
+type CheckSuggestion = { tool: string; reason: string; build: string; test: string; repository: string };
+const EMPTY_CHECKS: ChecksContent = { build: "", test: "", timeout_seconds: 600 };
 const FIELD_LABELS: Record<string, string> = { title: "Title", description: "Description", status: "Status", type: "Type", priority: "Priority", assignee: "Assignee", reporter: "Reporter", labels: "Labels", created: "Created", updated: "Updated" };
 
 function sameBoard(left: TrackerSource | Board, right: TrackerSource | Board) {
@@ -95,6 +99,47 @@ export default function ConfigurationPanel({
 
   const canWrite = Boolean(state?.permission.can_write);
   const linked = state ? linkedBoards(state.documents) : [];
+  const checksDocument = state?.documents.checks as { revision: string; content: Partial<ChecksContent> } | undefined;
+  const [checks, setChecks] = useState<ChecksContent>(EMPTY_CHECKS);
+  const [suggestions, setSuggestions] = useState<CheckSuggestion[] | null>(null);
+  useEffect(() => {
+    const content = checksDocument?.content || {};
+    setChecks({ build: String(content.build || ""), test: String(content.test || ""), timeout_seconds: Number(content.timeout_seconds) || 600 });
+  }, [checksDocument?.revision, project?.id]);
+
+  async function detectChecks() {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{ suggestions: CheckSuggestion[]; repositories: string[] }>("application.project.checks.detect", { bunker_id: bunker.id, project_id: project?.id || "" });
+      setSuggestions(value.suggestions);
+      if (value.repositories.length === 0) setError("Attach a local repository to this Project first; detection reads its root.");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishChecks() {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<ConfigurationState>("application.bunker.configuration.replace", {
+        bunker_id: bunker.id,
+        project_id: project?.id || "",
+        kind: "checks",
+        expected_revision: checksDocument?.revision || "",
+        content: checks,
+      });
+      applyConfiguration(value);
+      notify("Checks published");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
   const selected = providers[provider];
   const mappingRows = useMemo(() => Object.entries(selected?.fields || {}), [selected]);
 
@@ -287,6 +332,7 @@ export default function ConfigurationPanel({
       <nav>
         {project && <button className={tab === "board" ? "selected" : ""} onClick={() => setTab("board")}>Boards</button>}
         {project && <button className={tab === "repositories" ? "selected" : ""} onClick={() => setTab("repositories")}>Repositories</button>}
+        {project && <button className={tab === "checks" ? "selected" : ""} onClick={() => setTab("checks")}>Checks</button>}
         {!project && <button className={tab === "trackers" ? "selected" : ""} onClick={() => setTab("trackers")}>Trackers</button>}
         {!project && <button className={tab === "defaults" ? "selected" : ""} onClick={() => setTab("defaults")}>Defaults</button>}
       </nav>
@@ -395,6 +441,19 @@ export default function ConfigurationPanel({
           {repositories.length === 0 && <div className="repository-empty">No repositories allowed</div>}
         </div>
         <button disabled={!canWrite} onClick={() => setRepositories((values) => [...values, { id: "", project_id: project.id, name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>
+      </section>}
+
+      {state && project && tab === "checks" && <section className="config-surface">
+        <div className="config-heading"><div><h3>Checks</h3><p>Before the agent writes, TicketBunker runs these in a scratch worktree at the branch head. A failing build becomes a fact in the report instead of a guess.</p></div><button className="primary" disabled={!canWrite || busy} onClick={publishChecks}>Publish checks</button></div>
+        <div className="checks-form">
+          <label>Build command<input value={checks.build} disabled={!canWrite} placeholder="cmake -S . -B build && cmake --build build" onChange={(event) => setChecks({ ...checks, build: event.target.value })} /></label>
+          <label>Test command<input value={checks.test} disabled={!canWrite} placeholder="python3 -m pytest -x -q" onChange={(event) => setChecks({ ...checks, test: event.target.value })} /></label>
+          <label>Timeout (seconds)<input type="number" min={30} max={3600} value={checks.timeout_seconds} disabled={!canWrite} onChange={(event) => setChecks({ ...checks, timeout_seconds: Number(event.target.value) || 600 })} /></label>
+        </div>
+        <div className="integration-actions"><button disabled={busy} onClick={detectChecks}>Detect from repository</button>{(checks.build || checks.test) && <button className="danger-control" disabled={!canWrite} onClick={() => setChecks({ ...EMPTY_CHECKS, timeout_seconds: checks.timeout_seconds })}>Clear</button>}</div>
+        {suggestions && suggestions.length === 0 && <p className="quiet-note">No build system was recognized at the repository root. Enter the commands your team runs.</p>}
+        {suggestions && suggestions.length > 0 && <ul className="check-suggestions">{suggestions.map((item) => <li key={`${item.repository}-${item.tool}`}><div><strong>{item.tool}</strong><small>{item.reason}</small>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: item.build, test: item.test })}>Use</button></li>)}</ul>}
+        <details className="advanced"><summary>What runs, and where</summary><p>Commands run with your shell in a detached worktree under TicketBunker's data folder, never in your checkout, with the timeout above. The build runs first; the test command is skipped when the build fails. The first error line and a bounded log land in the report's evidence, and a failure sets the Standing verdict to blocked.</p></details>
       </section>}
 
       {state && !project && tab === "defaults" && <section className="config-surface">

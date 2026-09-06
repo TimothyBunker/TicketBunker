@@ -313,6 +313,11 @@ new Bunkers.
   stage places ticket terms on the baseline so the agent starts from hits.
   While a synthesis runs the page polls and shows phase, tool calls, and
   elapsed time, then re-reads once when it stops.
+- A Project's `checks` document (build, test, timeout) makes the bootstrap
+  run the team's own commands in a detached scratch worktree at the branch
+  head (`check` stage); outcomes prefill What and State and a failure asks
+  for a blocked verdict. The Checks tab detects suggestions from the
+  repository root's manifests; `application.project.checks.detect`.
 - The Reader brief opens with `### Standing` (one Verdict claim, optional
   `Next:` and `Ask:`) and closes with `### Checklist` (one `Done:`/`Partial:`/
   `Missing:`/`Unclear:` claim per ticket item) when the ticket has items. The

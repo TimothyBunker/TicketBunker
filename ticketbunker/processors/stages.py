@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import subprocess
+import os
 from pathlib import Path
 
 from ..contracts import StageContract, run_stage
@@ -72,6 +75,13 @@ CONTRACTS: dict[str, StageContract] = {
         inputs="Ticket title, description, and acceptance criteria; the baseline tree.",
         process="Extract identifier-like and distinctive terms from the ticket text; git grep each on the baseline; rank files by distinct terms matched, bounded.",
         desired_outcome="Ticket-wide: the terms searched and the files on the baseline that mention them, with match counts and the terms each file matched.",
+    ),
+    "check": StageContract(
+        name="check",
+        purpose="Run the team's own build and test commands so 'does it work' is an observation, not a guess.",
+        inputs="The Project's configured build/test commands and timeout; the branch being synthesized.",
+        process="Add a detached scratch worktree at the branch head, run build then test there with a timeout, capture exit codes, duration, and the first error line, keep a bounded log, remove the worktree.",
+        desired_outcome="For the synthesized branch: per command, passed or failed with exit code, seconds, first error, and log path; or a record that no check is configured.",
     ),
     "risk": StageContract(
         name="risk",
@@ -154,6 +164,8 @@ def run_bootstrap(
     ledger: Ledger,
     assigned_branches: list[str] | None = None,
     ticket_text: dict | None = None,
+    checks: dict | None = None,
+    check_branch: str | None = None,
 ) -> dict:
     """Run all eight stages in order. Returns the combined observation set."""
     observations: dict = {"ticket_key": ticket_key, "baseline": baseline, "repo": str(repo)}
@@ -474,5 +486,78 @@ def run_bootstrap(
         return payload
 
     observations["locate"] = run_stage(CONTRACTS["locate"], ledger, stage_locate)
+
+    CHECK_LOG_LINES = 200
+    ERROR_LINE_RE = re.compile(r"\b(error|failed|failure|fatal|traceback|exception|assert)\b", re.IGNORECASE)
+
+    def stage_check() -> dict:
+        configured = {
+            name: str((checks or {}).get(name) or "").strip()
+            for name in ("build", "test")
+            if str((checks or {}).get(name) or "").strip()
+        }
+        result: dict[str, dict] = {}
+        if not configured or not check_branch or check_branch not in bases:
+            _write_observation(obs_dir, "check", {"configured": bool(configured), "branch": check_branch or "", "per_branch": result})
+            return result
+        try:
+            timeout = int((checks or {}).get("timeout_seconds") or 600)
+        except (TypeError, ValueError):
+            timeout = 600
+        slug = branch_slug(check_branch)
+        worktree = obs_dir.parent / "checks" / slug
+        git_status(repo, ["worktree", "remove", "--force", str(worktree)], ledger, "check")
+        worktree.parent.mkdir(parents=True, exist_ok=True)
+        git(repo, ["worktree", "add", "--detach", str(worktree), check_branch], ledger, "check")
+        outcomes: dict[str, dict] = {}
+        try:
+            for name, command_line in configured.items():
+                started = time.monotonic()
+                timed_out = False
+                try:
+                    proc = subprocess.run(
+                        command_line,
+                        shell=True,
+                        cwd=str(worktree),
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env={**os.environ, "CI": "1", "TB_CHECK": name},
+                    )
+                    output = (proc.stdout or "") + (proc.stderr or "")
+                    exit_code: int | None = proc.returncode
+                except subprocess.TimeoutExpired as exc:
+                    output = ((exc.stdout or b"") if isinstance(exc.stdout, bytes) else (exc.stdout or "")).__str__()
+                    exit_code = None
+                    timed_out = True
+                seconds = round(time.monotonic() - started, 1)
+                lines = [line for line in output.splitlines() if line.strip()]
+                first_error = next((line.strip() for line in lines if ERROR_LINE_RE.search(line)), lines[-1].strip() if lines else "")
+                log_dir = obs_dir / "checks"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"{slug}.{name}.log"
+                log_path.write_text("\n".join(lines[-CHECK_LOG_LINES:]) + "\n", encoding="utf-8")
+                ledger.event("command", stage="check", argv=[command_line], cwd=str(worktree), status=exit_code, seconds=seconds, timed_out=timed_out)
+                outcomes[name] = {
+                    "command": command_line,
+                    "exit": exit_code,
+                    "timed_out": timed_out,
+                    "seconds": seconds,
+                    "passed": exit_code == 0,
+                    "first_error": first_error[:300],
+                    "log": str(log_path.relative_to(obs_dir.parent)),
+                }
+                if exit_code != 0:
+                    break  # a failed build makes the test result meaningless
+        finally:
+            git_status(repo, ["worktree", "remove", "--force", str(worktree)], ledger, "check")
+            git_status(repo, ["worktree", "prune"], ledger, "check")
+        result[check_branch] = outcomes
+        _write_observation(
+            obs_dir, "check", {"configured": True, "branch": check_branch, "timeout_seconds": timeout, "per_branch": result}
+        )
+        return result
+
+    observations["check"] = run_stage(CONTRACTS["check"], ledger, stage_check)
 
     return observations

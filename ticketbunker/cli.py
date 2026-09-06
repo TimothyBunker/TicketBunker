@@ -1643,6 +1643,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             ledger=ledger,
             assigned_branches=ticket.get("assigned_branches") or [],
             ticket_text=ticket,
+            checks=runtime_info.get("checks") if isinstance(runtime_info.get("checks"), dict) else None,
+            check_branch=branch,
         )
         _recompose(bunker, ledger)
         master.regenerate(bunker, ledger)

@@ -84,6 +84,28 @@ def checklist_items(ticket: dict) -> list[str]:
     return items[:MAX_CHECKLIST_ITEMS]
 
 
+def _check_lines(outcomes: dict) -> list[str]:
+    """One observation per configured check that ran on this branch."""
+    lines: list[str] = []
+    for name in ("build", "test"):
+        outcome = outcomes.get(name)
+        if not isinstance(outcome, dict):
+            continue
+        label = name.capitalize()
+        command = outcome.get("command", "")
+        seconds = outcome.get("seconds", "?")
+        if outcome.get("passed"):
+            lines.append(f"- [observation] {label} check passed in {seconds}s: `{command}` (check).")
+        elif outcome.get("timed_out"):
+            lines.append(f"- [observation] {label} check timed out after {seconds}s: `{command}` (check, {outcome.get('log', '')}).")
+        else:
+            lines.append(
+                f"- [observation] {label} check failed (exit {outcome.get('exit')}) in {seconds}s: `{command}` — "
+                f"first error: {outcome.get('first_error') or 'no output'} (check, {outcome.get('log', '')})."
+            )
+    return lines
+
+
 def build(ticket: dict, observations: dict, branch: str) -> str:
     mh = observations.get("merge_history", {}).get(branch, {})
     au = observations.get("authorship", {}).get(branch, {})
@@ -92,6 +114,10 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     pe = observations.get("people", {}).get(branch, {})
     rk = observations.get("risk", {}).get(branch, {})
     lo = observations.get("locate", {}) or {}
+    ck = observations.get("check", {}).get(branch, {}) or {}
+    check_lines = _check_lines(ck)
+    check_failed = any(not outcome.get("passed") for outcome in ck.values() if isinstance(outcome, dict))
+    no_branch_work = not (ws.get("work_commits") or []) and not (df.get("files") or [])
     baseline = str(observations.get("baseline") or "the baseline")
 
     lines: list[str] = []
@@ -110,6 +136,11 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         "with an anchor>` (use [real] with an anchor instead of [speculation] only when the verdict rests on a checked "
         "fact such as a failing build); then at most one `Next:` claim (the first concrete thing to do, with an anchor) "
         "and at most one `Ask:` claim (whom to talk to and why, citing (ticket) or (people)); nothing else in this part"
+        + ("; a configured build or test check FAILED on this branch (see the check observations under What), so the "
+           "verdict is blocked and its finding is that first error unless the code proves otherwise" if check_failed else "")
+        + ("; this branch has no work commits and no diff, so do not report the empty diff as the finding: judge the "
+           "tree at the branch head against the ticket (the work may already live on the baseline) and say what state "
+           "that code is in" if no_branch_work else "")
     ))
     lines += ["", "### Who", ""]
     lines.append(AGENT_AREA.format(
@@ -149,8 +180,10 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append(AGENT_AREA.format(
             instruction="reader brief Checklist: one claim per item below, in this order, each beginning `Done:`, "
             "`Partial:`, `Missing:`, or `Unclear:` followed by the item text and then the evidence — an anchor into "
-            "the code for Done and Partial, an anchor or (ticket) for Missing and Unclear; judge against the code on "
-            "the branch, not against the ticket's own wording; items: " + numbered
+            "the code for Done and Partial, an anchor or (ticket) for Missing and Unclear (a [speculation] item still "
+            "carries its grounding rank before the mark: `- [speculation] grounded — Missing: ...`); judge each item against the "
+            "whole tree at the branch head (what the code actually contains and whether it works), never against this "
+            "branch's diff alone or the ticket's own wording; items: " + numbered
         ))
     lines.append("")
 
@@ -216,15 +249,19 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     if df.get("patch"):
         lines.append(f"- [observation] Full patch text: {df['patch']}"
                      + (" (truncated)" if df.get("patch_truncated") else "") + " (diff).")
+    lines.extend(check_lines)
     for path, count in sorted((rk.get("added_markers") or {}).items()):
         lines.append(f"- [observation] Added {count} TODO/FIXME-style marker(s) in {path} (risk).")
     if rk.get("source_touched_without_tests"):
         source_count = len(files) - len(rk.get("tests_touched") or [])
         lines.append(f"- [observation] No test file changed alongside {source_count} source file(s) (risk).")
     lines.append(AGENT_AREA.format(
-        instruction="characterize the actual code changes from the patch — what the code does, not just which "
-        "files moved; [speculation] with grounding; optionally one 'Risk:' claim pointing at a bug, regression, "
-        "or untested path in the change, and one 'Next:' claim"
+        instruction=("this branch has no work commits and no diff: describe the state of the ticket's code at the "
+                     "branch head instead (read the located files; does it build, is it complete, what is wrong), "
+                     "as [real] finds with anchors and [speculation] with grounding" if no_branch_work else
+                     "characterize the actual code changes from the patch — what the code does, not just which "
+                     "files moved; [speculation] with grounding")
+        + "; optionally one 'Risk:' claim pointing at a bug, regression, or untested path, and one 'Next:' claim"
     ))
     lines.append("")
 
@@ -277,6 +314,7 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         f"- [observation] Branch {branch}: {mh.get('ahead_of_merge_base', '?')} commit(s) of work, "
         f"{mh.get('behind_baseline', '?')} behind baseline, merged back: {mh.get('merged_back', '?')} (merge_history)."
     )
+    lines.extend(check_lines)
     lines.append(f"- [observation] Last sync with baseline: {mh.get('last_sync_date', '?')} (merge_history).")
     if au.get("recency_of_development"):
         lines.append(f"- [observation] Recency of development: {au['recency_of_development']} (authorship).")
