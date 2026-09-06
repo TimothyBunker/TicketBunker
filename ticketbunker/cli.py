@@ -51,6 +51,11 @@ def _ticket(bunker: Path) -> dict:
 
 def _recompose(bunker: Path, ledger: Ledger, branch: str | None = None, merge: bool = False) -> None:
     p = layout.paths(bunker)
+    # The explanation and workflow fragments are ours and current: every
+    # composition rewrites them, so a Bunker runtime that was never seeded
+    # and a legacy bunker created under an older release both brief the
+    # agent with today's rules.
+    fragments.seed_static(p["context"])
     ticket = _ticket(bunker)
     if ticket.get("repo"):
         fragments.mirror_tbroot(Path(ticket["repo"]), p["context"])
@@ -158,6 +163,12 @@ def _report_draft_errors(
     if remaining:
         errors.insert(0, f"{remaining} report area(s) still contain an agent placeholder")
     return errors
+
+
+def _report_draft_warnings(text: str) -> list[str]:
+    """Advisory findings a repair session should also address while it is
+    already editing; they never block a publish on their own."""
+    return [str(finding) for finding in reportlint.lint(text) if finding.severity == "warn"]
 
 
 def _bunkers_assigned(project: Path | None, branch: str) -> list[Path]:
@@ -507,6 +518,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
             obs_dir=layout.paths(bunker)["observations"],
             ledger=ledger,
             assigned_branches=ticket.get("assigned_branches") or [],
+            ticket_text=ticket,
         )
     except GitError as exc:
         if "rev-parse" in " ".join(exc.argv):
@@ -873,12 +885,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     draft_errors = _report_draft_errors(text, repo, bunker, refs)
     repaired = False
     if draft_errors and args.harness in {"pi", "codex"}:
+        advisory = _report_draft_warnings(text)
+        findings = [f"- {finding}" for finding in draft_errors]
+        if advisory:
+            findings.append("- Also address, while you are editing (advisory, not blocking):")
+            findings.extend(f"  - {finding}" for finding in advisory)
         repair_prompt = harness_mod.REPAIR_PROMPT.format(
             ticket_id=_ticket(bunker).get("id") or bunker.name,
             branch=args.branch,
             form=form,
             repo=repo,
-            findings="\n".join(f"- {finding}" for finding in draft_errors),
+            findings="\n".join(findings),
         )
         ledger.event(
             "session_repair_started",
@@ -1625,6 +1642,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             obs_dir=layout.paths(bunker)["observations"],
             ledger=ledger,
             assigned_branches=ticket.get("assigned_branches") or [],
+            ticket_text=ticket,
         )
         _recompose(bunker, ledger)
         master.regenerate(bunker, ledger)

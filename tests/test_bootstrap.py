@@ -161,12 +161,30 @@ class PeopleAndRiskTests(unittest.TestCase):
         self.assertEqual(spike["baseline_overlap"], [])
         self.assertEqual(spike["added_markers"], {})
 
+    def test_locate_places_ticket_terms_on_the_baseline(self) -> None:
+        from ticketbunker.processors.stages import ticket_terms
+
+        self.assertEqual(
+            ticket_terms("Position Component Implementation", "Coordinates for general Pos3, not yet WorldPos3 and LocalPos3; see Type::Pos3 and parse_lines"),
+            ["WorldPos3", "LocalPos3", "Type::Pos3", "parse_lines", "Position", "Component", "Coordinates", "general"],
+        )
+        result = run_bootstrap(
+            repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger,
+            ticket_text={"title": "Parse blank lines", "description": "The parse helper skips blank lines"},
+        )
+        locate = result["locate"]
+        self.assertIn("parse", [term.lower() for term in locate["terms"]])
+        hit = next(item for item in locate["files"] if item["path"] == "src/parse.py")
+        self.assertIn("parse", [term.lower() for term in hit["terms"]])
+        self.assertGreaterEqual(hit["matches"], 1)
+        self.assertTrue((self.observations / "locate.json").is_file())
+
     def test_scaffold_prefills_people_and_risk_evidence(self) -> None:
         from ticketbunker.builders import fragments, scaffold
 
-        run_bootstrap(repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger)
+        ticket = {"id": "TB-7", "title": "Parse blank lines", "assignee": "Tim", "reporter": "Tim", "comments": [{"author": "Grace", "text": "Careful with blank lines"}]}
+        run_bootstrap(repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger, ticket_text=ticket)
         observations = fragments.load_observations(self.observations)
-        ticket = {"id": "TB-7", "assignee": "Tim", "reporter": "Tim", "comments": [{"author": "Grace", "text": "Careful with blank lines"}]}
         form = scaffold.build(ticket, observations, "tim/TB-7-parser")
         who = form.split("\n## Who\n", 1)[1].split("\n## What\n", 1)[0]
         self.assertIn("Commenter: Grace (1 comment(s) on the ticket) (ticket).", who)
@@ -178,4 +196,25 @@ class PeopleAndRiskTests(unittest.TestCase):
         self.assertIn("No test file changed alongside 1 source file(s) (risk).", what)
         where = form.split("\n## Where\n", 1)[1].split("\n## Why\n", 1)[0]
         self.assertIn("Also changed on main since the merge-base: src/parse.py", where)
+        self.assertIn("Ticket terms found on main: src/parse.py", where)
+        self.assertIn("start from the locate hits above", where)
         self.assertIn("'Risk:' claim", form.split("### Who", 1)[1].split("### What", 1)[0])
+
+
+class DescriptionItemTests(unittest.TestCase):
+    def test_nested_bullets_flatten_to_one_item_per_line(self) -> None:
+        from ticketbunker.builders import scaffold
+
+        text = "[8/21/26]\n- Implemented:\n  - CommonTypes\n  - Coordinates for general Pos3\n- Todo:\n  - WorldPos3\n"
+        self.assertEqual(
+            scaffold.description_items(text),
+            ["[8/21/26]", "Implemented", "Implemented › CommonTypes", "Implemented › Coordinates for general Pos3", "Todo", "Todo › WorldPos3"],
+        )
+        self.assertEqual(scaffold.description_items("One plain line."), ["One plain line."])
+        form = scaffold.build({"id": "TB-1", "description": text}, {}, "tim/TB-1")
+        why = form.split("\n## Why\n", 1)[1].split("\n## State\n", 1)[0]
+        self.assertIn("- [observation] Ticket description item: Implemented › CommonTypes (ticket).", why)
+        self.assertNotIn("\n- Implemented:", why)
+        for line in why.splitlines():
+            if line.startswith("- "):
+                self.assertTrue(line.startswith("- [observation]"), line)

@@ -506,3 +506,5 @@ details.advanced > *:not(summary) { margin-top: 10px; }
   .source-editor > header > div:last-child { grid-column: 1 / -1; padding-bottom: 6px; }
   .configuration-drawer { overflow-x: auto; }
 }
+
+.state-line strong .elapsed { color: #7e8999; font-weight: 600; font-size: 10px; font-variant-numeric: tabular-nums; }

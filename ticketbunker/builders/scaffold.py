@@ -18,6 +18,37 @@ MAX_PREFILL_PEOPLE = 6
 AGENT_AREA = "<!-- agent: {instruction} -->"
 
 
+def description_items(text: str) -> list[str]:
+    """Flatten a ticket description into one line per item.
+
+    Tracker descriptions arrive as nested bullet lists. A form claim is one
+    line, so each bullet becomes its own item with its parents joined by
+    " › ", and plain lines stay as they are. The raw text remains in
+    ticket.json for the agent to cite.
+    """
+    items: list[str] = []
+    stack: list[tuple[int, str]] = []
+    for raw in str(text or "").splitlines():
+        if not raw.strip():
+            continue
+        indent = len(raw) - len(raw.lstrip(" \t"))
+        body = raw.strip()
+        bullet = re.match(r"^(?:[-*+•]|\d+[.)])\s+(.*)$", body)
+        if bullet:
+            label = bullet.group(1).strip().rstrip(":").strip()
+            if not label:
+                continue
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            parents = [name for _, name in stack]
+            items.append(" › ".join([*parents, label]) if parents else label)
+            stack.append((indent, label))
+        else:
+            stack.clear()
+            items.append(body)
+    return items
+
+
 def build(ticket: dict, observations: dict, branch: str) -> str:
     mh = observations.get("merge_history", {}).get(branch, {})
     au = observations.get("authorship", {}).get(branch, {})
@@ -25,6 +56,7 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     ws = observations.get("work_separation", {}).get(branch, {})
     pe = observations.get("people", {}).get(branch, {})
     rk = observations.get("risk", {}).get(branch, {})
+    lo = observations.get("locate", {}) or {}
     baseline = str(observations.get("baseline") or "the baseline")
 
     lines: list[str] = []
@@ -148,7 +180,17 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         lines.append("- [observation] No edits on this branch yet relative to the merge-base (diff).")
     for path in rk.get("baseline_overlap") or []:
         lines.append(f"- [observation] Also changed on {baseline} since the merge-base: {path} — conflict risk on merge (risk).")
-    lines.append(AGENT_AREA.format(instruction="[real] located ticket-related information: symbols/paths from the ticket found in the baseline, with anchors"))
+    for hit in (lo.get("files") or [])[:MAX_PREFILL_FILES]:
+        terms = ", ".join(hit.get("terms") or [])
+        lines.append(
+            f"- [observation] Ticket terms found on {baseline}: {hit['path']} ({hit.get('matches', 0)} match(es): {terms}) (locate)."
+        )
+    if lo.get("terms") and not lo.get("files"):
+        lines.append(f"- [observation] None of the ticket's terms ({', '.join(lo['terms'][:8])}) occur on {baseline} (locate).")
+    lines.append(AGENT_AREA.format(
+        instruction="[real] located ticket-related information: start from the locate hits above, confirm the symbols/paths "
+        "from the ticket in the baseline, and cite them with anchors; do not re-search for terms the locate stage already placed"
+    ))
     lines.append(AGENT_AREA.format(
         instruction="[speculation] where changes may be needed to solve the ticket, ranked grounded/adjacent/ungrounded; "
         "if nothing concrete, say so and name the tag-up person; optionally one 'Risk:' claim (where a change is likely "
@@ -157,10 +199,17 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines.append("")
 
     lines += ["## Why", ""]
-    if ticket.get("description"):
-        lines.append(f"- [observation] Ticket description: {ticket['description']} (ticket).")
     if ticket.get("title"):
         lines.append(f"- [observation] Ticket title: {ticket['title']} (ticket).")
+    items = description_items(str(ticket.get("description") or ""))
+    if len(items) == 1:
+        lines.append(f"- [observation] Ticket description: {items[0]} (ticket).")
+    elif items:
+        for item in items:
+            lines.append(f"- [observation] Ticket description item: {item} (ticket).")
+    for criterion in ticket.get("acceptance_criteria") or []:
+        if isinstance(criterion, str) and criterion.strip():
+            lines.append(f"- [observation] Acceptance criterion: {criterion.strip()} (ticket).")
     lines.append(AGENT_AREA.format(
         instruction="primary sources first; your [speculation] synthesis at the bottom, composed from [real] findings "
         "and tagged; optionally one 'Risk:' claim (where the change and the ticket's intent diverge, or an acceptance "

@@ -35,7 +35,7 @@ ASPECT_RE = re.compile(
 # Who is about people, so a [real] Who claim may rest on the ticket or the
 # people observations instead of a source path.
 WHO_CITATION_RE = re.compile(
-    r"\((?:ticket(?: config)?|authorship|people|comments?)\)|ticket\.json|observations/(?:authorship|people)\.json",
+    r"\([^)]*\b(?:ticket|authorship|people|comments?|config)\b[^)]*\)|ticket\.json|observations/(?:authorship|people)\.json",
     re.IGNORECASE,
 )
 NOBODY_RE = re.compile(

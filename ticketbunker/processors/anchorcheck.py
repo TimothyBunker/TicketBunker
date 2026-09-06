@@ -87,7 +87,10 @@ def _resolves(repo: Path, refs: list[str], bunker: Path, path: str, line: int | 
             continue
         if line is None or line <= content.count("\n") + 1:
             return ref
-    local = bunker / _bunker_relative(bunker, clean)
+    relative = _bunker_relative(bunker, clean)
+    if not _citable(relative):
+        return None
+    local = bunker / relative
     if local.exists():
         if line is None or not local.is_file():
             return "bunker"
@@ -97,6 +100,18 @@ def _resolves(repo: Path, refs: list[str], bunker: Path, path: str, line: int | 
         except (OSError, UnicodeDecodeError):
             return None
     return None
+
+
+# Bunker files an anchor may rest on: the ticket record and the pipeline's
+# mechanical output. The form the agent is writing, its transcript, the
+# composed prompt, and the context fragments are the agent's own working
+# material and never count as evidence for a claim.
+_CITABLE_PREFIXES = ("observations/", "inferences/", "reports/")
+_CITABLE_FILES = ("ticket.json",)
+
+
+def _citable(relative: str) -> bool:
+    return relative in _CITABLE_FILES or relative.startswith(_CITABLE_PREFIXES)
 
 
 def _bunker_relative(bunker: Path, path: str) -> str:

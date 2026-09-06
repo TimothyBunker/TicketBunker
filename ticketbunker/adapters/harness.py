@@ -66,11 +66,16 @@ The mechanical gate reported:
 Edit that same form in place and fix every listed finding. Keep every existing
 [observation] line unchanged. Every claim must be a Markdown bullet beginning
 exactly with `- [real]` or `- [speculation]`. A [real] claim must name a
-checkable repo or bunker path. A [speculation] claim must say grounded,
-adjacent, or ungrounded. Reader brief Who, What, Where, and Why must each have
-at least one tagged bullet; Where must have exactly one, while the others have
-at most two. Remove every `<!-- agent: ... -->` marker. Do not publish or
-change source code. Save the repaired form in place and stop.
+checkable repo path, or `ticket.json` / `observations/...` for the bunker's
+own records; never this form, its transcript, the prompt, or an absolute
+path. A Who claim names a person and may cite (ticket), (authorship), or
+(people) instead of a path; drop any Who line that only says no one else is
+involved. A [speculation] claim must say grounded, adjacent, or ungrounded.
+Reader brief Who, What, Where, and Why must each have at least one tagged
+bullet; Where must have exactly one, while the others have at most two, plus
+at most one `Risk:` and one `Next:` claim each. Remove every
+`<!-- agent: ... -->` marker. Do not publish or change source code. Save the
+repaired form in place and stop.
 """
 
 MERGE_CONTRACT = StageContract(

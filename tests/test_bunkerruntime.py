@@ -195,13 +195,20 @@ class BunkerRuntimeTests(unittest.TestCase):
             "- [real] Observations exist (.tb/ECS-4_bunker/observations/branch_resolution.json).\n"
             "- [real] The plain form works (ticket.json).\n"
             "- [real] A missing file still fails (observations/nothing.json).\n"
+            f"- [real] The form is not evidence ({bunker}/sessions/tim__ECS-4.form.md).\n"
+            "- [real] Nor is the prompt (tb.md).\n"
         )
         (bunker / "observations" / "branch_resolution.json").write_text("{}\n", encoding="utf-8")
+        (bunker / "sessions").mkdir(exist_ok=True)
+        (bunker / "sessions" / "tim__ECS-4.form.md").write_text("## Who\n", encoding="utf-8")
+        (bunker / "tb.md").write_text("prompt\n", encoding="utf-8")
 
         errors = anchorcheck.verify(text, self.repo, ["main"], bunker)
 
-        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(errors), 3, errors)
         self.assertIn("observations/nothing.json", errors[0])
+        self.assertIn("form.md", errors[1])
+        self.assertIn("tb.md", errors[2])
 
     def test_a_verified_report_the_bunker_did_not_accept_is_shared_without_another_run(self) -> None:
         branch = self.start_work()

@@ -312,6 +312,19 @@ function AgentTab({
   );
 }
 
+function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const start = Date.parse(since);
+  if (!Number.isFinite(start)) return null;
+  const seconds = Math.max(0, Math.round((now - start) / 1000));
+  const label = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return <small className="elapsed"> · {label}</small>;
+}
+
 function TicketRail({
   detail,
   bunkerId,
@@ -370,7 +383,7 @@ function TicketRail({
     <aside className="ticket-rail">
       <section className="state-hub">
         <header><h2>Synthesis</h2></header>
-        <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
+        <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}{synthesis.status === "updating" && <Elapsed since={String((synthesis.progress as Record<string, unknown> | undefined)?.started_at || "")} />}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
         {Boolean(synthesis.log) && <details className="diagnostic-path"><summary>Diagnostic location</summary><code>{String(synthesis.log)}</code><button onClick={() => navigator.clipboard.writeText(String(synthesis.log)).then(() => notify("Diagnostic path copied")).catch(() => notify("Copy was unavailable; the full path is shown above.", true))}>Copy path</button></details>}
         {repoRoot && synthesis.status !== "updating" && <button className="wide-action" disabled={busy} onClick={synthesize}>{synthesis.status === "current" ? "Synthesize again" : String(synthesis.action || "Synthesize")}</button>}
       </section>
@@ -561,6 +574,22 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       .catch((reason) => setError(String(reason)));
   }
   useEffect(load, [bunker.id, reference.id]);
+  // While a synthesis runs, the page follows it: poll the ticket every few
+  // seconds and take one more read when it finishes, so the report appears
+  // without a manual refresh. A hidden tab stays quiet; returning to it
+  // reads once immediately.
+  const synthesisStatus = String((detail?.truth?.synthesis as Record<string, unknown> | undefined)?.status || "");
+  const wasUpdating = useRef(false);
+  useEffect(() => {
+    const updating = synthesisStatus === "updating";
+    if (!updating && wasUpdating.current) load();
+    wasUpdating.current = updating;
+    if (!updating) return;
+    const tick = () => { if (!document.hidden) load(); };
+    const timer = window.setInterval(tick, 3000);
+    document.addEventListener("visibilitychange", tick);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
+  }, [synthesisStatus, bunker.id, reference.id]);
   useEffect(() => {
     if (!detail || editor) return;
     const targets = ["description", "details", "agent-work"].map((id) => document.getElementById(id)).filter((value): value is HTMLElement => Boolean(value));

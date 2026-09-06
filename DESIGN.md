@@ -407,7 +407,10 @@ ticket, `ticketbunker/bunkerruntime.py` projects the database row into
 exactly like a legacy ticket bunker, so the observation stages, context
 composition, harness session, lint and anchor gates, and master builder run
 unchanged. The projection is rewritten only when the ticket itself changes, so
-a rerun keeps its input fingerprint. A runtime that has no working copy of a
+a rerun keeps its input fingerprint. Every composition rewrites the
+explanation and workflow fragments from the running release, so a runtime
+that was never seeded and a legacy bunker created under an older release both
+brief the agent with the current rules. A runtime that has no working copy of a
 report the Bunker has accepted (a replica, an imported copy, a machine that
 never ran synthesis for the ticket) is seeded with the accepted text when it
 is materialized, so the truth commands and the coworker read the same reports
@@ -462,6 +465,12 @@ tool:
   session headlessly; the bootstrap extensions and command-fed agent do the
   rest. Branch creation and ordinary Git activity only mark synthesis as
   missing or changed.
+- While a synthesis runs, the ticket page follows it: the rail shows the
+  phase (observing, placing the ticket, agent writing with its tool-call
+  count, repairing, publishing) and the elapsed time, read cheaply from the
+  ledger tail, and the page re-reads the ticket every few seconds while the
+  status is updating and once more when it stops, so the report appears
+  without a manual refresh. A hidden tab stays quiet and reads once on return.
 - A stopped synthesis names what stopped it, in this precedence: the run's
   own summary plus the first blocking `[error]` finding, then a provider or
   harness message such as a usage limit, never a `[warn]` line, which does
@@ -798,7 +807,7 @@ bunker's layout first: anything up to and including the bunker's directory
 name, or an absolute prefix, is stripped, so `runtime/ECS-4_bunker/ticket.json`
 and `ticket.json` resolve the same way. The workflow preamble tells the agent
 to use the plain form. A cited line number must fall inside the
-file. A claim none of whose anchors resolve is rejected at the gate, and an
+file. Only the bunker's records count as bunker evidence: `ticket.json`, `observations/`, `inferences/`, and `reports/`. The report form the agent is writing, its transcript, the composed prompt, and the context fragments are the agent's working material, and an anchor into them never resolves, so a claim cannot certify itself. A claim none of whose anchors resolve is rejected at the gate, and an
 accepted component is stamped (`tb:verified branch/commit/ts` plus known
 `harness/provider/model`, mechanical, never agent-authored) with the ref it was
 proven against and its generator identity; the master's
@@ -903,7 +912,13 @@ composition.
 pipeline **pre-fills** it — Who from ticket config, authorship, and the
 people stage (recent authors of the touched files, committers on the
 ticket's other branches), What from the diffs and the risk stage, Where from
-the diffs and baseline overlap, State from merge history, all as
+the diffs, baseline overlap, and the locate stage (identifier-like and
+distinctive terms from the ticket text, searched on the baseline with
+`git grep` and ranked by distinct terms matched, so the agent starts from
+placed files instead of searching for them), Why from the ticket title,
+description, and acceptance criteria with a multi-line description
+flattened to one `[observation]` item per bullet (parents joined by " › ",
+the raw text kept in `ticket.json`), State from merge history, all as
 `[observation]` lines — and the
 agent **fills in the agent-specific areas**: the `[real]` finds, the ranked
 `[speculation]`, the Why synthesis. The form's structure is ours; the

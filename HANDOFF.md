@@ -303,7 +303,17 @@ new Bunkers.
   exact lint/anchor findings remain in private local `diagnostics.jsonl` and do
   not leak into coworker replies or command errors. It cannot edit source, run
   Git mutations, or write Combined directly.
-- The bootstrap runs eight stages: the six Git stages plus `people` (recent
+- Every composition reseeds the explanation and workflow fragments, so Bunker
+  runtimes (which were never seeded before) and older legacy bunkers brief the
+  agent with the current rules. A multi-line ticket description prefills as
+  one `[observation]` item per bullet. The anchor check accepts only
+  `ticket.json`, `observations/`, `inferences/`, and `reports/` as bunker
+  evidence; the form, transcript, prompt, and context fragments never
+  resolve. A repair pass also carries the advisory warnings. The `locate`
+  stage places ticket terms on the baseline so the agent starts from hits.
+  While a synthesis runs the page polls and shows phase, tool calls, and
+  elapsed time, then re-reads once when it stops.
+- The bootstrap runs nine stages: the six Git stages plus `locate`, `people` (recent
   authors of the touched files on the baseline, last committer on each other
   branch of the ticket) and `risk` (baseline overlap since the merge-base,
   TODO/FIXME markers added by the patch, source changed without a test).

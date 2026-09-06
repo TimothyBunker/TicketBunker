@@ -137,7 +137,10 @@ Your stages, in order:
      viewer can open them directly. Do not use that form for unverified paths.
      Cite this bunker's own files by their bunker-relative names, exactly
      `ticket.json` or `observations/diff.json`, never with the bunker's
-     directory or an absolute path in front.
+     directory or an absolute path in front. The ticket's own text lives in
+     `ticket.json`: cite that, never the report form you are writing, its
+     transcript, or this prompt — those are your working material, not
+     evidence, and the anchor check rejects them.
      The brief is agent-authored, so never label its claims [observation]:
      use anchored [real] for verified facts and ranked [speculation] for
      synthesis. The complete trail remains unchanged below it.
@@ -472,4 +475,6 @@ def load_observations(obs_dir: Path) -> dict | None:
     combined["baseline"] = stage_files.get("baseline", {}).get("baseline") or stage_files.get("merge_history", {}).get("baseline")
     for stage in ("diff", "merge_history", "work_separation", "authorship", "people", "risk"):
         combined[stage] = stage_files.get(stage, {}).get("per_branch", {})
+    locate = stage_files.get("locate", {})
+    combined["locate"] = locate if isinstance(locate, dict) else {}
     return combined

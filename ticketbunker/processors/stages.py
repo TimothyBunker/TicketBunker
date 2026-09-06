@@ -66,6 +66,13 @@ CONTRACTS: dict[str, StageContract] = {
         process="git log on the baseline for the touched paths, bounded, aggregated by author; the last work commit on each other branch of the ticket.",
         desired_outcome="Per branch: recent authors of the touched files on the baseline with counts and last activity, and the last committer on each other branch of the ticket.",
     ),
+    "locate": StageContract(
+        name="locate",
+        purpose="Place the ticket in the code before the agent starts searching for it.",
+        inputs="Ticket title, description, and acceptance criteria; the baseline tree.",
+        process="Extract identifier-like and distinctive terms from the ticket text; git grep each on the baseline; rank files by distinct terms matched, bounded.",
+        desired_outcome="Ticket-wide: the terms searched and the files on the baseline that mention them, with match counts and the terms each file matched.",
+    ),
     "risk": StageContract(
         name="risk",
         purpose="Surface mechanical hazards in the work so the report can be proactive without guessing.",
@@ -108,6 +115,37 @@ def _write_observation(obs_dir: Path, stage: str, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+STOPWORDS = frozenset(
+    """a an and are as at be been but by for from has have if implement implemented implementation in into is
+    it its need needs not of on or our should that the their then there these this those to todo was we were
+    when where which while will with would yet you your""".split()
+)
+IDENTIFIER_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+|[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+|[A-Za-z][A-Za-z0-9_]*(?:::|\.)[A-Za-z][A-Za-z0-9_]*)\b")
+WORD_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{4,}\b")
+LOCATE_MAX_TERMS = 12
+LOCATE_MAX_FILES = 15
+
+
+def ticket_terms(*texts: str) -> list[str]:
+    """Identifier-like terms first (CamelCase, snake_case, dotted or scoped
+    names), then distinctive words, deduplicated and bounded."""
+    text = "\n".join(value for value in texts if value)
+    terms: list[str] = []
+    seen: set[str] = set()
+    for match in IDENTIFIER_RE.findall(text):
+        key = match.casefold()
+        if key not in seen:
+            seen.add(key)
+            terms.append(match)
+    for match in WORD_RE.findall(text):
+        key = match.casefold()
+        if key in STOPWORDS or key in seen or any(key in value.casefold() for value in terms):
+            continue
+        seen.add(key)
+        terms.append(match)
+    return terms[:LOCATE_MAX_TERMS]
+
+
 def run_bootstrap(
     repo: Path,
     ticket_key: str,
@@ -115,6 +153,7 @@ def run_bootstrap(
     obs_dir: Path,
     ledger: Ledger,
     assigned_branches: list[str] | None = None,
+    ticket_text: dict | None = None,
 ) -> dict:
     """Run all eight stages in order. Returns the combined observation set."""
     observations: dict = {"ticket_key": ticket_key, "baseline": baseline, "repo": str(repo)}
@@ -399,5 +438,41 @@ def run_bootstrap(
 
     risk = run_stage(CONTRACTS["risk"], ledger, stage_risk)
     observations["risk"] = risk
+
+    def stage_locate() -> dict:
+        fields = ticket_text or {}
+        criteria = fields.get("acceptance_criteria") or []
+        terms = ticket_terms(
+            str(fields.get("title") or ""),
+            str(fields.get("description") or ""),
+            "\n".join(str(value) for value in criteria if isinstance(value, str)),
+        )
+        files: dict[str, dict] = {}
+        for term in terms:
+            out, status = git_status(
+                repo,
+                ["grep", "-I", "-i", "-c", "--fixed-strings", "-e", term, baseline_ref, "--", ".", f":(exclude){TB_DIR}"],
+                ledger,
+                "locate",
+            )
+            if status != 0:
+                continue  # no match is an ordinary outcome for git grep
+            for line in out.splitlines():
+                # "<ref>:<path>:<count>"
+                try:
+                    ref_and_path, count = line.rsplit(":", 1)
+                    path = ref_and_path.split(":", 1)[1]
+                    hits = int(count)
+                except (ValueError, IndexError):
+                    continue
+                entry = files.setdefault(path, {"path": path, "matches": 0, "terms": []})
+                entry["matches"] += hits
+                entry["terms"].append(term)
+        ranked = sorted(files.values(), key=lambda item: (-len(item["terms"]), -item["matches"], item["path"]))
+        payload = {"terms": terms, "files": ranked[:LOCATE_MAX_FILES], "file_count": len(ranked)}
+        _write_observation(obs_dir, "locate", payload)
+        return payload
+
+    observations["locate"] = run_stage(CONTRACTS["locate"], ledger, stage_locate)
 
     return observations

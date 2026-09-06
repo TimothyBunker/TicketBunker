@@ -208,6 +208,67 @@ def _synthesis_compact(updated_at: str, fallback: str) -> str:
     return f"Updated {age}" if age else fallback
 
 
+_PROGRESS_LABELS = {
+    "branch_resolution": "Observing branches",
+    "baseline": "Observing branches",
+    "diff": "Reading the diff",
+    "merge_history": "Reading merge history",
+    "work_separation": "Reading merge history",
+    "authorship": "Reading authorship",
+    "people": "Finding people around the code",
+    "risk": "Checking for hazards",
+    "locate": "Placing the ticket in the code",
+    "agent_session": "Agent writing the report",
+    "agent_report_repair": "Agent repairing the report",
+}
+
+
+def _synthesis_progress(bunker: Path, active: dict[str, Any]) -> dict[str, Any]:
+    """What a running synthesis is doing right now, read from the ledger tail.
+
+    The page polls this while a synthesis runs, so it stays cheap: the last
+    few kilobytes of the ledger, no Git.
+    """
+    started = str(active.get("started_at") or active.get("queued_at") or "")
+    phase = "Queued" if active.get("status") != "running" else "Starting"
+    tool_calls = 0
+    try:
+        ledger_path = layout.paths(bunker)["ledger"]
+        with ledger_path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - 65536))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except (OSError, KeyError):
+        tail = ""
+    for line in tail.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "synthesis_started":
+            phase, tool_calls = "Starting", 0
+        elif kind == "stage_start":
+            phase = _PROGRESS_LABELS.get(str(event.get("stage") or event.get("name") or ""), phase)
+            if event.get("stage") in {"agent_session", "agent_report_repair"} or event.get("name") in {"agent_session", "agent_report_repair"}:
+                tool_calls = 0
+        elif kind == "agent_tool_call":
+            tool_calls += 1
+        elif kind == "session_repair_started":
+            phase = _PROGRESS_LABELS["agent_report_repair"]
+        elif kind in {"intake_accepted", "bunker_report_published"} and phase.startswith("Agent"):
+            phase = "Publishing"
+        elif kind == "synthesis_finished":
+            phase = "Finishing"
+    detail = phase
+    if tool_calls and phase.startswith("Agent"):
+        detail = f"{phase} · {tool_calls} tool call(s) so far"
+    return {"phase": phase, "tool_calls": tool_calls, "started_at": started, "detail": detail}
+
+
 def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
     """Describe user-requested synthesis, age, and changes since publication."""
     branch = _current_branch(root)
@@ -229,12 +290,14 @@ def synthesis_state(root: Path, ticket: TicketSnapshot) -> dict[str, Any]:
         and active.get("branch") == branch
         and autoagent.was_user_requested(active)
     ):
+        progress = _synthesis_progress(ticket.bunker, active)
         return {
             "status": "updating",
             "label": "Synthesizing",
             "compact": "Updating",
-            "detail": f"TicketBunker is updating {branch} because you requested it.",
+            "detail": progress["detail"] or f"TicketBunker is updating {branch} because you requested it.",
             "action": "",
+            "progress": progress,
         }
     if (
         isinstance(last, dict)

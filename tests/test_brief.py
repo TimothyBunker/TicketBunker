@@ -157,6 +157,10 @@ class WhoAndProactiveClaimTests(unittest.TestCase):
         text = self.brief("- [real] Grace owns the parser this branch touches.")
         self.assertIn("real-anchor", {f.check for f in reportlint.lint(text)})
 
+    def test_who_citation_may_be_a_list(self) -> None:
+        text = self.brief("- [real] TimothyBunker is the assignee, reporter, and only author (ticket, authorship).")
+        self.assertNotIn("real-anchor", {f.check for f in reportlint.lint(text)})
+
     def test_who_warns_when_a_claim_says_nobody_instead_of_naming_someone(self) -> None:
         text = self.brief("- [real] `src/parse.py:7-42` identifies no contributor beyond the assignee (people).")
         findings = [f for f in reportlint.lint(text) if f.check == "who-people"]
