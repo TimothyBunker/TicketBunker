@@ -1,7 +1,7 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
-import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, type ReportPlace } from "./Markdown";
-import { provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
+import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
+import { briefPart, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
@@ -269,6 +269,40 @@ function SynthesisCard({
   );
 }
 
+// The reader's first answers, above the four evidence questions: the verdict
+// and its reason, the first thing to do, whom to ask, and the ticket's own
+// items judged against the code.
+function Standing({ report, scope }: { report: TicketDetail["reports"][number]; scope: string }) {
+  const standing = briefPart(report.content, "Standing");
+  const checklist = briefPart(report.content, "Checklist");
+  if (!standing && !checklist) return null;
+  const claims = standing.split("\n").filter((line) => /^\s*[-*]\s/.test(line));
+  const verdictLine = claims.find((line) => verdictOf(line.replace(/^\s*[-*]\s*/, "")));
+  const verdict = verdictLine ? verdictOf(verdictLine.replace(/^\s*[-*]\s*/, "")) : null;
+  const others = claims.filter((line) => line !== verdictLine).join("\n");
+  const place = useMemo<ReportPlace>(() => ({ category: "what", scope, branch: report.scope.startsWith("branch:") ? report.scope.slice(7) : "" }), [scope, report.scope]);
+  const verdictText = verdictLine && verdict ? verdictLine.replace(/^\s*[-*]\s*/, "").replace(/Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?/i, "") : "";
+  return (
+    <ReportPlaceContext.Provider value={place}>
+      <section className="standing">
+        {verdict && (
+          <div className={`verdict-row verdict-${verdict.verdict.replace(/\s+/g, "-")}`}>
+            <span className="verdict-pill">{VERDICT_LABELS[verdict.verdict] || verdict.verdict}</span>
+            <Markdown compact>{`- ${verdictText}`}</Markdown>
+          </div>
+        )}
+        {others && <Markdown compact>{others}</Markdown>}
+        {checklist && (
+          <div className="checklist">
+            <h3>Checklist</h3>
+            <Markdown compact>{checklist}</Markdown>
+          </div>
+        )}
+      </section>
+    </ReportPlaceContext.Provider>
+  );
+}
+
 function AgentTab({
   detail,
   scope,
@@ -303,6 +337,7 @@ function AgentTab({
         <section className="branch-report" key={report.scope}>
           {scope === "all" && <div className="branch-divider"><span>{report.scope === "combined" ? "Combined report" : report.scope.slice(7)}</span></div>}
           {report.scope !== "combined" && <p className="report-provenance">{provenanceLine(verifiedStamp(report.content), report.updated_at) || "Provenance unknown"}</p>}
+          <Standing report={report} scope={scope} />
           <div className="synthesis-grid">
             {TOPICS.map((topic) => <SynthesisCard key={topic} topic={topic} report={report} scope={scope} onQuote={onQuote} openSource={openSource} copySource={copySource} />)}
           </div>

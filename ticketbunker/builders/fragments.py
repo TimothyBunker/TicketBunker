@@ -123,10 +123,23 @@ Your stages, in order:
 1. **Enrich.** Search the baseline for code related to the ticket's subject
    (symbols named in the ticket, neighbors of the diff, callers of changed
    functions). Compile the relevant-locations list.
-2. **Write.** One report component per branch. Start with `## Reader brief`
-   and its `### Who`, `### What`, `### Where`, and `### Why` subsections,
-   then preserve the full evidence sections `## Who`, `## What`, `## Where`,
-   `## Why`, and `## State`.
+2. **Write.** One report component per branch. Start with `## Reader brief`:
+   `### Standing` first, then `### Who`, `### What`, `### Where`, `### Why`,
+   and `### Checklist` when the form offers one; then preserve the full
+   evidence sections `## Who`, `## What`, `## Where`, `## Why`, and
+   `## State`.
+   - **Standing** is the reader's first answer: where does this stand.
+     Exactly one Verdict claim first, `Verdict: not started | in progress |
+     blocked | looks done — <the single most important finding, anchored>`,
+     then at most one `Next:` (the first concrete thing to do) and one
+     `Ask:` (whom to talk to and why, citing (ticket) or (people)). Blocked
+     means something must be resolved before the work can continue, such as
+     code that does not build; looks done means every checklist item is
+     Done and nothing in the risk observations contradicts it.
+   - **Checklist** judges each of the ticket's own items against the code
+     on the branch: `Done:`, `Partial:`, `Missing:`, or `Unclear:` followed
+     by the item text and its evidence. Done and Partial need an anchor;
+     Missing and Unclear may cite (ticket).
    Prefix each claim line with `[observation]`, `[real]`, or
    `[speculation]`. Section rules:
    - **Reader brief**: prioritize instead of inventorying. Write one or two

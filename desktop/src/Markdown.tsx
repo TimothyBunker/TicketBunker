@@ -33,12 +33,36 @@ type Props = {
 const CLAIM_RE = /^\s*\[(observation|real|speculation|inference)\]\s*(?:(grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?/i;
 // A proactive claim names its aspect after the tag: "Risk:" for something
 // that could cause the reader problems, "Next:" for one thing to do now.
-const ASPECT_RE = /^\s*(Risk|Next):\s*/i;
+const ASPECT_RE = /^\s*(Risk|Next|Ask|Done|Partial|Missing|Unclear):\s*/i;
 
 export const ASPECT_LABELS: Record<string, { label: string; title: string }> = {
   risk: { label: "Risk", title: "Something that could cause you problems: a bug, an untested change, a conflict, a stale branch, an unclear owner." },
   next: { label: "Next", title: "One concrete thing you could do now." },
+  ask: { label: "Ask", title: "Who to talk to about this ticket, and why." },
+  done: { label: "Done", title: "This ticket item is present in the code, at the cited place." },
+  partial: { label: "Partial", title: "This ticket item is started but not complete, at the cited place." },
+  missing: { label: "Missing", title: "Nothing in the code satisfies this ticket item yet." },
+  unclear: { label: "Unclear", title: "The agent could not tell whether this item is satisfied." },
 };
+
+// The Standing verdict: "Verdict: blocked — sentence".
+const VERDICT_RE = /^\s*Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?/i;
+
+export const VERDICT_LABELS: Record<string, string> = {
+  "not started": "Not started",
+  "in progress": "In progress",
+  blocked: "Blocked",
+  "looks done": "Looks done",
+};
+
+/** Split a Standing verdict claim into its verdict and the sentence after it. */
+export function verdictOf(text: string): { verdict: string; rest: string } | null {
+  const claim = claimTag(text);
+  const body = claim ? claim.rest : text;
+  const match = VERDICT_RE.exec(body);
+  if (!match) return null;
+  return { verdict: match[1].toLowerCase(), rest: body.slice(match[0].length) };
+}
 
 export const TRUST_LABELS: Record<string, { label: string; title: string }> = {
   observation: { label: "Observed", title: "A mechanical Git or ticket fact produced by the pipeline, reproducible from the same repository state." },
@@ -81,7 +105,7 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
     const claim = claimTag(first);
     if (!claim) return null;
     const chip = claim.aspect ? <><TrustChip tagKey={claim.key} /><AspectChip aspect={claim.aspect} /></> : <TrustChip tagKey={claim.key} />;
-    return { chip, tone: claim.key, children: [claim.rest, ...others] };
+    return { chip, tone: claim.aspect ? `${claim.key} aspect-${claim.aspect}` : claim.key, children: [claim.rest, ...others] };
   }
   if (isValidElement(first) && (first as ReactElement<{ children?: ReactNode }>).type === "p") {
     const element = first as ReactElement<{ children?: ReactNode }>;
@@ -123,8 +147,9 @@ const COMPONENTS: Components = {
   li({ children: items, node: _node, ...rest }) {
     const replaced = withChip(Children.toArray(items));
     if (!replaced) return <li {...rest}>{items}</li>;
-    const tone = replaced.tone.startsWith("speculation") ? "speculation" : replaced.tone;
-    return <li {...rest} className={`claim claim-${tone}`}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
+    const [trust, ...aspects] = replaced.tone.split(" ");
+    const tone = trust.startsWith("speculation") ? "speculation" : trust;
+    return <li {...rest} className={["claim", `claim-${tone}`, ...aspects].join(" ")}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
   },
   code({ children: value, className, node: _node, ...rest }) {
     const raw = String(value ?? "");

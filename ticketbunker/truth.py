@@ -230,7 +230,9 @@ def _synthesis_progress(bunker: Path, active: dict[str, Any]) -> dict[str, Any]:
     few kilobytes of the ledger, no Git.
     """
     started = str(active.get("started_at") or active.get("queued_at") or "")
-    phase = "Queued" if active.get("status") != "running" else "Starting"
+    if active.get("status") != "running":
+        return {"phase": "Queued", "tool_calls": 0, "started_at": started, "detail": "Queued"}
+    phase = "Starting"
     tool_calls = 0
     try:
         ledger_path = layout.paths(bunker)["ledger"]
@@ -247,6 +249,9 @@ def _synthesis_progress(bunker: Path, active: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             continue
         if not isinstance(event, dict):
+            continue
+        # Only this run's events count; the tail still holds the previous run.
+        if started and str(event.get("ts") or "") < started[:19]:
             continue
         kind = event.get("type")
         if kind == "synthesis_started":

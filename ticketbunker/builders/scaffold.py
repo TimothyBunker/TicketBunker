@@ -49,6 +49,41 @@ def description_items(text: str) -> list[str]:
     return items
 
 
+MAX_CHECKLIST_ITEMS = 12
+DATE_ONLY_RE = re.compile(r"\[?\d{1,2}/\d{1,2}/\d{2,4}\]?")
+
+
+def _readable_items(items: list[str]) -> list[str]:
+    """Drop what says nothing on its own: bare dates, and a parent heading
+    that only introduces the items that follow it."""
+    kept: list[str] = []
+    for index, item in enumerate(items):
+        if DATE_ONLY_RE.fullmatch(item.strip()):
+            continue
+        following = items[index + 1] if index + 1 < len(items) else ""
+        if following.startswith(item + " › "):
+            continue
+        kept.append(item)
+    return kept
+
+
+def checklist_items(ticket: dict) -> list[str]:
+    """The ticket's own list of things to be true: acceptance criteria first,
+    then the description's items, deduplicated and bounded."""
+    items: list[str] = []
+    seen: set[str] = set()
+    criteria = [value for value in (ticket.get("acceptance_criteria") or []) if isinstance(value, str) and value.strip()]
+    for item in [*criteria, *_readable_items(description_items(str(ticket.get("description") or "")))]:
+        text = item.strip()
+        key = text.casefold()
+        # One-word markers are not checkable.
+        if not text or key in seen or len(text.split()) < 2:
+            continue
+        seen.add(key)
+        items.append(text)
+    return items[:MAX_CHECKLIST_ITEMS]
+
+
 def build(ticket: dict, observations: dict, branch: str) -> str:
     mh = observations.get("merge_history", {}).get(branch, {})
     au = observations.get("authorship", {}).get(branch, {})
@@ -66,7 +101,17 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     # remains in Who/What/Where/Why/State and the brief keeps the same trust
     # labels and anchor requirements as every other claim.
     lines += ["## Reader brief", ""]
-    lines += ["### Who", ""]
+    # Standing answers the reader's first question before the four evidence
+    # questions: where does this stand, what matters most, what next, whom to ask.
+    lines += ["### Standing", ""]
+    lines.append(AGENT_AREA.format(
+        instruction="reader brief Standing: exactly one verdict claim first, written as `- [speculation] <rank> — Verdict: "
+        "<not started | in progress | blocked | looks done> — <one sentence naming the single most important finding, "
+        "with an anchor>` (use [real] with an anchor instead of [speculation] only when the verdict rests on a checked "
+        "fact such as a failing build); then at most one `Next:` claim (the first concrete thing to do, with an anchor) "
+        "and at most one `Ask:` claim (whom to talk to and why, citing (ticket) or (people)); nothing else in this part"
+    ))
+    lines += ["", "### Who", ""]
     lines.append(AGENT_AREA.format(
         instruction="reader brief Who: one or two concise [real]/[speculation] claims naming the people "
         "most important to this ticket and why, highest apparent importance first, drawn from ticket config, "
@@ -97,6 +142,16 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
         "primary ticket and code evidence; optionally one 'Risk:' claim (where the change and the ticket's "
         "intent diverge or an acceptance criterion is unmet) and one 'Next:' claim (what would settle it)"
     ))
+    checklist = checklist_items(ticket)
+    if checklist:
+        lines += ["", "### Checklist", ""]
+        numbered = "; ".join(f"{index}) {item}" for index, item in enumerate(checklist, 1))
+        lines.append(AGENT_AREA.format(
+            instruction="reader brief Checklist: one claim per item below, in this order, each beginning `Done:`, "
+            "`Partial:`, `Missing:`, or `Unclear:` followed by the item text and then the evidence — an anchor into "
+            "the code for Done and Partial, an anchor or (ticket) for Missing and Unclear; judge against the code on "
+            "the branch, not against the ticket's own wording; items: " + numbered
+        ))
     lines.append("")
 
     lines += ["## Who", ""]
@@ -201,7 +256,7 @@ def build(ticket: dict, observations: dict, branch: str) -> str:
     lines += ["## Why", ""]
     if ticket.get("title"):
         lines.append(f"- [observation] Ticket title: {ticket['title']} (ticket).")
-    items = description_items(str(ticket.get("description") or ""))
+    items = _readable_items(description_items(str(ticket.get("description") or "")))
     if len(items) == 1:
         lines.append(f"- [observation] Ticket description: {items[0]} (ticket).")
     elif items:

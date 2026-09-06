@@ -438,6 +438,22 @@ this schema; every newly scaffolded session must fill it.
 | Why | **The ticket itself, primary sources** — then the agent | **Primary sources first**: the ticket text and other primary material at the top. At the bottom, the agent's speculation — a composition of real findings and speculation, clearly tagged | ticket + real + speculation |
 | State | **Merge history + authorship observations** — then the agent | Branch freshness vs main, merged-back or not, apparent progress | observation + speculation |
 
+**Standing first.** A reader opens a ticket to learn where it stands, what
+matters most, what to do next, and whom to ask. The Reader brief therefore
+opens with a `### Standing` part: exactly one Verdict claim (`Verdict: not
+started | in progress | blocked | looks done — <the single most important
+finding, anchored>`), then at most one `Next:` and one `Ask:` claim. When the
+ticket carries items (acceptance criteria, then the description's bullets,
+deduplicated and bounded to twelve), the brief closes with a `### Checklist`
+part that judges each item against the code on the branch as `Done:`,
+`Partial:`, `Missing:`, or `Unclear:` with its evidence; Done and Partial need
+an anchor, Missing and Unclear may cite the ticket. The scaffold offers both
+parts as agent areas, the lint checks their shape, and reports published
+before they existed stay admissible. The viewer renders Standing above the
+four evidence cards: the verdict as a pill, its finding beside it, Next and
+Ask beneath, and the checklist with one mark per item; the four cards remain
+the audit trail.
+
 **Proactive, but bounded.** A report should tell the reader what could bite
 them and what to do next, inside the same four questions rather than in a
 new section. Each Reader brief part may carry, on top of its ordinary claims,

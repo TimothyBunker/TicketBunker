@@ -37,6 +37,8 @@ def _real_file() -> str:
 def fill(text: str) -> str:
     anchor = _real_file()
     replacements = {
+        "reader brief Standing": f"- [speculation] grounded — Verdict: in progress — work commits exist and are unmerged (`{anchor}`).\n- [real] Next: review the observed diff first (`{anchor}`).\n- [real] Ask: the ticket assignee, the only person on it (ticket).",
+        "reader brief Checklist": "- [speculation] grounded — Partial: the ticket's items are started per the observed diff (observations/diff.json).",
         "reader brief Who": "- [speculation] grounded: the ticket assignee and observed git authors are the people most directly connected to this work (ticket, authorship).",
         "reader brief What": "- [speculation] grounded: the observed diff is the clearest statement of what this branch changes (observations/diff.json).",
         "reader brief Where": f"- [real] Start with `{anchor}`; it is the clearest ticket-related path in the observed work.",

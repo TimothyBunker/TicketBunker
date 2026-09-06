@@ -313,6 +313,11 @@ new Bunkers.
   stage places ticket terms on the baseline so the agent starts from hits.
   While a synthesis runs the page polls and shows phase, tool calls, and
   elapsed time, then re-reads once when it stops.
+- The Reader brief opens with `### Standing` (one Verdict claim, optional
+  `Next:` and `Ask:`) and closes with `### Checklist` (one `Done:`/`Partial:`/
+  `Missing:`/`Unclear:` claim per ticket item) when the ticket has items. The
+  lint checks their shape; older reports without them stay admissible. The
+  page renders Standing above the four cards with the verdict as a pill.
 - The bootstrap runs nine stages: the six Git stages plus `locate`, `people` (recent
   authors of the touched files on the baseline, last committer on each other
   branch of the ticket) and `risk` (baseline overlap since the merge-base,

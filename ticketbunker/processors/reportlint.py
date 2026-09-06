@@ -14,8 +14,16 @@ REQUIRED_SECTIONS = ["Who", "What", "Where", "Why", "State"]
 SECTION_BUDGET_LINES = 60
 BRIEF_SECTION = "Reader brief"
 BRIEF_PARTS = ("Who", "What", "Where", "Why")
+# Optional parts: Standing leads the brief with a verdict, Checklist closes it
+# with one judgement per ticket item. New forms scaffold both; older reports
+# without them stay admissible.
+STANDING_PART = "Standing"
+CHECKLIST_PART = "Checklist"
+VERDICTS = ("not started", "in progress", "blocked", "looks done")
+CHECKLIST_MARKS = ("done", "partial", "missing", "unclear")
+MAX_CHECKLIST_CLAIMS = 12
 BRIEF_CLAIM_LIMITS = {"Who": 2, "What": 2, "Where": 1, "Why": 2}
-BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170}
+BRIEF_WORD_LIMITS = {"Who": 130, "What": 170, "Where": 120, "Why": 170, "Standing": 110, "Checklist": 320}
 # Each brief part may carry one proactive Risk claim and one Next claim on
 # top of its ordinary claims; they are what keeps a report task-oriented
 # without letting it sprawl.
@@ -32,6 +40,13 @@ ASPECT_RE = re.compile(
     r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?(Risk|Next):",
     re.IGNORECASE,
 )
+_CLAIM_PREFIX = (
+    r"^\s*[-*]?\s*\[(?:observation|real|speculation|inference)\]\s*"
+    r"(?:(?:grounded|adjacent|ungrounded)\s*(?:[—–:-]\s*)?)?"
+)
+VERDICT_RE = re.compile(_CLAIM_PREFIX + r"Verdict:\s*(not started|in progress|blocked|looks done)\b", re.IGNORECASE)
+STANDING_ASPECT_RE = re.compile(_CLAIM_PREFIX + r"(Next|Ask):", re.IGNORECASE)
+CHECKLIST_RE = re.compile(_CLAIM_PREFIX + r"(Done|Partial|Missing|Unclear):", re.IGNORECASE)
 # Who is about people, so a [real] Who claim may rest on the ticket or the
 # people observations instead of a source path.
 WHO_CITATION_RE = re.compile(
@@ -154,6 +169,53 @@ def lint(text: str) -> list[Finding]:
                         )
                     )
 
+    if BRIEF_SECTION in sections:
+        brief = split_subsections(sections[BRIEF_SECTION])
+        if STANDING_PART in brief:
+            claims = [line for line in brief[STANDING_PART] if line.strip().startswith(("-", "*"))]
+            verdicts = [line for line in claims if VERDICT_RE.match(line)]
+            if len(verdicts) != 1:
+                findings.append(
+                    Finding(
+                        "standing",
+                        "error",
+                        "Reader brief 'Standing' needs exactly one 'Verdict: not started | in progress | blocked | looks done' claim, first",
+                    )
+                )
+            elif claims and claims[0] is not verdicts[0]:
+                findings.append(Finding("standing", "error", "Reader brief 'Standing' must open with its Verdict claim"))
+            counts = {"next": 0, "ask": 0}
+            for line in claims:
+                if line in verdicts:
+                    continue
+                aspect = STANDING_ASPECT_RE.match(line)
+                if not aspect:
+                    findings.append(
+                        Finding("standing", "error", f"Reader brief 'Standing' allows only the Verdict, one Next:, and one Ask: claim: {line.strip()[:80]}")
+                    )
+                    continue
+                counts[aspect.group(1).lower()] += 1
+            for aspect, count in counts.items():
+                if count > 1:
+                    findings.append(Finding("standing", "error", f"Reader brief 'Standing' has {count} {aspect.capitalize()}: claims (max 1)"))
+            words = sum(len(line.split()) for line in brief[STANDING_PART] if line.strip())
+            if words > BRIEF_WORD_LIMITS[STANDING_PART]:
+                findings.append(Finding("brief-length", "error", f"Reader brief 'Standing' is {words} words (max {BRIEF_WORD_LIMITS[STANDING_PART]})"))
+        if CHECKLIST_PART in brief:
+            claims = [line for line in brief[CHECKLIST_PART] if line.strip().startswith(("-", "*"))]
+            if not claims:
+                findings.append(Finding("checklist", "error", "Reader brief 'Checklist' needs one claim per ticket item"))
+            if len(claims) > MAX_CHECKLIST_CLAIMS:
+                findings.append(Finding("checklist", "error", f"Reader brief 'Checklist' has {len(claims)} claims (max {MAX_CHECKLIST_CLAIMS})"))
+            for line in claims:
+                if not CHECKLIST_RE.match(line):
+                    findings.append(
+                        Finding("checklist", "error", f"Reader brief 'Checklist' claims begin Done:, Partial:, Missing:, or Unclear:: {line.strip()[:80]}")
+                    )
+            words = sum(len(line.split()) for line in brief[CHECKLIST_PART] if line.strip())
+            if words > BRIEF_WORD_LIMITS[CHECKLIST_PART]:
+                findings.append(Finding("brief-length", "error", f"Reader brief 'Checklist' is {words} words (max {BRIEF_WORD_LIMITS[CHECKLIST_PART]})"))
+
     # Claims are checked per section, and per part inside the brief, so the
     # Who rules apply to '## Who' and '### Who' alike.
     groups: list[tuple[str, bool, list[str]]] = []
@@ -169,6 +231,9 @@ def lint(text: str) -> list[Finding]:
         else:
             groups.append((name, name == "Who", body))
     for name, is_who, body in groups:
+        # Ask: claims in Standing and Missing:/Unclear: checklist items rest on
+        # the ticket or on people, not on a source path.
+        people_cited = is_who or name.endswith(STANDING_PART) or name.endswith(CHECKLIST_PART)
         claims = [l for l in body if l.strip().startswith(("-", "*"))]
         unlabeled = [l for l in claims if not STRATUM_RE.match(l)]
         if claims and unlabeled:
@@ -180,7 +245,7 @@ def lint(text: str) -> list[Finding]:
             if not m:
                 continue
             tag = m.group(1).lower()
-            if tag == "real" and not PATHLIKE_RE.search(l) and not (is_who and WHO_CITATION_RE.search(l)):
+            if tag == "real" and not PATHLIKE_RE.search(l) and not (people_cited and WHO_CITATION_RE.search(l)):
                 findings.append(
                     Finding("real-anchor", "error", f"section '{name}': [real] claim names no path/line to check: {l.strip()[:80]}")
                 )

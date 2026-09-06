@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import Markdown, { claimTag } from "./Markdown";
+import Markdown, { claimTag, verdictOf } from "./Markdown";
 
 describe("trust chips", () => {
   afterEach(cleanup);
@@ -86,5 +86,21 @@ describe("risk and next chips", () => {
     expect(screen.getByText("Next")).toBeTruthy();
     expect(screen.queryByText(/Risk:/)).toBeNull();
     expect(document.querySelector("li.claim-speculation .aspect-chip.risk")).toBeTruthy();
+  });
+});
+
+describe("standing and checklist", () => {
+  afterEach(cleanup);
+
+  it("reads the verdict and marks checklist items", () => {
+    expect(verdictOf("[speculation] grounded — Verdict: blocked — PositionComponent does not compile (src/p.cpp:21).")).toEqual({ verdict: "blocked", rest: "PositionComponent does not compile (src/p.cpp:21)." });
+    expect(verdictOf("[real] Next: fix it (src/p.cpp:21).")).toBeNull();
+    render(<Markdown compact>{"- [real] Done: CommonTypes (src/types.h:11).\n- [real] Missing: WorldPos3 (ticket).\n- [real] Ask: Tim, the only author (people)."}</Markdown>);
+    expect(screen.getByText("Done")).toBeTruthy();
+    expect(screen.getByText("Missing")).toBeTruthy();
+    expect(screen.getByText("Ask")).toBeTruthy();
+    expect(document.querySelector("li.claim-real.aspect-done")).toBeTruthy();
+    expect(document.querySelector("li.claim-real.aspect-missing")).toBeTruthy();
+    expect(screen.queryByText(/Done:/)).toBeNull();
   });
 });

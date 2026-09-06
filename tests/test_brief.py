@@ -46,7 +46,7 @@ class ReaderBriefTests(unittest.TestCase):
         )
 
         self.assertIn("## Reader brief", form)
-        self.assertEqual(form.count("reader brief "), 4)
+        self.assertEqual(form.count("reader brief "), 6)  # Standing, Who, What, Where, Why, Checklist
         self.assertEqual(form.count("highest apparent importance first"), 3)
         filled = fill(form)
         ok, findings = reportlint.gate(filled)
@@ -184,3 +184,66 @@ class WhoAndProactiveClaimTests(unittest.TestCase):
         text = self.brief(who + "\n- [real] Lin spiked the same ticket (people).")
         messages = [f.message for f in reportlint.lint(text) if f.check == "brief-length"]
         self.assertTrue(any("has 3 claims (max 2)" in m for m in messages), messages)
+
+
+class StandingAndChecklistTests(unittest.TestCase):
+    def brief(self, standing: str = "", checklist: str = "") -> str:
+        parts = "## Reader brief\n\n"
+        if standing:
+            parts += "### Standing\n\n" + standing + "\n\n"
+        parts += (
+            "### Who\n\n- [real] Tim is the assignee (ticket).\n\n"
+            "### What\n\n- [speculation] grounded — one file changed (diff).\n\n"
+            "### Where\n\n- [real] Start in `ticketbunker/viewer.py:1`.\n\n"
+            "### Why\n\n- [speculation] grounded — the ticket wants a clearer report (ticket).\n\n"
+        )
+        if checklist:
+            parts += "### Checklist\n\n" + checklist + "\n\n"
+        return parts + EVIDENCE
+
+    def test_standing_opens_with_one_verdict_and_allows_next_and_ask(self) -> None:
+        good = (
+            "- [speculation] grounded — Verdict: blocked — PositionComponent does not compile (`ticketbunker/viewer.py:1`).\n"
+            "- [real] Next: fix the constructor mismatch first (`ticketbunker/viewer.py:1`).\n"
+            "- [real] Ask: TimothyBunker, the only person who has touched it (people)."
+        )
+        ok, findings = reportlint.gate(self.brief(standing=good))
+        self.assertTrue(ok, [str(f) for f in findings])
+        checks = {f.check for f in reportlint.lint(self.brief(standing="- [real] Next: do it (`ticketbunker/viewer.py:1`)."))}
+        self.assertIn("standing", checks)
+        two = good + "\n- [speculation] grounded — Verdict: in progress — also this (`ticketbunker/viewer.py:1`)."
+        self.assertIn("standing", {f.check for f in reportlint.lint(self.brief(standing=two))})
+        stray = good + "\n- [real] An extra sentence (`ticketbunker/viewer.py:1`)."
+        self.assertIn("standing", {f.check for f in reportlint.lint(self.brief(standing=stray))})
+        bad_value = "- [speculation] grounded — Verdict: stuck — nope (`ticketbunker/viewer.py:1`)."
+        self.assertIn("standing", {f.check for f in reportlint.lint(self.brief(standing=bad_value))})
+
+    def test_checklist_marks_each_item(self) -> None:
+        good = (
+            "- [real] Done: CommonTypes (`ticketbunker/viewer.py:1`).\n"
+            "- [speculation] grounded — Partial: Coordinates for general Pos3 (`ticketbunker/viewer.py:1`).\n"
+            "- [real] Missing: WorldPos3 and LocalPos3 (ticket)."
+        )
+        ok, findings = reportlint.gate(self.brief(checklist=good))
+        self.assertTrue(ok, [str(f) for f in findings])
+        unmarked = good + "\n- [real] Something else (`ticketbunker/viewer.py:1`)."
+        self.assertIn("checklist", {f.check for f in reportlint.lint(self.brief(checklist=unmarked))})
+        self.assertIn("checklist", {f.check for f in reportlint.lint(self.brief(checklist="- [real] Done: x (`ticketbunker/viewer.py:1`).\n" * 13))})
+
+    def test_scaffold_offers_standing_and_a_checklist_from_the_ticket(self) -> None:
+        ticket = {
+            "id": "ECS-2",
+            "title": "Position Component Implementation",
+            "description": "[8/21/26]\n- Implemented:\n  - CommonTypes\n  - Coordinates for general Pos3, not yet WorldPos3 and LocalPos3 which is todo\n  - Implemented basic components\n",
+            "acceptance_criteria": ["Position component compiles"],
+        }
+        form = scaffold.build(ticket, {}, "bunker/ECS-2")
+        brief = form.split("\n## Who\n", 1)[0]
+        self.assertLess(brief.index("### Standing"), brief.index("### Who"))
+        self.assertIn("Verdict:", brief)
+        self.assertIn("### Checklist", brief)
+        self.assertIn("1) Position component compiles; 2) Implemented › CommonTypes", brief)
+        self.assertNotIn("1) [8/21/26]", brief)
+        self.assertEqual(scaffold.checklist_items({"description": "Just a sentence here."}), ["Just a sentence here."])
+        self.assertEqual(scaffold.checklist_items({"description": ""}), [])
+        self.assertNotIn("### Checklist", scaffold.build({"id": "X-1"}, {}, "b"))

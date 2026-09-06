@@ -35,6 +35,11 @@ function subsection(text: string, parent: string, heading: string): string {
   return selected.join("\n").trim();
 }
 
+/** One named part of the Reader brief ("Standing", "Checklist"), or "" when absent. */
+export function briefPart(text: string, label: string): string {
+  return subsection(text, "Reader brief", label);
+}
+
 export function reportTopic(text: string, topic: Topic) {
   const label = topic[0].toUpperCase() + topic.slice(1);
   return {

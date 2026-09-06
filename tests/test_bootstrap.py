@@ -215,6 +215,8 @@ class DescriptionItemTests(unittest.TestCase):
         why = form.split("\n## Why\n", 1)[1].split("\n## State\n", 1)[0]
         self.assertIn("- [observation] Ticket description item: Implemented › CommonTypes (ticket).", why)
         self.assertNotIn("\n- Implemented:", why)
+        self.assertNotIn("Ticket description item: [8/21/26]", why)
+        self.assertNotIn("Ticket description item: Implemented (ticket)", why)
         for line in why.splitlines():
             if line.startswith("- "):
                 self.assertTrue(line.startswith("- [observation]"), line)
