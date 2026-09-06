@@ -33,7 +33,9 @@ publish without both secrets.
    `desktop/src-tauri/Cargo.toml`, and `desktop/src-tauri/tauri.conf.json`.
 3. Create and push the matching annotated `v<version>` tag, or a
    `v<version>-rc<n>` tag for an unsigned test build.
-4. The release workflow builds every platform from that tag, verifies the
+4. The release workflow builds Linux x64, macOS Apple Silicon, and Windows
+   x64 from that tag (run it manually with "all platforms" for Linux arm64,
+   macOS Intel, and Windows arm64), verifies the
    bundled core and Pi runtime, signs Windows output, creates adjacent SHA-256
    files, and publishes one GitHub Release.
 5. Install the Windows setup executable and Linux Debian package on clean test

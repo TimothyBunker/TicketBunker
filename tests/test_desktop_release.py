@@ -68,7 +68,9 @@ class DesktopReleaseTests(unittest.TestCase):
         self.assertIn("Get-AuthenticodeSignature", workflow)
         self.assertIn('signature.Status -ne "Valid"', workflow)
         self.assertIn("xdg-utils", workflow)
-        self.assertIn("platform: linux-arm64\n            executable: dist/tb\n            bundles: deb", workflow)
+        self.assertIn('"platform":"linux-arm64","executable":"dist/tb","bundles":"deb"', workflow)
+        self.assertIn("fromJSON(needs.plan.outputs.matrix)", workflow)
+        self.assertIn("all_platforms", workflow)
         self.assertIn('--bundles "${{ matrix.bundles }}"', workflow)
 
     def test_stage_places_the_frozen_core_and_verified_runtime_for_tauri(self) -> None:

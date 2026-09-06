@@ -355,6 +355,13 @@ class ApplicationStateTests(unittest.TestCase):
         enrollment = application.remote.Enrollment(snapshot, "vault:item-7")
         adapter = mock.Mock()
         adapter.enroll.return_value = enrollment
+        # A service enrolment carries the person's name and email; a clean
+        # runner has no Git identity to fall back on, so set the profile.
+        commands.dispatch(
+            "application.profile.update",
+            {"name": "Tim", "email": "tim@example.test", "branch_user": "tim"},
+            commands.CommandContext(self.root, transport="desktop"),
+        )
         with mock.patch.object(
             application.remote, "HTTPRemoteAdapter", return_value=adapter
         ):

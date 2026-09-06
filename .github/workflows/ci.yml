@@ -4,17 +4,25 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      windows:
+        description: "Also validate on Windows (billed at 2x)"
+        type: boolean
+        default: false
+
+# A newer push on the same branch supersedes the run in progress, so a burst
+# of commits bills one run, not one per commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -27,10 +35,31 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux desktop prerequisites
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm ci --prefix desktop
+      - run: npm run build --prefix desktop
+      - run: npm test --prefix desktop
+      - run: python -m unittest discover -s tests -v
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  # Windows costs twice a Linux minute; it runs for pull requests and on
+  # request, not for every push.
+  validate-windows:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci --prefix desktop
       - run: npm run build --prefix desktop
       - run: npm test --prefix desktop
@@ -59,7 +88,7 @@ jobs:
           qa_root="$(mktemp -d)"
           TB_DATA_HOME="$qa_root/data" TB_CONFIG="$qa_root/config.json" \
             PYTHONPATH=. python -m ticketbunker.cli _app-browser-worker \
-            --repo "$GITHUB_WORKSPACE" --port 18777 --launch=ci &
+            --repo "$GITHUB_WORKSPACE" --port 18777 --launch=ci < /dev/null &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do

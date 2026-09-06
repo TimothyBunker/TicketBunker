@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      all_platforms:
+        description: "Build all six platforms (adds Linux arm64, macOS Intel, Windows arm64; macOS is billed at 10x)"
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -10,35 +15,36 @@ permissions:
   contents: write
 
 jobs:
+  # The default release is the three platforms people install today: Linux
+  # x64, macOS Apple Silicon, Windows x64. The other three are one manual
+  # input away, because each macOS job costs ten Linux minutes per minute.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        shell: bash
+        env:
+          ALL: ${{ inputs.all_platforms }}
+        run: |
+          core='[
+            {"os":"ubuntu-latest","platform":"linux-x64","executable":"dist/tb","bundles":"deb,appimage"},
+            {"os":"macos-15","platform":"darwin-arm64","executable":"dist/tb","bundles":"app,dmg"},
+            {"os":"windows-latest","platform":"windows-x64","executable":"dist/tb.exe","bundles":"nsis"}'
+          extra=',
+            {"os":"ubuntu-24.04-arm","platform":"linux-arm64","executable":"dist/tb","bundles":"deb"},
+            {"os":"macos-15-intel","platform":"darwin-x64","executable":"dist/tb","bundles":"app,dmg"},
+            {"os":"windows-11-arm","platform":"windows-arm64","executable":"dist/tb.exe","bundles":"nsis"}'
+          if [ "$ALL" = "true" ]; then matrix="${core}${extra}]"; else matrix="${core}]"; fi
+          echo "matrix=$(echo "$matrix" | tr -d '\n ')" >> "$GITHUB_OUTPUT"
+
   bundle:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-x64
-            executable: dist/tb
-            bundles: deb,appimage
-          - os: ubuntu-24.04-arm
-            platform: linux-arm64
-            executable: dist/tb
-            bundles: deb
-          - os: macos-15-intel
-            platform: darwin-x64
-            executable: dist/tb
-            bundles: app,dmg
-          - os: macos-15
-            platform: darwin-arm64
-            executable: dist/tb
-            bundles: app,dmg
-          - os: windows-latest
-            platform: windows-x64
-            executable: dist/tb.exe
-            bundles: nsis
-          - os: windows-11-arm
-            platform: windows-arm64
-            executable: dist/tb.exe
-            bundles: nsis
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

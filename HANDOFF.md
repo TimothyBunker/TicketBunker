@@ -449,8 +449,11 @@ new Bunkers.
   A native single-instance gate focuses the existing window and forwards a
   second repository launch when the host session supports it. The CLI remains
   an optional automation and migration surface over the same typed handlers.
-- The six-platform release matrix remains Linux, macOS, and Windows on x64 and
-  arm64. Linux is locally built and exercised; Windows is a first-class
+- Releases build three platforms by default (Linux x64, macOS Apple Silicon,
+  Windows x64); the six-platform matrix is a manual `all_platforms` input,
+  because GitHub bills macOS minutes at ten times Linux. CI validates on
+  Linux for every push with superseded runs cancelled; the Windows job runs
+  for pull requests or on request. Linux is locally built and exercised; Windows is a first-class
   CI/build target using the same UI, core, and platform boundary.
   `tools/build_desktop.py` stages the frozen core under Tauri's target-triple
   sidecar name, verifies and embeds the complete Pi 0.84.2 distribution, and
