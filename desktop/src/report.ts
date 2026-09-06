@@ -58,6 +58,8 @@ function prefixOf(claim: string): { prefix: string; body: string; tag: string } 
 
 export type PlanSteps = string[] & { derived?: boolean };
 
+const DERIVED_PLAN_MAX = 7;
+
 /**
  * The report's plan as claim strings ("[real] do this (path:1)"), in order.
  * A report with a `### Plan` supplies its own steps; older reports get one
@@ -90,9 +92,16 @@ export function planSteps(text: string): PlanSteps {
     const value = prefixOf(claim);
     if (value.prefix === "missing" || value.prefix === "partial") push(value.tag, `${value.prefix === "missing" ? "Implement" : "Finish"}: ${value.body}`);
   }
+  // A derived plan is bounded like an authored one; the rest stays in the
+  // evidence cards where each item already lives.
+  if (steps.length > DERIVED_PLAN_MAX) {
+    const remaining = steps.length - (DERIVED_PLAN_MAX - 1);
+    steps.splice(DERIVED_PLAN_MAX - 1, remaining, `…and ${remaining} more: see the Defect claims under What and the checklist below.`);
+  }
   steps.derived = true;
   return steps;
 }
+
 
 export function reportTopic(text: string, topic: Topic) {
   const label = topic[0].toUpperCase() + topic.slice(1);

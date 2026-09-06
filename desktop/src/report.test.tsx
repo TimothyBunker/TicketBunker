@@ -71,4 +71,10 @@ describe("plan steps", () => {
     expect(steps.derived).toBe(true);
     expect([...steps]).toEqual(["[real] fix the header first (a.h:7).", "[real] Fix: duplicate constructor (a.cpp:21).", "[real] Implement: WorldPos3 (ticket)."]);
   });
+  it("bounds a derived plan to seven steps", () => {
+    const defects = Array.from({ length: 10 }, (_, index) => `- [real] Defect: problem ${index + 1} (a.cpp:${index + 1}).`).join("\n");
+    const steps = planSteps(`## Reader brief\n\n### What\n\n${defects}\n\n## What\n\n- [observation] x (diff).\n`);
+    expect(steps).toHaveLength(7);
+    expect(steps[6]).toBe("…and 4 more: see the Defect claims under What and the checklist below.");
+  });
 });
