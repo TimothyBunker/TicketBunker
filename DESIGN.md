@@ -699,9 +699,13 @@ stay absent instead of being guessed. Before the first report, Agent work shows
 only its empty state rather than a meaningless Combined selector. Trust tags
 render as chips that say what to trust rather than the on-disk word: Observed
 for pipeline facts, Verified for anchored [real] claims, and Speculation with
-its grounding rank (grounded, adjacent, ungrounded); a legend above the report
-explains each on hover, and a `Risk:` or `Next:` prefix becomes a second
-chip beside it. The bracket tags and prefixes remain the report's stored form.
+its grounding rank (grounded, adjacent, ungrounded), and a `Defect:`,
+`Risk:`, or `Next:` prefix becomes a second chip beside it. The same chips
+form a filter row above the report: each toggles its tag on or off across the
+four evidence cards, a dimmed chip is a hidden tag, Show all restores them,
+and hovering a chip explains it. Standing is never filtered. The Agent work
+heading carries no explanatory subtext. The bracket tags and prefixes remain
+the report's stored form.
 
 **File references act on click, and selection never acts on its own.** Any
 reference a report or ticket carries in the forms the anchor checker accepts

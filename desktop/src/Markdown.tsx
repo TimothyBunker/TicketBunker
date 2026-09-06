@@ -150,7 +150,8 @@ const COMPONENTS: Components = {
     if (!replaced) return <li {...rest}>{items}</li>;
     const [trust, ...aspects] = replaced.tone.split(" ");
     const tone = trust.startsWith("speculation") ? "speculation" : trust;
-    return <li {...rest} className={["claim", `claim-${tone}`, ...aspects].join(" ")}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
+    const grade = trust.startsWith("speculation:") ? [`grade-${trust.split(":")[1]}`] : [];
+    return <li {...rest} className={["claim", `claim-${tone}`, ...grade, ...aspects].join(" ")}>{replaced.chip}<span className="claim-text">{replaced.children}</span></li>;
   },
   code({ children: value, className, node: _node, ...rest }) {
     const raw = String(value ?? "");

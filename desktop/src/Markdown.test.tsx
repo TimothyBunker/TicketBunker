@@ -86,6 +86,7 @@ describe("risk and next chips", () => {
     expect(screen.getByText("Next")).toBeTruthy();
     expect(screen.queryByText(/Risk:/)).toBeNull();
     expect(document.querySelector("li.claim-speculation .aspect-chip.risk")).toBeTruthy();
+    expect(document.querySelector("li.claim-speculation.grade-grounded.aspect-risk")).toBeTruthy();
   });
 });
 

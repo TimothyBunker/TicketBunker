@@ -380,6 +380,14 @@ function AgentTab({
   notify: (message: string, error?: boolean) => void;
 }) {
   const [drafting, setDrafting] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  function toggleTag(key: string) {
+    setHidden((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
   const branchReports = detail.reports.filter((value) => value.scope.startsWith("branch:"));
   const legacyMaster = detail.reports.filter((value) => value.scope === "combined");
   const reports = scope === "all"
@@ -387,16 +395,24 @@ function AgentTab({
     : detail.reports.filter((value) => value.scope === `branch:${scope}`);
   const selectable = branchReports.length > 0;
   return (
-    <article className="agent-work">
+    <article className={["agent-work", ...[...hidden].map((key) => `hide-${key}`)].join(" ")}>
       <div className="agent-toolbar">
-        <div><h2>Agent work</h2><p>{scope === "all" ? `Every branch report, most recent first (${branchReports.length}).` : "This branch's report. Synthesis first; evidence stays one disclosure away."}</p></div>
+        <div><h2>Agent work</h2></div>
         <div className="agent-toolbar-actions">
           {branchReports.length > 0 && <button onClick={() => setDrafting((value) => !value)} aria-expanded={drafting}>{drafting ? "Hide update" : "Draft update"}</button>}
           {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
         </div>
       </div>
       {drafting && <UpdatePanel bunkerId={bunkerId} detail={detail} scope={scope} notify={notify} onClose={() => setDrafting(false)} />}
-      {reports.length > 0 && <p className="trust-legend"><span>Each claim carries how much to trust it:</span>{["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => <span key={key} className={`trust-chip ${key.startsWith("speculation") ? key.split(":")[1] : key}`} title={TRUST_LABELS[key].title}>{TRUST_LABELS[key].label}</span>)}<span className="legend-gap">and may flag</span>{["defect", "risk", "next"].map((key) => <span key={key} className={`aspect-chip ${key}`} title={ASPECT_LABELS[key].title}>{ASPECT_LABELS[key].label}</span>)}</p>}
+      {reports.length > 0 && <div className="claim-filter" role="group" aria-label="Show claims">
+        {["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => {
+          const tone = key.startsWith("speculation") ? key.split(":")[1] : key;
+          return <button key={key} type="button" className={`trust-chip ${tone}${hidden.has(tone) ? " off" : ""}`} aria-pressed={!hidden.has(tone)} title={TRUST_LABELS[key].title} onClick={() => toggleTag(tone)}>{TRUST_LABELS[key].label}</button>;
+        })}
+        <span className="filter-gap" aria-hidden="true" />
+        {["defect", "risk", "next"].map((key) => <button key={key} type="button" className={`aspect-chip ${key}${hidden.has(key) ? " off" : ""}`} aria-pressed={!hidden.has(key)} title={ASPECT_LABELS[key].title} onClick={() => toggleTag(key)}>{ASPECT_LABELS[key].label}</button>)}
+        {hidden.size > 0 && <button type="button" className="filter-reset" onClick={() => setHidden(new Set())}>Show all</button>}
+      </div>}
       {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
       {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
       {reports.map((report) => (
