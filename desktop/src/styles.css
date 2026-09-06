@@ -540,3 +540,12 @@ details.advanced > *:not(summary) { margin-top: 10px; }
 .check-suggestions small { color: var(--muted); font-size: 9px; }
 .check-suggestions code { font-size: 10px; color: #233249; overflow-wrap: anywhere; }
 .quiet-note { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+
+.agent-toolbar-actions { display: flex; align-items: center; gap: 10px; }
+.update-panel { margin: 0 0 14px; padding: 12px 14px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.update-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.update-panel h3 { margin: 0 0 2px; font-size: 12px; }
+.update-panel p { margin: 0; color: var(--muted); font-size: 10.5px; }
+.update-panel textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 12px; line-height: 1.5; resize: vertical; }
+.update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.update-actions a { color: var(--blue); font-size: 11px; font-weight: 650; text-decoration: none; }

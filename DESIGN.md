@@ -469,6 +469,15 @@ Project configuration's Checks tab offers detection from the repository
 root's manifests (CMake, Cargo, Go, npm, pytest, make) as suggestions the
 owner confirms; nothing runs until the document is published.
 
+**The follow-through is drafted, never sent on its own.** Agent work offers
+**Draft update**: the Standing verdict and finding, Next, Ask, and the
+checklist marks rewritten as plain Markdown (trust tags and grounding ranks
+dropped, references as `path:line`, a one-line provenance footer) in an
+editable text area. The person copies it, or, when the ticket came from a
+GitHub issue and a GitHub token is connected, posts it as a comment on that
+issue after a second confirming click. Nothing is added that the report did
+not say, and nothing is posted without the click.
+
 **Proactive, but bounded.** A report should tell the reader what could bite
 them and what to do next, inside the same four questions rather than in a
 new section. Each Reader brief part may carry, on top of its ordinary claims,

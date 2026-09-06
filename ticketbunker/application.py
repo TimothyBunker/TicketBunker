@@ -1010,6 +1010,83 @@ def publish_ticket_reports(
     return {**result, "shared": proposal["mode"] == "remote"}
 
 
+def _github_target(ticket: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The issue a GitHub-sourced ticket came from, or None."""
+    if str(ticket.get("source_kind") or "") != "github":
+        return None
+    metadata = ticket.get("metadata") if isinstance(ticket.get("metadata"), Mapping) else {}
+    github_meta = metadata.get("github") if isinstance(metadata.get("github"), Mapping) else {}
+    repository = str(github_meta.get("repository") or "")
+    number = github_meta.get("issue_number")
+    if not repository or not isinstance(number, int):
+        return None
+    return {"provider": "github", "repository": repository, "number": number, "label": f"{repository}#{number}", "url": str(ticket.get("source_reference") or metadata.get("source_url") or "")}
+
+
+def _report_for_update(detail: Mapping[str, Any], scope: str) -> dict[str, Any] | None:
+    reports = [value for value in detail.get("reports") or [] if str(value.get("scope") or "").startswith("branch:")]
+    if scope:
+        for value in reports:
+            if value.get("scope") == f"branch:{scope}":
+                return dict(value)
+    reports.sort(key=lambda value: str(value.get("updated_at") or ""), reverse=True)
+    return dict(reports[0]) if reports else None
+
+
+@commands.register("application.ticket.update.draft")
+def command_ticket_update_draft(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Draft a tracker comment from a branch report's Standing; nothing is sent."""
+    from . import projectconfig, updates
+    from .processors import anchorcheck
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    ticket_id = str(payload.get("ticket_id") or "")
+    scope = str(payload.get("scope") or "").strip()
+    detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
+    report = _report_for_update(detail, scope)
+    if report is None:
+        raise commands.CommandRejected("report_missing", "Synthesize a branch report first; the update is drafted from its Standing.")
+    branch = str(report.get("scope") or "").removeprefix("branch:")
+    stamp = anchorcheck.verified_stamp(str(report.get("content") or "")) or {}
+    composed = updates.compose(str(report.get("content") or ""), ticket_id=ticket_id, branch=branch, commit=str(stamp.get("commit") or ""))
+    if not composed["text"]:
+        raise commands.CommandRejected("standing_missing", "This report has no Standing yet. Update synthesis, then draft again.")
+    target = _github_target(detail.get("ticket") or {})
+    can_post = bool(target and projectconfig.credential_value("github"))
+    return {**composed, "branch": branch, "target": target, "can_post": can_post}
+
+
+@commands.register("application.ticket.update.post")
+def command_ticket_update_post(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Post the user's edited update as a comment on the ticket's source issue."""
+    from . import projectconfig
+    from .integrations import github
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    ticket_id = str(payload.get("ticket_id") or "")
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise commands.CommandRejected("update_empty", "Write or draft the update first.")
+    if len(text) > 60000:
+        raise commands.CommandRejected("update_too_long", "Keep the update under 60,000 characters.")
+    detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
+    target = _github_target(detail.get("ticket") or {})
+    if target is None:
+        raise commands.CommandRejected("update_target_missing", "This ticket did not come from a GitHub issue, so there is nowhere to post. Copy the text instead.")
+    token = projectconfig.credential_value("github")
+    if not token:
+        raise commands.CommandRejected("github_credential_missing", "Connect a GitHub token under Trackers, then post again.")
+    try:
+        posted = github.post_issue_comment(str(target["repository"]), int(target["number"]), text, token)
+    except github.GitHubError as exc:
+        raise commands.CommandRejected("github_post_failed", f"GitHub did not accept the comment: {exc}") from exc
+    return {"posted": True, "target": target, **posted}
+
+
 @commands.register("application.project.checks.detect")
 def command_project_checks_detect(
     _context: commands.CommandContext, payload: dict[str, Any]

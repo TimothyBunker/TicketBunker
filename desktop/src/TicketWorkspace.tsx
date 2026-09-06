@@ -303,21 +303,83 @@ function Standing({ report, scope }: { report: TicketDetail["reports"][number]; 
   );
 }
 
+type UpdateDraft = { text: string; branch: string; target: { label: string; url: string } | null; can_post: boolean };
+
+// The menial follow-through: the Standing block as a tracker comment the
+// person edits, copies, or posts. Posting is a deliberate second click.
+function UpdatePanel({ bunkerId, detail, scope, notify, onClose }: { bunkerId: string; detail: TicketDetail; scope: string; notify: (message: string, error?: boolean) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState<UpdateDraft | null>(null);
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [posted, setPosted] = useState("");
+  useEffect(() => {
+    let active = true;
+    setError("");
+    command<UpdateDraft>("application.ticket.update.draft", { bunker_id: bunkerId, ticket_id: detail.ticket.id, scope: scope === "all" ? "" : scope })
+      .then((value) => { if (!active) return; setDraft(value); setText(value.text); })
+      .catch((reason) => active && setError(String(reason)));
+    return () => { active = false; };
+  }, [bunkerId, detail.ticket.id, scope]);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify("Update copied");
+    } catch {
+      notify("Select the text and copy it; the clipboard was not available.", true);
+    }
+  }
+  async function post() {
+    if (!confirming) return setConfirming(true);
+    setBusy(true);
+    setError("");
+    try {
+      const value = await command<{ url: string }>("application.ticket.update.post", { bunker_id: bunkerId, ticket_id: detail.ticket.id, text });
+      setPosted(value.url || "posted");
+      notify("Update posted");
+    } catch (reason) {
+      setError(String(reason));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="update-panel" aria-label="Draft update">
+      <header><div><h3>Update for the tracker</h3><p>{draft?.target ? `Drafted from ${draft.branch}; posts to ${draft.target.label}.` : draft ? `Drafted from ${draft.branch}. This ticket has no GitHub issue to post to, so copy it.` : "Drafting from the Standing block."}</p></div><button className="icon-control" aria-label="Close update" onClick={onClose}>×</button></header>
+      {error && <p className="inline-error">{error}</p>}
+      {draft && <textarea aria-label="Update text" value={text} rows={Math.min(14, Math.max(5, text.split("\n").length + 1))} onChange={(event) => { setText(event.target.value); setConfirming(false); }} />}
+      {draft && <div className="update-actions">
+        <button onClick={copy} disabled={!text}>Copy</button>
+        {draft.can_post && !posted && <button className={confirming ? "danger-control" : "primary"} disabled={busy || !text} onClick={post}>{confirming ? `Confirm post to ${draft.target?.label}` : "Post to GitHub"}</button>}
+        {confirming && !posted && <button onClick={() => setConfirming(false)}>Cancel</button>}
+        {posted && (/^https?:/.test(posted) ? <a href={posted} target="_blank" rel="noreferrer">Posted · open comment ↗</a> : <span>Posted</span>)}
+      </div>}
+    </section>
+  );
+}
+
 function AgentTab({
   detail,
+  bunkerId,
   scope,
   onScope,
   onQuote,
   openSource,
   copySource,
+  notify,
 }: {
   detail: TicketDetail;
+  bunkerId: string;
   scope: string;
   onScope: (value: string) => void;
   onQuote: (quote: Quote) => void;
   openSource: (path: string, line: number) => void;
   copySource: (path: string, line: number) => void;
+  notify: (message: string, error?: boolean) => void;
 }) {
+  const [drafting, setDrafting] = useState(false);
   const branchReports = detail.reports.filter((value) => value.scope.startsWith("branch:"));
   const legacyMaster = detail.reports.filter((value) => value.scope === "combined");
   const reports = scope === "all"
@@ -328,8 +390,12 @@ function AgentTab({
     <article className="agent-work">
       <div className="agent-toolbar">
         <div><h2>Agent work</h2><p>{scope === "all" ? `Every branch report, most recent first (${branchReports.length}).` : "This branch's report. Synthesis first; evidence stays one disclosure away."}</p></div>
-        {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
+        <div className="agent-toolbar-actions">
+          {branchReports.length > 0 && <button onClick={() => setDrafting((value) => !value)} aria-expanded={drafting}>{drafting ? "Hide update" : "Draft update"}</button>}
+          {selectable && <label><span className="sr-only">Report scope</span><select value={scope} onChange={(event) => onScope(event.target.value)}>{branchReports.map((report) => <option key={report.scope} value={report.scope.slice(7)}>{report.scope.slice(7)}</option>)}{branchReports.length > 1 && <option value="all">All branches</option>}</select></label>}
+        </div>
       </div>
+      {drafting && <UpdatePanel bunkerId={bunkerId} detail={detail} scope={scope} notify={notify} onClose={() => setDrafting(false)} />}
       {reports.length > 0 && <p className="trust-legend"><span>Each claim carries how much to trust it:</span>{["observation", "real", "speculation:grounded", "speculation:adjacent", "speculation:ungrounded"].map((key) => <span key={key} className={`trust-chip ${key.startsWith("speculation") ? key.split(":")[1] : key}`} title={TRUST_LABELS[key].title}>{TRUST_LABELS[key].label}</span>)}<span className="legend-gap">and may flag</span>{["risk", "next"].map((key) => <span key={key} className={`aspect-chip ${key}`} title={ASPECT_LABELS[key].title}>{ASPECT_LABELS[key].label}</span>)}</p>}
       {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
       {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
@@ -706,7 +772,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
         <main className="ticket-main">
           {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
             <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
-            <div id="agent-work"><AgentTab detail={detail} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} /></div>
+            <div id="agent-work"><AgentTab detail={detail} bunkerId={bunker.id} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} notify={notify} /></div>
           </SourceActionsContext.Provider>}
         </main>
         <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />

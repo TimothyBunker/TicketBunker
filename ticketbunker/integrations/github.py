@@ -68,6 +68,16 @@ def _repository_from_url(url: str | None) -> str | None:
     return f"{owner}/{repo}"
 
 
+def post_issue_comment(full_name: str, number: int, body: str, token: str) -> dict[str, Any]:
+    """Post one comment on an issue and return GitHub's record of it."""
+    if not token:
+        raise GitHubError("no GitHub credential is connected")
+    value = _request_json(f"{API}/repos/{full_name}/issues/{int(number)}/comments", token, {"body": body})
+    if not isinstance(value, dict):
+        raise GitHubError("GitHub returned an unexpected comment payload")
+    return {"url": str(value.get("html_url") or ""), "id": value.get("id"), "created_at": value.get("created_at")}
+
+
 def fetch_comments(owner: str, repo: str, number: int, token: str | None) -> list[dict[str, Any]]:
     comments: list[dict[str, Any]] = []
     page = 1

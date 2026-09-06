@@ -50,6 +50,8 @@ DESKTOP_ACTIONS = frozenset(
         "application.bunker.sync",
         "application.project.sync",
         "application.project.checks.detect",
+        "application.ticket.update.draft",
+        "application.ticket.update.post",
         "application.tracker.connect",
         "application.tracker.boards",
         "application.project.link",

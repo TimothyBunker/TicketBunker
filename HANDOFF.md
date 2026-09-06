@@ -313,6 +313,10 @@ new Bunkers.
   stage places ticket terms on the baseline so the agent starts from hits.
   While a synthesis runs the page polls and shows phase, tool calls, and
   elapsed time, then re-reads once when it stops.
+- Agent work has Draft update: `application.ticket.update.draft` composes a
+  tracker comment from the report's Standing and Checklist (`updates.py`),
+  and `application.ticket.update.post` posts the edited text to the GitHub
+  issue behind the ticket after a confirming click.
 - A Project's `checks` document (build, test, timeout) makes the bootstrap
   run the team's own commands in a detached scratch worktree at the branch
   head (`check` stage); outcomes prefill What and State and a failure asks
