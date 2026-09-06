@@ -714,6 +714,18 @@ and hovering a chip explains it. Standing is never filtered. The Agent work
 heading carries no explanatory subtext. The bracket tags and prefixes remain
 the report's stored form.
 
+**Reading first.** Inside a claim the trust tag is a small muted word in a
+fixed column, never a coloured pill, so the eye lands on the sentence; the
+pills live only in the filter row. A source reference reads as its file name
+and line (`PositionComponent.cpp:21`), with the directory on hover and in its
+toolbar. The four evidence cards share one fixed height; the synthesis and,
+when opened, the full trail scroll inside the card, and the Full trail toggle
+is pinned to the card's bottom edge so every card ends the same way. Standing
+carries a Defects block above the plan when the report recorded any, so the
+verified errors read as one list instead of being scattered through What. The
+stored report stays plain Markdown with tagged lines; the page renders it
+with components, and no agent-authored markup is ever executed.
+
 **File references act on click, and selection never acts on its own.** Any
 reference a report or ticket carries in the forms the anchor checker accepts
 (`path:line` or `path` in a code span, `@path:line`, `@path`, or the older

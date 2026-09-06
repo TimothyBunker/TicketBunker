@@ -42,27 +42,29 @@ describe("source references", () => {
       </Markdown>,
     );
     expect(screen.queryByRole("toolbar")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "src/app.py:12" }));
+    fireEvent.click(screen.getByRole("button", { name: "src/app.py line 12" }));
     const toolbar = screen.getByRole("toolbar", { name: "Actions for src/app.py" });
     expect(toolbar).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
     expect(opened).toEqual([["src/app.py", 12]]);
     expect(screen.queryByRole("toolbar")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "@docs/guide.md:3" }));
+    fireEvent.click(screen.getByRole("button", { name: "docs/guide.md line 3" }));
     fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
     expect(copied).toEqual([["docs/guide.md", 3]]);
 
-    fireEvent.click(screen.getByRole("button", { name: "@README.md:1" }));
+    fireEvent.click(screen.getByRole("button", { name: "README.md line 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Send to chat" }));
     expect(asked).toEqual([["README.md", 1]]);
     expect(screen.queryByRole("button", { name: "1.2" })).toBeNull();
+    expect(screen.getByRole("button", { name: "src/app.py line 12" }).textContent).toBe("app.py:12");
   });
 
   it("links a bare @path mention to its first line", () => {
     const opened: Array<[string, number]> = [];
     render(<Markdown compact onOpenSource={(p, l) => opened.push([p, l])}>{"See @ticketbunker/cli.py."}</Markdown>);
-    fireEvent.click(screen.getByRole("button", { name: "@ticketbunker/cli.py" }));
+    expect(screen.getByRole("button", { name: "ticketbunker/cli.py" }).textContent).toBe("cli.py");
+    fireEvent.click(screen.getByRole("button", { name: "ticketbunker/cli.py" }));
     fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
     expect(opened).toEqual([["ticketbunker/cli.py", 1]]);
   });

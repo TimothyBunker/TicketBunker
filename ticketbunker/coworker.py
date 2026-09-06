@@ -39,7 +39,9 @@ from .ledger import Ledger, digest
 from .processors import anchorcheck, reportlint
 
 
-CATEGORIES = ("who", "what", "where", "why")
+CATEGORIES = ("standing", "who", "what", "where", "why")
+# The Standing topic covers the brief parts that are not evidence questions.
+STANDING_PARTS = ("Standing", "Plan", "Checklist")
 MAX_MESSAGE_CHARS = 8000
 MAX_REPLY_CHARS = 16000
 MAX_REFERENCE_CHARS = 2400
@@ -69,7 +71,10 @@ Hard boundaries:
   propose a direct Combined edit. A Combined-scoped proposal names each child
   branch whose Reader brief subsection should change.
 - Preserve the concrete evidence trail. A proposal changes only the concise
-  Reader brief subsection for the selected Who, What, Where, or Why category.
+  Reader brief part for the selected topic: the Who, What, Where, or Why
+  subsection, or for the Standing topic one of the Standing, Plan, or
+  Checklist parts (the verdict and next step, the ordered plan, the ticket's
+  items judged against the code).
 - Keep synthesis current by importance, not merely by the newest event. Do not
   expose private chain-of-thought. Explain conclusions and cite checkable
   evidence instead.
@@ -89,16 +94,21 @@ Reply as exactly one JSON object, without a code fence:
 }
 When a report change would help, proposal is:
 {
-  "category": "who|what|where|why",
+  "category": "standing|who|what|where|why",
   "changes": [
     {
       "branch": "an exact child branch from the supplied context",
+      "part": "for the standing category only: Standing, Plan, or Checklist",
       "proposed_synthesis": "one or more complete Markdown bullet claims, each beginning with - [real] or - [speculation]; speculation includes grounded, adjacent, or ungrounded"
     }
   ]
 }
 Who, What, and Why allow at most two concise claims. Where allows one claim
-and at most three paths in importance order. Never invent an [observation].
+and at most three paths in importance order. Standing is exactly one
+`Verdict: not started | in progress | blocked | looks done — <finding>` claim
+first, then at most one `Next:` and one `Ask:` claim. Plan is one to seven
+ordered `Step:` claims. Checklist claims begin `Done:`, `Partial:`,
+`Missing:`, or `Unclear:`. Never invent an [observation].
 """
 
 
@@ -255,6 +265,18 @@ def _subsection(text: str, section: str, subsection: str) -> str:
     return "\n".join(selected).strip()
 
 
+def _proposal_part(category: str, requested: Any) -> str | None:
+    """The brief part a proposal edits: the category's own part, or for the
+    Standing topic one of Standing, Plan, Checklist."""
+    if category != "standing":
+        return category.capitalize()
+    wanted = str(requested or "Standing").strip().casefold()
+    for part in STANDING_PARTS:
+        if part.casefold() == wanted:
+            return part
+    return None
+
+
 def _replace_brief(text: str, category: str, synthesis: str) -> str:
     """Replace one Reader brief subsection without touching its evidence."""
     wanted = category.casefold()
@@ -378,13 +400,21 @@ def _context(ticket: TicketSnapshot, category: str, scope: str) -> str:
     ]
     label = category.capitalize()
     for report in reports:
+        if category == "standing":
+            synthesis = "\n\n".join(
+                f"### {part}\n{_subsection(report.text, 'Reader brief', part) or '(empty)'}" for part in STANDING_PARTS
+            )
+            evidence = _section(report.text, "What") or "(no evidence trail)"
+        else:
+            synthesis = _subsection(report.text, "Reader brief", label) or "(no Reader brief synthesis)"
+            evidence = _section(report.text, label) or "(no evidence trail)"
         chunks.extend(
             [
                 f"--- branch: {report.branch}",
                 "current_synthesis:",
-                _subsection(report.text, "Reader brief", label) or "(no Reader brief synthesis)",
+                synthesis,
                 "full_evidence_trail:",
-                _section(report.text, label) or "(no evidence trail)",
+                evidence,
                 "report_state:",
                 report.state_text or "(no state trail)",
             ]
@@ -481,8 +511,11 @@ def _prepare_proposal(
             return None, PROPOSAL_CHECK_WARNING, [
                 f"The proposal could not resolve child branch {branch or '(missing)'}.",
             ]
+        part = _proposal_part(category, item.get("part"))
+        if part is None:
+            return None, PROPOSAL_CHECK_WARNING, ["A Standing proposal names its part: Standing, Plan, or Checklist."]
         try:
-            patched = _replace_brief(report.text, category, synthesis)
+            patched = _replace_brief(report.text, part, synthesis)
         except commands.CommandRejected as exc:
             return None, PROPOSAL_CHECK_WARNING, [exc.message]
         ok, findings = reportlint.gate(patched)
@@ -493,8 +526,9 @@ def _prepare_proposal(
         changes.append(
             {
                 "branch": branch,
+                "part": part,
                 "report_digest": digest(report.text),
-                "current_synthesis": _subsection(report.text, "Reader brief", category.capitalize()),
+                "current_synthesis": _subsection(report.text, "Reader brief", part),
                 "proposed_synthesis": synthesis,
             }
         )
@@ -733,7 +767,7 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
     scope = str(payload.get("scope") or "combined").strip()
     message = str(payload.get("message") or "").strip()
     if category not in CATEGORIES:
-        raise commands.CommandRejected("coworker_category_invalid", "Choose Who, What, Where, or Why.")
+        raise commands.CommandRejected("coworker_category_invalid", "Choose Standing, Who, What, Where, or Why.")
     if not message:
         raise commands.CommandRejected("coworker_message_required", "Enter a message for the ticket coworker.")
     if len(message) > MAX_MESSAGE_CHARS:
@@ -816,7 +850,7 @@ def command_state(context: commands.CommandContext, payload: dict[str, Any]) -> 
     scope = str(payload.get("scope") or "combined").strip()
     if category not in CATEGORIES:
         raise commands.CommandRejected(
-            "coworker_category_invalid", "Choose Who, What, Where, or Why."
+            "coworker_category_invalid", "Choose Standing, Who, What, Where, or Why."
         )
     bunker_id = str(payload.get("bunker_id") or "").strip()
     return state(root, project_key, ticket_id, category=category, scope=scope, bunker_id=bunker_id)
@@ -863,7 +897,7 @@ def _accept(context: commands.CommandContext, payload: dict[str, Any]) -> dict[s
                 f"{branch or 'A child report'} changed after this proposal. Review the current synthesis and ask again.",
             )
         synthesis = str(edits.get(branch) or change.get("proposed_synthesis") or "").strip()
-        patched = _replace_brief(report.text, category, synthesis)
+        patched = _replace_brief(report.text, str(change.get("part") or category), synthesis)
         ok, findings = reportlint.gate(patched)
         errors = [str(finding) for finding in findings if finding.severity == "error"]
         errors.extend(anchorcheck.verify(patched, root, _refs(ticket.bunker, branch), ticket.bunker))

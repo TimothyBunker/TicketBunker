@@ -506,3 +506,23 @@ class CoworkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StandingTopicTests(unittest.TestCase):
+    BRIEF = (
+        "## Reader brief\n\n### Standing\n\n- [speculation] grounded — Verdict: blocked — it does not build (a.cpp:1).\n\n"
+        "### Who\n\n- [real] Tim (ticket).\n\n### What\n\n- [real] Defect: dup (a.cpp:21).\n\n### Where\n\n- [real] Start (a.cpp:1).\n\n"
+        "### Why\n\n- [speculation] grounded — because (ticket).\n\n### Checklist\n\n- [real] Missing: x (ticket).\n\n"
+        "### Plan\n\n- [real] Step: fix dup (a.cpp:21).\n\n## Who\n\n- [observation] Tim (ticket config).\n\n"
+        "## What\n\n- [real] Defect: dup (a.cpp:21).\n\n## Where\n\n- [observation] none (diff).\n\n## Why\n\n- [observation] t (ticket).\n\n## State\n\n- [observation] s (merge_history).\n"
+    )
+
+    def test_standing_proposals_name_their_part_and_replace_only_it(self) -> None:
+        self.assertEqual(coworker._proposal_part("standing", None), "Standing")
+        self.assertEqual(coworker._proposal_part("standing", "plan"), "Plan")
+        self.assertIsNone(coworker._proposal_part("standing", "who"))
+        self.assertEqual(coworker._proposal_part("what", "plan"), "What")
+        patched = coworker._replace_brief(self.BRIEF, "Plan", "- [real] Step: fix dup (a.cpp:21).\n- [speculation] grounded — Step: rebuild (check).")
+        self.assertIn("Step: rebuild (check)", coworker._subsection(patched, "Reader brief", "Plan"))
+        self.assertEqual(coworker._subsection(patched, "Reader brief", "Standing"), coworker._subsection(self.BRIEF, "Reader brief", "Standing"))
+        self.assertIn("standing", coworker.CATEGORIES)

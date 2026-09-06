@@ -37,10 +37,10 @@ describe("standalone report presentation", () => {
     );
 
     expect(container.querySelector("ul ul")?.textContent).toContain("Nested");
-    fireEvent.click(screen.getByRole("button", { name: "@src/cache.py:4" }));
+    fireEvent.click(screen.getByRole("button", { name: "src/cache.py line 4" }));
     fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
     expect(open).toHaveBeenCalledWith("src/cache.py", 4);
-    fireEvent.click(screen.getByRole("button", { name: "@src/cache.py:4" }));
+    fireEvent.click(screen.getByRole("button", { name: "src/cache.py line 4" }));
     fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
     expect(copy).toHaveBeenCalledWith("src/cache.py", 4);
   });
@@ -69,12 +69,11 @@ describe("plan steps", () => {
   it("derives a plan from next, defects, and unfinished items when there is none", () => {
     const steps = planSteps(withPlan.replace(/### Plan[\s\S]*?## What/, "## What"));
     expect(steps.derived).toBe(true);
-    expect([...steps]).toEqual(["[real] fix the header first (a.h:7).", "[real] Fix: duplicate constructor (a.cpp:21).", "[real] Implement: WorldPos3 (ticket)."]);
+    expect([...steps]).toEqual(["[real] fix the header first (a.h:7).", "Fix the defect listed above: duplicate constructor (a.cpp:21).", "[real] Implement: WorldPos3 (ticket)."]);
   });
   it("bounds a derived plan to seven steps", () => {
     const defects = Array.from({ length: 10 }, (_, index) => `- [real] Defect: problem ${index + 1} (a.cpp:${index + 1}).`).join("\n");
     const steps = planSteps(`## Reader brief\n\n### What\n\n${defects}\n\n## What\n\n- [observation] x (diff).\n`);
-    expect(steps).toHaveLength(7);
-    expect(steps[6]).toBe("…and 4 more: see the Defect claims under What and the checklist below.");
+    expect([...steps]).toEqual(["Fix the 10 defects listed above; the code will not build until they are gone."]);
   });
 });

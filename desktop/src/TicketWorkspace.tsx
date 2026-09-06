@@ -1,7 +1,7 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
-import { briefPart, planSteps, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type Topic } from "./report";
+import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, TOPICS, verifiedStamp, type ChatTopic, type Topic } from "./report";
 import { command } from "./transport";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
@@ -14,7 +14,7 @@ type Props = {
 
 type Quote = {
   kind?: "synthesis" | "source";
-  category: Topic;
+  category: ChatTopic;
   scope: string;
   branch: string;
   text: string;
@@ -213,6 +213,7 @@ function SynthesisCard({
   const synthesisRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLElement>(null);
   const [menu, setMenu] = useState<{ top: number; left: number; text: string } | null>(null);
+  const [trailOpen, setTrailOpen] = useState(false);
   // Selecting text offers actions beside the selection; it never opens the
   // chat by itself, so copying a phrase stays a plain copy.
   function selected(event: MouseEvent) {
@@ -256,14 +257,17 @@ function SynthesisCard({
         />
       )}
       <header><h3>{topic[0].toUpperCase() + topic.slice(1)}</h3></header>
-      <div ref={synthesisRef} className="synthesis-copy">
-        {value.synthesis
-          ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.synthesis}</Markdown>
-          : value.trail
-            ? <><p className="missing-copy">No synthesis brief; this is the evidence trail.</p><Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown></>
-            : <p className="missing-copy">Nothing was published for {topic}.</p>}
+      <div className="synthesis-body">
+        <div ref={synthesisRef} className="synthesis-copy">
+          {value.synthesis
+            ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.synthesis}</Markdown>
+            : value.trail
+              ? <><p className="missing-copy">No synthesis brief; this is the evidence trail.</p><Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown></>
+              : <p className="missing-copy">Nothing was published for {topic}.</p>}
+        </div>
+        {value.synthesis && trailOpen && <div className="synthesis-trail">{value.trail ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown> : <p>No evidence trail was published.</p>}</div>}
       </div>
-      {value.synthesis && <details><summary>Full trail</summary>{value.trail ? <Markdown compact onOpenSource={openSource} onCopySource={copySource}>{value.trail}</Markdown> : <p>No evidence trail was published.</p>}</details>}
+      {value.synthesis && <button type="button" className="trail-toggle" aria-expanded={trailOpen} onClick={() => setTrailOpen((open) => !open)}>{trailOpen ? "Hide trail" : "Full trail"}</button>}
     </section>
     </ReportPlaceContext.Provider>
   );
@@ -277,12 +281,13 @@ function Standing({ report, scope }: { report: TicketDetail["reports"][number]; 
   const standing = briefPart(report.content, "Standing");
   const checklist = briefPart(report.content, "Checklist");
   const plan = planSteps(report.content);
-  if (!standing && !checklist && plan.length === 0) return null;
+  const defects = defectClaims(report.content);
+  if (!standing && !checklist && plan.length === 0 && defects.length === 0) return null;
   const claims = standing.split("\n").filter((line) => /^\s*[-*]\s/.test(line));
   const verdictLine = claims.find((line) => verdictOf(line.replace(/^\s*[-*]\s*/, "")));
   const verdict = verdictLine ? verdictOf(verdictLine.replace(/^\s*[-*]\s*/, "")) : null;
   const others = claims.filter((line) => line !== verdictLine).join("\n");
-  const place = useMemo<ReportPlace>(() => ({ category: "what", scope, branch: report.scope.startsWith("branch:") ? report.scope.slice(7) : "" }), [scope, report.scope]);
+  const place = useMemo<ReportPlace>(() => ({ category: "standing", scope, branch: report.scope.startsWith("branch:") ? report.scope.slice(7) : "" }), [scope, report.scope]);
   const verdictText = verdictLine && verdict ? verdictLine.replace(/^\s*[-*]\s*/, "").replace(/Verdict:\s*(not started|in progress|blocked|looks done)\s*(?:[—–:-]\s*)?/i, "") : "";
   return (
     <ReportPlaceContext.Provider value={place}>
@@ -295,6 +300,12 @@ function Standing({ report, scope }: { report: TicketDetail["reports"][number]; 
           </div>
         )}
         {others && <div className="standing-lines"><Markdown compact>{others}</Markdown></div>}
+        {defects.length > 0 && (
+          <div className="defects">
+            <h3 className="standing-eyebrow">{defects.length === 1 ? "Defect" : `Defects · ${defects.length}`}</h3>
+            <Markdown compact>{defects.map((claim) => `- ${claim}`).join("\n")}</Markdown>
+          </div>
+        )}
         {plan.length > 0 && (
           <div className="plan">
             <h3 className="standing-eyebrow">{plan.derived ? "Plan · from the findings" : "Plan"}</h3>
@@ -558,7 +569,7 @@ function CoworkerDrawer({
   onReload: () => void;
   notify: (message: string, error?: boolean) => void;
 }) {
-  const [topic, setTopic] = useState<Topic>(quote?.category || "who");
+  const [topic, setTopic] = useState<ChatTopic>(quote?.category || "standing");
   const [coworker, setCoworker] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -620,7 +631,7 @@ function CoworkerDrawer({
   return (
     <aside className="coworker-drawer">
       <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
-      <nav>{TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>
+      <nav>{CHAT_TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>
       <div className="chat-messages">{messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>
       <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={`Ask about ${topic}`} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>
     </aside>
@@ -773,7 +784,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     setChatOpen(true);
   }
   function askSource(path: string, line: number, place: ReportPlace | null) {
-    const category = (place?.category || "what") as Topic;
+    const category = (place?.category || "what") as ChatTopic;
     setQuote({ kind: "source", category, scope: place?.scope || (scope === "all" ? "combined" : scope), branch: place?.branch || "", text: `${path}:${line}`, path, line_start: line, line_end: line });
     setChatOpen(true);
   }

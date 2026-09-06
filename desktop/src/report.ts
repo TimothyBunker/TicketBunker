@@ -1,5 +1,9 @@
 export const TOPICS = ["who", "what", "where", "why"] as const;
 export type Topic = (typeof TOPICS)[number];
+// The chat can work on every part of the report: the Standing topic covers
+// the verdict, plan, checklist, and defects.
+export const CHAT_TOPICS = ["standing", ...TOPICS] as const;
+export type ChatTopic = (typeof CHAT_TOPICS)[number];
 
 function section(text: string, heading: string): string {
   const lines = text.split(/\r?\n/);
@@ -56,6 +60,19 @@ function prefixOf(claim: string): { prefix: string; body: string; tag: string } 
   return { prefix: prefixed ? prefixed[1].toLowerCase() : "", body: prefixed ? rest.slice(prefixed[0].length) : rest, tag };
 }
 
+/** Defect claims from the brief's What and the What evidence, tagged, in order. */
+export function defectClaims(text: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const claim of [...claimLines(subsection(text, "Reader brief", "What")), ...claimLines(section(text, "What"))]) {
+    const value = prefixOf(claim);
+    if (value.prefix !== "defect" || seen.has(value.body.trim())) continue;
+    seen.add(value.body.trim());
+    out.push(`${value.tag}${value.body}`);
+  }
+  return out;
+}
+
 export type PlanSteps = string[] & { derived?: boolean };
 
 const DERIVED_PLAN_MAX = 7;
@@ -84,10 +101,9 @@ export function planSteps(text: string): PlanSteps {
     const value = prefixOf(claim);
     if (value.prefix === "next") push(value.tag, value.body);
   }
-  for (const claim of [...claimLines(subsection(text, "Reader brief", "What")), ...claimLines(section(text, "What"))]) {
-    const value = prefixOf(claim);
-    if (value.prefix === "defect") push(value.tag, `Fix: ${value.body}`);
-  }
+  const defects = defectClaims(text);
+  if (defects.length === 1) push("", `Fix the defect listed above: ${prefixOf(defects[0]).body}`);
+  else if (defects.length > 1) push("", `Fix the ${defects.length} defects listed above; the code will not build until they are gone.`);
   for (const claim of claimLines(subsection(text, "Reader brief", "Checklist"))) {
     const value = prefixOf(claim);
     if (value.prefix === "missing" || value.prefix === "partial") push(value.tag, `${value.prefix === "missing" ? "Implement" : "Finish"}: ${value.body}`);

@@ -285,8 +285,9 @@ new Bunkers.
   `.git/ticketbunker/automatic-agent/agent.log` path. The browser reloads only
   when ticket data or refs change.
 - One local Pi coworker session exists per user and ticket across every branch.
-  The viewer exposes it as Who/What/Where/Why chats with Combined-or-branch
-  scope. Category actions and the persistent launcher are icon-only chat
+  The viewer exposes it as Standing/Who/What/Where/Why chats with
+  Combined-or-branch scope; the Standing topic covers the verdict, plan,
+  checklist, and defects, and its proposals name the part they edit. Category actions and the persistent launcher are icon-only chat
   bubbles. The expanded surface is a right-side drawer whose arrow collapses
   it without implying that the session is closed. Topic, scope, draft,
   reference, and expanded state persist into the included source editor and
@@ -327,6 +328,10 @@ new Bunkers.
   head (`check` stage); outcomes prefill What and State and a failure asks
   for a blocked verdict. The Checks tab detects suggestions from the
   repository root's manifests; `application.project.checks.detect`.
+- The report page reads first: trust tags are muted words in a fixed column,
+  references show file name and line, the four cards share one fixed height
+  with the body scrolling and Full trail pinned to the bottom, and Standing
+  lists Defects above the plan.
 - The Reader brief opens with `### Standing` (one Verdict claim, optional
   `Next:` and `Ask:`), carries `### Checklist` (one `Done:`/`Partial:`/
   `Missing:`/`Unclear:` claim per ticket item) when the ticket has items, and

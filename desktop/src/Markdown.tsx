@@ -105,7 +105,8 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
   if (typeof first === "string") {
     const claim = claimTag(first);
     if (!claim) return null;
-    const chip = claim.aspect ? <><TrustChip tagKey={claim.key} /><AspectChip aspect={claim.aspect} /></> : <TrustChip tagKey={claim.key} />;
+    // One grid cell for every chip, so an aspect never lands in the text column.
+    const chip = <span className="claim-chips"><TrustChip tagKey={claim.key} />{claim.aspect && <AspectChip aspect={claim.aspect} />}</span>;
     return { chip, tone: claim.aspect ? `${claim.key} aspect-${claim.aspect}` : claim.key, children: [claim.rest, ...others] };
   }
   if (isValidElement(first) && (first as ReactElement<{ children?: ReactNode }>).type === "p") {
@@ -121,11 +122,20 @@ function withChip(nodes: ReactNode[]): { chip: ReactNode; tone: string; children
 // One file reference. Clicking it shows what can be done with it rather than
 // doing one thing: open the editor there, copy the absolute path, or send the
 // reference into the coworker chat.
-function SourceRef({ path, line, label }: { path: string; line: number; label: ReactNode }) {
+// References read as the file name and line; the directory is a hover away
+// and in the toolbar. "@coal/components/position/PositionComponent.cpp:21"
+// becomes "PositionComponent.cpp:21".
+export function shortReference(path: string, line: number, explicitLine: boolean): string {
+  const name = path.split("/").filter(Boolean).pop() || path;
+  return explicitLine ? `${name}:${line}` : name;
+}
+
+function SourceRef({ path, line, label, explicitLine = true }: { path: string; line: number; label: ReactNode; explicitLine?: boolean }) {
   const actions = useContext(SourceActionsContext);
   const place = useContext(ReportPlaceContext);
   const anchor = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
+  void label;
   const items: FloatingAction[] = [];
   if (actions.open) items.push({ label: "Open in editor", onSelect: () => actions.open?.(path, line) });
   if (actions.copy) items.push({ label: "Copy path", onSelect: () => actions.copy?.(path, line) });
@@ -133,8 +143,8 @@ function SourceRef({ path, line, label }: { path: string; line: number; label: R
   if (items.length === 0) return <>{label}</>;
   return (
     <span ref={anchor} className={open ? "source-reference open" : "source-reference"}>
-      <button type="button" className="source-ref" aria-haspopup="true" aria-expanded={open} title={`${path}, line ${line}`} onClick={() => setOpen((value) => !value)}>
-        {label}
+      <button type="button" className="source-ref" aria-haspopup="true" aria-expanded={open} title={`${path}${explicitLine ? `, line ${line}` : ""}`} aria-label={`${path}${explicitLine ? ` line ${line}` : ""}`} onClick={() => setOpen((value) => !value)}>
+        <code>{shortReference(path, line, explicitLine)}</code>
       </button>
       {open && <FloatingActions label={`Actions for ${path}`} actions={items} anchor={anchor} onClose={() => setOpen(false)} />}
     </span>
@@ -156,7 +166,7 @@ const COMPONENTS: Components = {
   code({ children: value, className, node: _node, ...rest }) {
     const raw = String(value ?? "");
     const reference = className || raw.includes("\n") ? null : sourceReference(raw);
-    if (reference) return <SourceRef path={reference.path} line={reference.line} label={<code {...rest}>{raw}</code>} />;
+    if (reference) return <SourceRef path={reference.path} line={reference.line} explicitLine={/:\d+\s*$/.test(raw.trim().replace(/[.,;:]+$/, ""))} label={<code {...rest}>{raw}</code>} />;
     return <code className={className} {...rest}>{value}</code>;
   },
   a({ href = "", children: label }) {
@@ -165,7 +175,8 @@ const COMPONENTS: Components = {
       const split = raw.lastIndexOf(":");
       const path = decodeURIComponent(raw.slice(0, split));
       const line = Number(raw.slice(split + 1)) || 1;
-      return <SourceRef path={path} line={line} label={label} />;
+      const shown = String(Array.isArray(label) ? label.join("") : label ?? "");
+      return <SourceRef path={path} line={line} explicitLine={/:\d+$/.test(shown)} label={label} />;
     }
     return (
       <a href={href} target="_blank" rel="noreferrer">
