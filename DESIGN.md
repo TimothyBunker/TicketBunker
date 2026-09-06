@@ -578,9 +578,13 @@ tool:
   chat to resume.
 - One local **ticket coworker** provides optional follow-up without becoming a
   source-work agent. There is one underlying Pi session per local user and
-  ticket, shared across all ticket branches. The viewer presents it as four
-  clear Who, What, Where, and Why conversations; every message carries its
-  selected category and Combined-or-branch scope. The coworker receives the
+  ticket, shared across all ticket branches. The viewer presents it as
+  Standing, Who, What, Where, and Why conversations, plus one tab per file
+  the user has asked about: a file conversation is keyed by the file's path,
+  is what a note reply or a Send to chat from the editor opens, tells the
+  coworker to read the file with its tools, and never proposes a report
+  change. Every message carries its selected category, Combined-or-branch
+  scope, and, for a file conversation, its path. The coworker receives the
   ticket, the selected synthesis and evidence, exact child branches, and its
   prior ticket conversation. It can explain, advise, accept corrections, and
   prepare a report-update proposal. A message may also carry one bounded,
@@ -732,9 +736,20 @@ for a moment. Every claim in the branch report that anchors into the open
 file becomes a margin note beside the lines it cites, in the manner of a
 shared document's comments: the cited lines are tinted (red for a Defect),
 the note names its kind (Defect, Step, Where, Standing…) and line, shows the
-claim as prose, and offers Ask about this, which quotes those lines into the
-coworker. Hovering a note brightens its lines; notes that would overlap slide
-down. Notes come from the selected branch report, or from every branch report
+claim as prose in a card outlined in its kind's colour, and carries a small
+reply box: typing there starts or continues the conversation about this file
+with the note's lines quoted. Clicking a note, or pressing Enter on it, jumps
+to its line. The notes are their own column, clipped to the file's height and
+scrolled together with it, and they may scroll on past the end of the file
+when they overflow. Selecting text in the file offers the same Send to chat
+and Copy toolbar as selected report text; nothing happens until a button is
+pressed. Hovering a note brightens its lines;
+notes that would overlap slide down. A line bar above the editor lists every
+noted line with its note count: selecting a line jumps to it and narrows the
+notes to the selected lines, more than one may be selected, the previous and
+next controls (or the arrow keys on the bar) cycle the editor through the
+selected lines with the current one ringed, All or deselecting the last line
+restores every note. Notes come from the selected branch report, or from every branch report
 when All branches is selected. The editor is a textarea over a mirror of the
 text, one element per line, so highlighting never alters the file.
 

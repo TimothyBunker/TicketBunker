@@ -287,7 +287,10 @@ new Bunkers.
 - One local Pi coworker session exists per user and ticket across every branch.
   The viewer exposes it as Standing/Who/What/Where/Why chats with
   Combined-or-branch scope; the Standing topic covers the verdict, plan,
-  checklist, and defects, and its proposals name the part they edit. Category actions and the persistent launcher are icon-only chat
+  checklist, and defects, and its proposals name the part they edit. A
+  `file` category keyed by `path` holds one conversation per file; the
+  drawer shows a tab per such file, editor note replies and Send to chat
+  open it, and it never proposes report changes. Category actions and the persistent launcher are icon-only chat
   bubbles. The expanded surface is a right-side drawer whose arrow collapses
   it without implying that the session is closed. Topic, scope, draft,
   reference, and expanded state persist into the included source editor and

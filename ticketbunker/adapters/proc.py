@@ -28,6 +28,7 @@ def run(
         argv,
         cwd=str(cwd),
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         env=env,
         **platform_services.current().headless_process_options(),
     )

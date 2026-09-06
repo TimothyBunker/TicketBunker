@@ -526,3 +526,31 @@ class StandingTopicTests(unittest.TestCase):
         self.assertIn("Step: rebuild (check)", coworker._subsection(patched, "Reader brief", "Plan"))
         self.assertEqual(coworker._subsection(patched, "Reader brief", "Standing"), coworker._subsection(self.BRIEF, "Reader brief", "Standing"))
         self.assertIn("standing", coworker.CATEGORIES)
+
+
+class FileThreadTests(unittest.TestCase):
+    def test_file_threads_are_keyed_by_path_and_listed(self) -> None:
+        self.assertIn("file", coworker.CATEGORIES)
+        self.assertEqual(coworker._thread_path({"path": "./coal/a.cpp"}, "file"), "coal/a.cpp")
+        self.assertEqual(coworker._thread_path({"path": "coal/a.cpp"}, "what"), "")
+        with self.assertRaises(commands.CommandRejected):
+            coworker._thread_path({}, "file")
+        self.assertIsNone(coworker._proposal_part("file", "Plan"))
+        proposal, warning, details = coworker._prepare_proposal(Path("/tmp"), mock.Mock(reports=()), "file", "combined", {"category": "what", "changes": []}, {})
+        self.assertEqual((proposal, warning, details), (None, "", []))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            session = coworker._root(root, "ECS", "ECS-4", user="Ada")
+            session.mkdir(parents=True)
+            rows = [
+                {"role": "user", "category": "file", "scope": "combined", "path": "coal/a.cpp", "text": "why twice?", "created_at": "t"},
+                {"role": "user", "category": "file", "scope": "combined", "path": "coal/b.h", "text": "hm", "created_at": "t"},
+                {"role": "user", "category": "what", "scope": "combined", "text": "general", "created_at": "t"},
+            ]
+            (session / "messages.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            with mock.patch.object(coworker, "_user", return_value="Ada"), mock.patch.object(coworker, "_ticket", return_value=mock.Mock(id="ECS-4", data={}, reports=())), mock.patch.object(coworker.agent_runtime, "state", return_value={"ready": False}):
+                value = coworker.state(root, "ECS", "ECS-4", category="file", scope="combined", path="coal/a.cpp")
+        self.assertEqual([m["text"] for m in value["messages"]], ["why twice?"])
+        self.assertEqual(value["files"], ["coal/a.cpp", "coal/b.h"])
+        self.assertEqual(value["path"], "coal/a.cpp")

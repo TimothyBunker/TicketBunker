@@ -14,7 +14,7 @@ type Props = {
 
 type Quote = {
   kind?: "synthesis" | "source";
-  category: ChatTopic;
+  category: ChatTopic | "file";
   scope: string;
   branch: string;
   text: string;
@@ -546,6 +546,10 @@ function TicketRail({
   );
 }
 
+function topicOf(quote: Quote): string {
+  return quote.category === "file" && quote.path ? `file:${quote.path}` : String(quote.category);
+}
+
 function CoworkerDrawer({
   open,
   onOpen,
@@ -555,6 +559,9 @@ function CoworkerDrawer({
   scope,
   quote,
   onQuote,
+  pending,
+  onPendingSent,
+  openFile,
   onReload,
   notify,
 }: {
@@ -566,43 +573,62 @@ function CoworkerDrawer({
   scope: string;
   quote: Quote | null;
   onQuote: (value: Quote | null) => void;
+  pending: { quote: Quote; message: string; id: number } | null;
+  onPendingSent: () => void;
+  openFile: string;
   onReload: () => void;
   notify: (message: string, error?: boolean) => void;
 }) {
-  const [topic, setTopic] = useState<ChatTopic>(quote?.category || "standing");
+  // A topic is a report part, or "file:<path>" for a conversation about one file.
+  const [topic, setTopic] = useState<string>(quote ? topicOf(quote) : "standing");
   const [coworker, setCoworker] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
+  const scoped = scope === "all" ? "combined" : scope;
   useEffect(() => {
     if (quote) {
-      setTopic(quote.category);
+      setTopic(topicOf(quote));
       onOpen(true);
     }
   }, [quote, onOpen]);
   useEffect(() => {
     if (!open || !repoRoot) return;
-    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot)
+    command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot)
       .then(setCoworker)
       .catch((reason) => setError(String(reason)));
-  }, [open, repoRoot, detail.project.key, detail.ticket.id, topic, scope]);
+  }, [open, repoRoot, detail.project.key, detail.ticket.id, thread.category, thread.path, scoped]);
+
+  async function deliver(message: string, reference: Quote | null, target: { category: string; path: string }) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: target.category, scope: scoped, path: target.path, message, reference }, repoRoot);
+      setCoworker(result);
+      onQuote(null);
+      return true;
+    } catch (reason) {
+      setError(String(reason));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  // A reply typed under a note in the editor: open the file's tab and send.
+  useEffect(() => {
+    if (!pending) return;
+    const target = { category: pending.quote.category === "file" ? "file" : pending.quote.category, path: pending.quote.path && pending.quote.category === "file" ? pending.quote.path : "" };
+    setTopic(topicOf(pending.quote));
+    onOpen(true);
+    deliver(pending.message, pending.quote, target).finally(onPendingSent);
+  }, [pending?.id]);
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const message = String(new FormData(form).get("message") || "");
     if (!message.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope, message, reference: quote }, repoRoot);
-      setCoworker(result);
-      onQuote(null);
-      form.reset();
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setBusy(false);
-    }
+    if (await deliver(message, quote, thread)) form.reset();
   }
 
   async function proposal(action: "accept" | "dismiss", id: string) {
@@ -611,7 +637,7 @@ function CoworkerDrawer({
       await command(`coworker.proposal.${action}`, { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, proposal: id }, repoRoot);
       notify(action === "accept" ? "Report update accepted" : "Proposal dismissed");
       onReload();
-      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: topic, scope: scope === "all" ? "combined" : scope }, repoRoot);
+      const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot);
       setCoworker(refreshed);
     } catch (reason) {
       setError(String(reason));
@@ -628,13 +654,36 @@ function CoworkerDrawer({
   );
   const messages = (coworker?.messages || []) as Array<Record<string, unknown>>;
   const proposals = (coworker?.proposals || []) as Array<Record<string, unknown>>;
+  const fileTabs = [...new Set([...((coworker?.files as string[] | undefined) || []), ...(openFile ? [openFile] : []), ...(thread.path ? [thread.path] : [])])];
+  const placeholder = thread.category === "file" ? `Ask about ${thread.path.split("/").pop()}` : `Ask about ${thread.category}`;
   return (
     <aside className="coworker-drawer">
       <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
-      <nav>{CHAT_TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>
+      <nav>
+        {CHAT_TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
+        {fileTabs.map((path) => <button key={path} className={topic === `file:${path}` ? "selected file-tab" : "file-tab"} title={path} onClick={() => { setTopic(`file:${path}`); onQuote(null); }}>{path.split("/").pop()}</button>)}
+      </nav>
       <div className="chat-messages">{messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>
-      <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={`Ask about ${topic}`} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>
+      <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>
     </aside>
+  );
+}
+
+// A small reply box under every note: typing here starts (or continues) the
+// conversation about this file with the note's lines quoted.
+function NoteReply({ onSend }: { onSend: (message: string) => void }) {
+  const [value, setValue] = useState("");
+  function submit() {
+    const message = value.trim();
+    if (!message) return;
+    onSend(message);
+    setValue("");
+  }
+  return (
+    <form className="note-reply" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+      <textarea value={value} rows={1} placeholder="Reply…" aria-label="Reply to this note" onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
+      <button type="submit" disabled={!value.trim()}>Send</button>
+    </form>
   );
 }
 
@@ -648,6 +697,7 @@ function SourceEditor({
   onBack,
   onDraft,
   onQuote,
+  onReply,
   notify,
 }: {
   draft: SourceDraft;
@@ -656,23 +706,51 @@ function SourceEditor({
   onBack: () => void;
   onDraft: (draft: SourceDraft) => void;
   onQuote: (quote: Quote) => void;
+  onReply: (quote: Quote, message: string) => void;
   notify: (message: string, error?: boolean) => void;
 }) {
   const [content, setContent] = useState(draft.content);
+  const [selection, setSelection] = useState<{ top: number; left: number; start: number; end: number; text: string } | null>(null);
+  const notesColumn = useRef<HTMLDivElement>(null);
+  const syncing = useRef(false);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState<number>(0);
   const [active, setActive] = useState<number | null>(null);
   const [noteTops, setNoteTops] = useState<number[]>([]);
+  // Line filter: nothing selected means every note shows; selecting lines
+  // narrows the notes to those lines and cycles the editor between them.
+  const [selectedLines, setSelectedLines] = useState<number[]>([]);
+  const [cursor, setCursor] = useState(0);
   const editor = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const noteRefs = useRef<Array<HTMLElement | null>>([]);
   const lines = useMemo(() => content.split("\n"), [content]);
+  const noteLines = useMemo(() => [...new Set(notes.map((note) => note.line))].sort((a, b) => a - b), [notes]);
+  const visibleNotes = useMemo(() => (selectedLines.length ? notes.filter((note) => selectedLines.includes(note.line)) : notes), [notes, selectedLines]);
+  const cycle = selectedLines.length ? selectedLines : noteLines;
   const notedLines = useMemo(() => {
     const map = new Map<number, string>();
-    for (const note of notes) for (let line = note.line; line <= note.endLine; line += 1) if (!map.has(line) || note.tone === "defect") map.set(line, note.tone);
+    for (const note of visibleNotes) for (let line = note.line; line <= note.endLine; line += 1) if (!map.has(line) || note.tone === "defect") map.set(line, note.tone);
     return map;
-  }, [notes]);
+  }, [visibleNotes]);
+  useEffect(() => { setSelectedLines([]); setCursor(0); }, [draft.path]);
+
+  function toggleLine(line: number) {
+    setSelectedLines((current) => {
+      const next = current.includes(line) ? current.filter((value) => value !== line) : [...current, line].sort((a, b) => a - b);
+      const position = next.indexOf(line);
+      setCursor(position >= 0 ? position : 0);
+      return next;
+    });
+    goTo(line);
+  }
+  function step(direction: 1 | -1) {
+    if (cycle.length === 0) return;
+    const next = (cursor + direction + cycle.length) % cycle.length;
+    setCursor(next);
+    goTo(cycle[next]);
+  }
 
   function lineTop(line: number): number {
     const element = mirror.current?.children[line - 1] as HTMLElement | undefined;
@@ -681,6 +759,7 @@ function SourceEditor({
   function goTo(line: number, flash = true) {
     const top = lineTop(line);
     scroller.current?.scrollTo({ top: Math.max(0, top - 140), behavior: "smooth" });
+    notesColumn.current?.scrollTo({ top: Math.max(0, top - 140), behavior: "smooth" });
     if (flash) {
       setTarget(line);
       window.setTimeout(() => setTarget((value) => (value === line ? 0 : value)), 1800);
@@ -703,14 +782,14 @@ function SourceEditor({
   useLayoutEffect(() => {
     const tops: number[] = [];
     let floor = 0;
-    notes.forEach((note, index) => {
+    visibleNotes.forEach((note, index) => {
       const wanted = lineTop(note.line);
       const top = Math.max(wanted, floor);
       tops.push(top);
       floor = top + (noteRefs.current[index]?.offsetHeight || 0) + 6;
     });
     setNoteTops(tops);
-  }, [notes, lines, draft.settings.line_wrap]);
+  }, [visibleNotes, lines, draft.settings.line_wrap]);
 
   async function save() {
     setBusy(true);
@@ -725,58 +804,109 @@ function SourceEditor({
       setBusy(false);
     }
   }
-  function quoteSelection() {
-    const input = editor.current;
-    if (!input || input.selectionStart === input.selectionEnd) return notify("Select source text first.", true);
-    const before = content.slice(0, input.selectionStart);
-    const selected = content.slice(input.selectionStart, input.selectionEnd);
-    const start = before.split("\n").length;
-    const end = start + selected.split("\n").length - 1;
-    onQuote({ kind: "source", category: "what", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: selected.slice(0, 4000) });
+  function quoteOf(start: number, end: number, text: string): Quote {
+    return { kind: "source", category: "file", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: text.slice(0, 4000) };
   }
-  function askAboutNote(note: SourceNote) {
+  // Selecting text in the file offers the same toolbar as selecting report
+  // text: Send to chat, Copy. Nothing happens until a button is pressed.
+  function selected() {
+    const input = editor.current;
+    if (!input || input.selectionStart === input.selectionEnd) return setSelection(null);
+    const before = content.slice(0, input.selectionStart);
+    const text = content.slice(input.selectionStart, input.selectionEnd);
+    const start = before.split("\n").length;
+    const end = start + text.split("\n").length - 1;
+    setSelection({ top: lineTop(start), left: 60, start, end, text });
+  }
+  function noteQuote(note: SourceNote): Quote {
     const text = lines.slice(note.line - 1, note.endLine).join("\n");
-    onQuote({ kind: "source", category: note.tone === "defect" || note.section === "What" ? "what" : "standing", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: note.line, line_end: note.endLine, unsaved: content !== draft.content, text: text.slice(0, 4000) || note.text });
+    return quoteOf(note.line, note.endLine, text || note.text);
+  }
+  // The two columns scroll together, and the notes column may scroll past
+  // the end of the file on its own when its notes overflow.
+  function syncFrom(source: "file" | "notes") {
+    if (syncing.current) return;
+    const file = scroller.current;
+    const column = notesColumn.current;
+    if (!file || !column) return;
+    syncing.current = true;
+    if (source === "file") column.scrollTop = file.scrollTop;
+    else file.scrollTop = Math.min(column.scrollTop, file.scrollHeight - file.clientHeight);
+    requestAnimationFrame(() => { syncing.current = false; });
   }
   const wrap = Boolean(draft.settings.line_wrap);
   return (
     <section className={notes.length ? "source-editor annotated" : "source-editor"}>
-      <header><button className="back-control" onClick={onBack}>← Ticket</button><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}{notes.length > 0 && ` · ${notes.length} note${notes.length === 1 ? "" : "s"} from the report`}</small></div><div><button onClick={quoteSelection}>Ask about selection</button><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
-      <div ref={scroller} className="editor-scroll">
-        <div className={wrap ? "editor-surface wrap" : "editor-surface"} style={{ tabSize: draft.settings.tab_size || 4 }}>
-          <div className="editor-gutter" aria-hidden="true">{lines.map((_, index) => <div key={index} className={notedLines.has(index + 1) ? `gutter-line noted ${notedLines.get(index + 1)}` : "gutter-line"} style={{ height: lineTop(index + 2) - lineTop(index + 1) || undefined }}>{index + 1}</div>)}</div>
-          <div className="editor-stack">
-            <div ref={mirror} className="editor-mirror" aria-hidden="true">
-              {lines.map((line, index) => {
-                const number = index + 1;
-                const classes = ["mirror-line"];
-                if (notedLines.has(number)) classes.push("noted", notedLines.get(number) || "");
-                if (target === number) classes.push("target");
-                if (active !== null && notes[active] && number >= notes[active].line && number <= notes[active].endLine) classes.push("active");
-                return <div key={index} className={classes.join(" ")}>{line || " "}</div>;
-              })}
+      <header><button className="back-control" onClick={onBack}>← Ticket</button><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}{notes.length > 0 && ` · ${notes.length} note${notes.length === 1 ? "" : "s"} from the report`}</small></div><div><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
+      {notes.length > 0 && (
+        <div className="note-filter" role="toolbar" aria-label="Notes by line" onKeyDown={(event) => { if (event.key === "ArrowRight") { event.preventDefault(); step(1); } else if (event.key === "ArrowLeft") { event.preventDefault(); step(-1); } }}>
+          <span className="note-filter-label">Lines</span>
+          {noteLines.map((line) => {
+            const count = notes.filter((note) => note.line === line).length;
+            const on = selectedLines.includes(line);
+            const tone = notes.find((note) => note.line === line && note.tone === "defect") ? "defect" : "";
+            return <button key={line} type="button" className={`line-chip ${tone}${on ? " on" : ""}${cycle[cursor] === line ? " current" : ""}`} aria-pressed={on} title={`${count} note${count === 1 ? "" : "s"} on line ${line}`} onClick={() => toggleLine(line)}>{line}{count > 1 && <sup>{count}</sup>}</button>;
+          })}
+          <span className="note-filter-gap" />
+          {selectedLines.length > 0 && <button type="button" className="line-chip-reset" onClick={() => { setSelectedLines([]); setCursor(0); }}>All</button>}
+          <button type="button" className="line-step" aria-label="Previous noted line" onClick={() => step(-1)}>‹</button>
+          <button type="button" className="line-step" aria-label="Next noted line" onClick={() => step(1)}>›</button>
+        </div>
+      )}
+      <div className="editor-body">
+        <div ref={scroller} className="editor-scroll" onScroll={() => syncFrom("file")}>
+          <div className={wrap ? "editor-surface wrap" : "editor-surface"} style={{ tabSize: draft.settings.tab_size || 4 }}>
+            <div className="editor-gutter" aria-hidden="true">{lines.map((_, index) => <div key={index} className={notedLines.has(index + 1) ? `gutter-line noted ${notedLines.get(index + 1)}` : "gutter-line"} style={{ height: lineTop(index + 2) - lineTop(index + 1) || undefined }}>{index + 1}</div>)}</div>
+            <div className="editor-stack">
+              <div ref={mirror} className="editor-mirror" aria-hidden="true">
+                {lines.map((line, index) => {
+                  const number = index + 1;
+                  const classes = ["mirror-line"];
+                  if (notedLines.has(number)) classes.push("noted", notedLines.get(number) || "");
+                  if (target === number) classes.push("target");
+                  if (active !== null && visibleNotes[active] && number >= visibleNotes[active].line && number <= visibleNotes[active].endLine) classes.push("active");
+                  return <div key={index} className={classes.join(" ")}>{line || " "}</div>;
+                })}
+              </div>
+              <textarea ref={editor} value={content} onChange={(event) => { setContent(event.target.value); setSelection(null); }} onMouseUp={selected} onKeyUp={(event) => { if (event.shiftKey || event.key === "Shift") selected(); }} onBlur={(event) => { if (!(event.relatedTarget as HTMLElement | null)?.closest?.(".floating-actions")) setSelection(null); }} spellCheck={false} wrap={wrap ? "soft" : "off"} rows={lines.length} />
+              {selection && (
+                <FloatingActions
+                  label="Selection actions"
+                  style={{ top: selection.top, left: selection.left, transform: "translateY(calc(-100% - 6px))" }}
+                  onClose={() => setSelection(null)}
+                  actions={[
+                    { label: "Send to chat", onSelect: () => onQuote(quoteOf(selection.start, selection.end, selection.text)) },
+                    { label: "Copy", onSelect: () => { navigator.clipboard?.writeText(selection.text).catch(() => undefined); } },
+                  ]}
+                />
+              )}
             </div>
-            <textarea ref={editor} value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} wrap={wrap ? "soft" : "off"} rows={lines.length} />
           </div>
-          {notes.length > 0 && (
-            <aside className="editor-notes" aria-label="Report notes for this file">
-              {notes.map((note, index) => (
+        </div>
+        {notes.length > 0 && (
+          <div ref={notesColumn} className="editor-notes-scroll" onScroll={() => syncFrom("notes")}>
+            <aside className="editor-notes" aria-label="Report notes for this file" style={{ minHeight: lineTop(lines.length + 1) + 60 }}>
+              {visibleNotes.map((note, index) => (
                 <article
-                  key={`${note.line}-${index}`}
+                  key={`${note.line}:${note.endLine}:${note.label}:${note.text}`}
                   ref={(element) => { noteRefs.current[index] = element; }}
                   className={`editor-note ${note.tone}${active === index ? " active" : ""}`}
                   style={{ top: noteTops[index] ?? lineTop(note.line) }}
+                  tabIndex={0}
                   onMouseEnter={() => setActive(index)}
                   onMouseLeave={() => setActive((value) => (value === index ? null : value))}
+                  onFocus={() => setActive(index)}
+                  onClick={(event) => { if ((event.target as HTMLElement).closest("button, textarea, form, .source-reference")) return; goTo(note.line); }}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !(event.target as HTMLElement).closest("textarea")) goTo(note.line); }}
                 >
-                  <header><span className={`note-label ${note.tone}`}>{note.label}</span><button type="button" onClick={() => goTo(note.line)}>{note.endLine > note.line ? `Lines ${note.line}–${note.endLine}` : `Line ${note.line}`}</button></header>
+                  <header><span className={`note-label ${note.tone}`}>{note.label}</span><span className="note-line">{note.endLine > note.line ? `Lines ${note.line}–${note.endLine}` : `Line ${note.line}`}</span></header>
                   <Markdown compact>{note.text}</Markdown>
-                  <footer><button type="button" onClick={() => askAboutNote(note)}>Ask about this</button></footer>
+                  <NoteReply onSend={(message) => onReply(noteQuote(note), message)} />
                 </article>
               ))}
             </aside>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -789,6 +919,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   const [section, setSection] = useState("details");
   const [chatOpen, setChatOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [pending, setPending] = useState<{ quote: Quote; message: string; id: number } | null>(null);
   const [editor, setEditor] = useState<SourceDraft | null>(null);
   const repoRoot = useMemo(() => detail?.repositories.find((value) => value.local_path)?.local_path || "", [detail]);
 
@@ -868,7 +999,11 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     setChatOpen(true);
   }
   function quoteSource(value: Quote) {
-    setQuote({ ...value, scope, category: "what" });
+    setQuote({ ...value, scope: scope === "all" ? "combined" : scope, category: "file" });
+    setChatOpen(true);
+  }
+  function replyFromEditor(value: Quote, message: string) {
+    setPending({ quote: { ...value, scope: scope === "all" ? "combined" : scope, category: "file" }, message, id: Date.now() });
     setChatOpen(true);
   }
   function askSource(path: string, line: number, place: ReportPlace | null) {
@@ -901,14 +1036,14 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} onReply={replyFromEditor} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
             <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
             <div id="agent-work"><AgentTab detail={detail} bunkerId={bunker.id} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} notify={notify} /></div>
           </SourceActionsContext.Provider>}
         </main>
         <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
       </div>
-      <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} onReload={load} notify={notify} />
+      <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} pending={pending} onPendingSent={() => setPending(null)} openFile={editor?.path || ""} onReload={load} notify={notify} />
     </div>
   );
 }
