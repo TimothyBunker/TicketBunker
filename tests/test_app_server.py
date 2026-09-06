@@ -140,8 +140,10 @@ class BrowserPresenceTests(unittest.TestCase):
         self.assertEqual(self.server.idle_reason(start + 170), "")
         expiry = start + app_server.SESSION_TTL_SECONDS + 5
         self.assertEqual(self.server.idle_reason(expiry), "")  # grace after expiry
+        # One second past each boundary: a large monotonic clock on a
+        # long-running host rounds (start + n) - start a hair under n.
         self.assertEqual(
-            self.server.idle_reason(expiry + app_server.CLOSE_GRACE_SECONDS),
+            self.server.idle_reason(expiry + app_server.CLOSE_GRACE_SECONDS + 1),
             "no browser tab reported in for 3 minutes",
         )
 
@@ -168,7 +170,7 @@ class BrowserPresenceTests(unittest.TestCase):
         start = self.server._started_at
         self.assertEqual(self.server.idle_reason(start + 30), "")
         self.assertEqual(
-            self.server.idle_reason(start + app_server.FIRST_TAB_TIMEOUT_SECONDS),
+            self.server.idle_reason(start + app_server.FIRST_TAB_TIMEOUT_SECONDS + 1),
             "no browser tab opened within 60 seconds",
         )
 
