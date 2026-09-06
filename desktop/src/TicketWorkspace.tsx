@@ -584,7 +584,7 @@ function CoworkerDrawer({
   const [coworker, setCoworker] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
+  const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic === "files" ? "standing" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
   const scoped = scope === "all" ? "combined" : scope;
   useEffect(() => {
     if (quote) {
@@ -594,9 +594,12 @@ function CoworkerDrawer({
   }, [quote, onOpen]);
   useEffect(() => {
     if (!open || !repoRoot) return;
+    let active = true;
+    setCoworker((current) => (current && current.path === thread.path && current.category === thread.category ? current : null));
     command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot)
-      .then(setCoworker)
-      .catch((reason) => setError(String(reason)));
+      .then((value) => { if (active) setCoworker(value); })
+      .catch((reason) => active && setError(String(reason)));
+    return () => { active = false; };
   }, [open, repoRoot, detail.project.key, detail.ticket.id, thread.category, thread.path, scoped]);
 
   async function deliver(message: string, reference: Quote | null, target: { category: string; path: string }) {
@@ -654,17 +657,51 @@ function CoworkerDrawer({
   );
   const messages = (coworker?.messages || []) as Array<Record<string, unknown>>;
   const proposals = (coworker?.proposals || []) as Array<Record<string, unknown>>;
-  const fileTabs = [...new Set([...((coworker?.files as string[] | undefined) || []), ...(openFile ? [openFile] : []), ...(thread.path ? [thread.path] : [])])];
+  const threads = ((coworker?.file_threads as Array<{ path: string; messages: number; last_at: string; last_text: string }> | undefined) || []);
+  const fileList = [...threads];
+  if (openFile && !fileList.some((item) => item.path === openFile)) fileList.unshift({ path: openFile, messages: 0, last_at: "", last_text: "" });
+  const inFiles = topic === "files" || thread.category === "file";
   const placeholder = thread.category === "file" ? `Ask about ${thread.path.split("/").pop()}` : `Ask about ${thread.category}`;
+  async function forget(path: string) {
+    setBusy(true);
+    try {
+      const value = await command<Record<string, unknown>>("coworker.file.forget", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, scope: scoped, path }, repoRoot);
+      setCoworker(value);
+      if (thread.path === path) setTopic("files");
+      notify(`Forgot the conversation about ${path.split("/").pop()}`);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <aside className="coworker-drawer">
       <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
       <nav>
         {CHAT_TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
-        {fileTabs.map((path) => <button key={path} className={topic === `file:${path}` ? "selected file-tab" : "file-tab"} title={path} onClick={() => { setTopic(`file:${path}`); onQuote(null); }}>{path.split("/").pop()}</button>)}
+        <button className={inFiles ? "selected files-tab" : "files-tab"} onClick={() => { setTopic("files"); onQuote(null); }}>Files{fileList.length > 0 && <sup>{fileList.length}</sup>}</button>
       </nav>
-      <div className="chat-messages">{messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>
-      <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>
+      {thread.category === "file" && <div className="file-thread-bar"><button type="button" onClick={() => { setTopic("files"); onQuote(null); }}>‹ Files</button><strong title={thread.path}>{thread.path.split("/").pop()}</strong><small>{thread.path}</small><button type="button" className="danger-control" disabled={busy} onClick={() => forget(thread.path)}>Forget</button></div>}
+      {topic === "files" && (
+        <div className="file-thread-list">
+          {!coworker && <p className="chat-empty">Loading conversations…</p>}
+          {coworker && fileList.length === 0 && <p className="chat-empty">No file conversations yet. Reply under a note in the editor, or select code and send it to chat.</p>}
+          {fileList.map((item) => (
+            <div key={item.path} className="file-thread">
+              <button type="button" className="file-thread-open" onClick={() => { setTopic(`file:${item.path}`); onQuote(null); }}>
+                <strong>{item.path.split("/").pop()}</strong>
+                <small>{item.path}</small>
+                {item.messages > 0 ? <span>{item.messages} message{item.messages === 1 ? "" : "s"} · {relativeTime(item.last_at)}</span> : <span>{item.path === openFile ? "Open in the editor · no conversation yet" : "No conversation yet"}</span>}
+              </button>
+              {item.messages > 0 && <button type="button" className="file-thread-forget" aria-label={`Forget the conversation about ${item.path}`} disabled={busy} onClick={() => forget(item.path)}>×</button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {topic !== "files" && <div className="chat-messages">{!coworker && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
+      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
+      {topic === "files" && error && <p className="inline-error">{error}</p>}
     </aside>
   );
 }

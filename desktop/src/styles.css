@@ -318,7 +318,9 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .stream-change { color: #526075; font-size: 11px; }
 
 .coworker-bubble { position: fixed; z-index: 20; right: 22px; bottom: 20px; width: 42px; min-width: 42px; height: 42px; padding: 0; border-color: #1c4f87; border-radius: 50%; color: #fff; background: #245d9f; box-shadow: 0 8px 24px rgba(28, 66, 110, .24); font-size: 21px;  display: grid; place-items: center; }
-.coworker-drawer { position: fixed; z-index: 20; top: 0; right: 0; width: min(390px, 100vw); height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; border-left: 1px solid #ccd4df; background: #fff; box-shadow: -14px 0 40px rgba(25, 41, 62, .12); }
+.coworker-drawer { position: fixed; z-index: 20; top: 0; right: 0; width: min(390px, 100vw); height: 100vh; display: flex; flex-direction: column; border-left: 1px solid #ccd4df; background: #fff; box-shadow: -14px 0 40px rgba(25, 41, 62, .12); }
+.coworker-drawer > header, .coworker-drawer > nav, .coworker-drawer > .file-thread-bar, .coworker-drawer > form { flex: none; }
+.coworker-drawer > .chat-messages, .coworker-drawer > .file-thread-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .coworker-drawer > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line); }
 .coworker-drawer > header > div { display: grid; gap: 2px; }
 .coworker-drawer > header strong { font-size: 11px; }
@@ -656,4 +658,18 @@ details.advanced > *:not(summary) { margin-top: 10px; }
 .note-reply button { min-height: 26px; padding: 0 9px; border: 1px solid #34425a; border-radius: 5px; color: #c9d4e3; background: #232d3d; font-size: 10px; font-weight: 650; }
 .note-reply button:disabled { opacity: .45; }
 .coworker-drawer > nav { flex-wrap: wrap; }
-.coworker-drawer > nav button.file-tab { flex: 0 0 auto; padding: 0 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.coworker-drawer > nav button.files-tab sup { margin-left: 3px; color: var(--blue); font-size: 8px; }
+.file-thread-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: #f8f9fb; }
+.file-thread-bar > button:first-child { min-height: 24px; padding: 0 6px; border: 0; color: var(--blue); background: transparent; font-size: 10px; font-weight: 650; }
+.file-thread-bar strong { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10.5px; }
+.file-thread-bar small { grid-column: 2; color: #7e8999; font-size: 8.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-thread-bar .danger-control { grid-row: 1 / span 2; min-height: 24px; padding: 0 8px; font-size: 10px; }
+.file-thread-list { padding: 10px 12px; overflow: auto; }
+.file-thread { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; margin-bottom: 6px; }
+.file-thread-open { display: grid; gap: 2px; width: 100%; min-height: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; background: #fff; text-align: left; }
+.file-thread-open:hover { border-color: var(--blue); }
+.file-thread-open strong { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.file-thread-open small { color: #7e8999; font-size: 8.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-thread-open span { color: #4d5a6e; font-size: 9.5px; }
+.file-thread-forget { width: 26px; min-width: 26px; min-height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 5px; color: #7e8999; background: transparent; font-size: 13px; }
+.file-thread-forget:hover { color: #a83232; border-color: #e3b4b4; }

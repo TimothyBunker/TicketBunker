@@ -579,9 +579,12 @@ tool:
 - One local **ticket coworker** provides optional follow-up without becoming a
   source-work agent. There is one underlying Pi session per local user and
   ticket, shared across all ticket branches. The viewer presents it as
-  Standing, Who, What, Where, and Why conversations, plus one tab per file
-  the user has asked about: a file conversation is keyed by the file's path,
-  is what a note reply or a Send to chat from the editor opens, tells the
+  Standing, Who, What, Where, and Why conversations, plus one persistent
+  **Files** entry that holds every file conversation: it counts them, opens
+  a list (file name, path, message count, last activity, with the file open
+  in the editor listed first), and each can be forgotten so the list never
+  accumulates. A file conversation is keyed by the file's path, is what a
+  note reply or a Send to chat from the editor opens directly, tells the
   coworker to read the file with its tools, and never proposes a report
   change. Every message carries its selected category, Combined-or-branch
   scope, and, for a file conversation, its path. The coworker receives the

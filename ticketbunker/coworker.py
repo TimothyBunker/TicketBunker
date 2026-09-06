@@ -767,10 +767,17 @@ def state(
     # Files that hold a conversation on this scope, so the page can offer a
     # tab for each even after the editor is closed.
     files: list[str] = []
+    file_threads: dict[str, dict[str, Any]] = {}
     for value in every:
         candidate = str(value.get("path") or "")
-        if value.get("category") == "file" and value.get("scope") == scope and candidate and candidate not in files:
+        if value.get("category") != "file" or value.get("scope") != scope or not candidate:
+            continue
+        if candidate not in files:
             files.append(candidate)
+        entry = file_threads.setdefault(candidate, {"path": candidate, "messages": 0, "last_at": "", "last_text": ""})
+        entry["messages"] += 1
+        entry["last_at"] = str(value.get("created_at") or entry["last_at"])
+        entry["last_text"] = str(value.get("text") or "")[:120]
     proposals: list[dict[str, Any]] = []
     for message in selected:
         proposal_id = str(message.get("proposal") or "")
@@ -792,6 +799,7 @@ def state(
         "scope": scope,
         "path": path,
         "files": files,
+        "file_threads": sorted(file_threads.values(), key=lambda item: item["last_at"], reverse=True),
         "categories": list(CATEGORIES),
         "scopes": [
             {"value": "combined", "label": "Combined"},
@@ -900,6 +908,28 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
             },
         )
     return state(root, project_key, ticket_id, category=category, scope=scope, bunker_id=bunker_id, path=path)
+
+
+@commands.register("coworker.file.forget")
+def command_file_forget(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    """Drop one file's conversation from the local session; nothing else changes."""
+    root = Path(context.project_root).resolve()
+    project_key = str(payload.get("project") or "").strip()
+    ticket_id = str(payload.get("ticket") or "").strip()
+    scope = str(payload.get("scope") or "combined").strip()
+    path = _thread_path(payload, "file")
+    session_root = _root(root, project_key, ticket_id)
+    messages_path = session_root / "messages.jsonl"
+    with _session_lock(session_root):
+        kept = [
+            value
+            for value in _messages(root, project_key, ticket_id)
+            if not (value.get("category") == "file" and value.get("scope") == scope and str(value.get("path") or "") == path)
+        ]
+        if messages_path.exists():
+            _private_write(messages_path, "".join(json.dumps(value, ensure_ascii=False) + "\n" for value in kept))
+    bunker_id = str(payload.get("bunker_id") or "").strip()
+    return state(root, project_key, ticket_id, category="standing", scope=scope, bunker_id=bunker_id)
 
 
 @commands.register("coworker.state")
