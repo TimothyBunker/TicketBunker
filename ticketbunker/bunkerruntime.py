@@ -89,17 +89,42 @@ def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str)
     return written
 
 
-def _checks_for(bunker_id: str, project_id: str) -> dict[str, Any]:
-    """The Project's build/test checks, falling back to the Bunker default."""
+def effective_checks(bunker_id: str, project_id: str, ticket_id: str, repo_root: str = "") -> dict[str, Any]:
+    """The build/test checks that apply to one ticket, and where they came from.
+
+    Precedence: the ticket's own override, then the Project's commands, then
+    commands detected from the repository when the Project allows discovery,
+    then the Bunker default. The result names its ``source`` so the page can
+    say which one is in force.
+    """
+    from . import checks as checks_mod
+
+    timeout = bunkerdb.CHECK_TIMEOUT_DEFAULT
     for scope in ((project_id or None), None):
         try:
             documents = bunkerdb.get_configuration(bunker_id, project_id=scope).get("documents") or {}
         except bunkerdb.BunkerDatabaseError:
             continue
         content = (documents.get("checks") or {}).get("content")
-        if isinstance(content, dict) and (content.get("build") or content.get("test")):
-            return dict(content)
-    return {}
+        if not isinstance(content, dict):
+            continue
+        timeout = int(content.get("timeout_seconds") or timeout)
+        own = (content.get("tickets") or {}).get(ticket_id) if isinstance(content.get("tickets"), dict) else None
+        if isinstance(own, dict) and (own.get("build") or own.get("test")):
+            return {"build": str(own.get("build") or ""), "test": str(own.get("test") or ""), "timeout_seconds": timeout, "source": "ticket"}
+        if content.get("build") or content.get("test"):
+            return {"build": str(content.get("build") or ""), "test": str(content.get("test") or ""), "timeout_seconds": timeout, "source": "project" if scope else "bunker"}
+        if content.get("discover") and repo_root:
+            found = checks_mod.detect(repo_root)
+            if found:
+                first = found[0]
+                return {"build": first["build"], "test": first["test"], "timeout_seconds": timeout, "source": "discovered", "detail": f"{first['tool']}: {first['reason']}"}
+    return {"build": "", "test": "", "timeout_seconds": timeout, "source": "none"}
+
+
+def _checks_for(bunker_id: str, project_id: str, ticket_id: str = "", repo_root: str = "") -> dict[str, Any]:
+    value = effective_checks(bunker_id, project_id, ticket_id, repo_root)
+    return value if value.get("build") or value.get("test") else {}
 
 
 def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
@@ -147,7 +172,7 @@ def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     info = {
         "bunker_id": bunker_id,
         "ticket_id": ticket_id,
-        "checks": _checks_for(bunker_id, str(detail["project"].get("id") or "")),
+        "checks": _checks_for(bunker_id, str(detail["project"].get("id") or ""), ticket_id, str((repository or {}).get("local_path") or "")),
         "project_id": str(detail["project"].get("id") or ""),
         "project_key": str(detail["project"].get("key") or ""),
         "repository_id": str(repository.get("id") or "") if repository else "",

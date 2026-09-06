@@ -61,7 +61,9 @@ class DesktopReleaseTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("Tagged Windows releases require", workflow)
+        self.assertIn("Stable Windows releases require", workflow)
+        self.assertIn('-match "-"', workflow)
+        self.assertIn("--prerelease", workflow)
         self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", workflow)
         self.assertIn("Get-AuthenticodeSignature", workflow)
         self.assertIn('signature.Status -ne "Valid"', workflow)

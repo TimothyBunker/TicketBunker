@@ -53,6 +53,8 @@ DESKTOP_ACTIONS = frozenset(
         "application.ticket.update.draft",
         "application.ticket.update.post",
         "coworker.file.forget",
+        "application.ticket.checks.set",
+        "application.checks.discover",
         "application.tracker.connect",
         "application.tracker.boards",
         "application.project.link",

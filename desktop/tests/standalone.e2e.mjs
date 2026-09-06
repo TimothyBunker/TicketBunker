@@ -31,7 +31,7 @@ try {
   await page.getByRole("heading", { name: "Bunkers", exact: true }).waitFor();
   await page.locator(".profile-control").click();
   await page.getByRole("button", { name: "System", exact: true }).click();
-  await page.getByText("0.5.0", { exact: true }).waitFor();
+  await page.getByText("0.6.0", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Check now", exact: true }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-system.png"), fullPage: true });
   await page.getByRole("button", { name: "Close settings" }).click();

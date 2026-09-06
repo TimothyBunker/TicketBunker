@@ -7,9 +7,9 @@ const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", 
 const EMPTY_TRACKER: TrackerSource = { provider: "github", kind: "project", owner: "", number: 0, repository: "", include_comments: true, title: "", url: "" };
 export type ConfigurationTab = "board" | "repositories" | "checks" | "trackers" | "defaults";
 
-type ChecksContent = { build: string; test: string; timeout_seconds: number };
+type ChecksContent = { build: string; test: string; timeout_seconds: number; discover: boolean; tickets: Record<string, { build: string; test: string }> };
 type CheckSuggestion = { tool: string; reason: string; build: string; test: string; repository: string };
-const EMPTY_CHECKS: ChecksContent = { build: "", test: "", timeout_seconds: 600 };
+const EMPTY_CHECKS: ChecksContent = { build: "", test: "", timeout_seconds: 600, discover: false, tickets: {} };
 const FIELD_LABELS: Record<string, string> = { title: "Title", description: "Description", status: "Status", type: "Type", priority: "Priority", assignee: "Assignee", reporter: "Reporter", labels: "Labels", created: "Created", updated: "Updated" };
 
 function sameBoard(left: TrackerSource | Board, right: TrackerSource | Board) {
@@ -102,10 +102,25 @@ export default function ConfigurationPanel({
   const checksDocument = state?.documents.checks as { revision: string; content: Partial<ChecksContent> } | undefined;
   const [checks, setChecks] = useState<ChecksContent>(EMPTY_CHECKS);
   const [suggestions, setSuggestions] = useState<CheckSuggestion[] | null>(null);
+  const [agentSuggestion, setAgentSuggestion] = useState<{ build: string; test: string; reason: string } | null>(null);
+  const [asking, setAsking] = useState(false);
   useEffect(() => {
     const content = checksDocument?.content || {};
-    setChecks({ build: String(content.build || ""), test: String(content.test || ""), timeout_seconds: Number(content.timeout_seconds) || 600 });
+    setChecks({ build: String(content.build || ""), test: String(content.test || ""), timeout_seconds: Number(content.timeout_seconds) || 600, discover: Boolean(content.discover), tickets: { ...(content.tickets || {}) } });
   }, [checksDocument?.revision, project?.id]);
+
+  async function askAgentForChecks() {
+    setAsking(true);
+    setError("");
+    try {
+      const value = await command<{ build: string; test: string; reason: string }>("application.checks.discover", { bunker_id: bunker.id, project_id: project?.id || "" });
+      setAgentSuggestion(value);
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setAsking(false);
+    }
+  }
 
   async function detectChecks() {
     setBusy(true);
@@ -450,10 +465,13 @@ export default function ConfigurationPanel({
           <label>Test command<input value={checks.test} disabled={!canWrite} placeholder="python3 -m pytest -x -q" onChange={(event) => setChecks({ ...checks, test: event.target.value })} /></label>
           <label>Timeout (seconds)<input type="number" min={30} max={3600} value={checks.timeout_seconds} disabled={!canWrite} onChange={(event) => setChecks({ ...checks, timeout_seconds: Number(event.target.value) || 600 })} /></label>
         </div>
-        <div className="integration-actions"><button disabled={busy} onClick={detectChecks}>Detect from repository</button>{(checks.build || checks.test) && <button className="danger-control" disabled={!canWrite} onClick={() => setChecks({ ...EMPTY_CHECKS, timeout_seconds: checks.timeout_seconds })}>Clear</button>}</div>
-        {suggestions && suggestions.length === 0 && <p className="quiet-note">No build system was recognized at the repository root. Enter the commands your team runs.</p>}
+        <label className="check-toggle"><input type="checkbox" checked={checks.discover} disabled={!canWrite} onChange={(event) => setChecks({ ...checks, discover: event.target.checked })} /><span><strong>Discover automatically</strong><small>When no commands are set, use the ones detected from the repository's manifests at synthesis time.</small></span></label>
+        <div className="integration-actions"><button disabled={busy} onClick={detectChecks}>Detect from repository</button><button disabled={busy || asking} onClick={askAgentForChecks}>{asking ? "Asking the agent…" : "Ask the agent"}</button>{(checks.build || checks.test) && <button className="danger-control" disabled={!canWrite} onClick={() => setChecks({ ...checks, build: "", test: "" })}>Clear</button>}</div>
+        {suggestions && suggestions.length === 0 && <p className="quiet-note">No build system was recognized at the repository root. Enter the commands your team runs, or ask the agent.</p>}
         {suggestions && suggestions.length > 0 && <ul className="check-suggestions">{suggestions.map((item) => <li key={`${item.repository}-${item.tool}`}><div><strong>{item.tool}</strong><small>{item.reason}</small>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: item.build, test: item.test })}>Use</button></li>)}</ul>}
-        <details className="advanced"><summary>What runs, and where</summary><p>Commands run with your shell in a detached worktree under TicketBunker's data folder, never in your checkout, with the timeout above. The build runs first; the test command is skipped when the build fails. The first error line and a bounded log land in the report's evidence, and a failure sets the Standing verdict to blocked.</p></details>
+        {agentSuggestion && <ul className="check-suggestions"><li><div><strong>Agent</strong><small>{agentSuggestion.reason}</small>{agentSuggestion.build && <code>{agentSuggestion.build}</code>}{agentSuggestion.test && <code>{agentSuggestion.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: agentSuggestion.build, test: agentSuggestion.test })}>Use</button></li></ul>}
+        {Object.keys(checks.tickets).length > 0 && <div className="ticket-checks"><h4>Per-ticket commands</h4><p className="quiet-note">These override the project's commands for one ticket. Set them from the ticket page.</p><ul>{Object.entries(checks.tickets).map(([id, item]) => <li key={id}><div><strong>{id}</strong>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button aria-label={`Remove ${id} checks`} disabled={!canWrite} onClick={() => { const tickets = { ...checks.tickets }; delete tickets[id]; setChecks({ ...checks, tickets }); }}>−</button></li>)}</ul></div>}
+        <details className="advanced"><summary>What runs, and where</summary><p>Commands run with your shell in a detached worktree at the head of the branch being synthesized, under TicketBunker's data folder, never in your checkout, with the timeout above. The build runs first; the test command is skipped when the build fails. The first error line and a bounded log land in the report's evidence, and a failure sets the Standing verdict to blocked. A ticket's own commands win over the project's, which win over discovered ones.</p></details>
       </section>}
 
       {state && !project && tab === "defaults" && <section className="config-surface">

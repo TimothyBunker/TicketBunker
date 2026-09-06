@@ -73,7 +73,7 @@ class ApplicationStateTests(unittest.TestCase):
         with mock.patch.object(
             application.release_updates,
             "check",
-            return_value={"current": "0.5.0", "latest": "0.5.1", "available": True},
+            return_value={"current": "0.6.0", "latest": "0.6.1", "available": True},
         ) as checked:
             result = commands.dispatch(
                 "application.release.check",

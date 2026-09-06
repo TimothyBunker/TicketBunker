@@ -478,8 +478,20 @@ the standard library and prefills each syntax error as an `[observation]`
 under What, so what a parser can prove never depends on the model.
 
 **Does it work is an observation.** A Project (or the Bunker default) may
-publish a `checks` document: a build command, a test command, and a timeout
-between thirty seconds and an hour. When one is configured, the `check` stage
+publish a `checks` document: a build command, a test command, a timeout
+between thirty seconds and an hour, a `discover` switch, and per-ticket
+overrides keyed by ticket id. The checks that apply to one ticket resolve in
+this order, and the ticket page names which is in force: the ticket's own
+commands, then the Project's, then, when `discover` is on and nothing is
+configured, the commands detected from the repository's manifests at
+synthesis time, then the Bunker default. A ticket's own commands are set from
+its page (for the ticket whose build is narrower than the project's, a single
+target or test filter) and live in the Project's document so they publish and
+sync like every other configuration. At either level the owner may ask the
+local agent to propose commands: it reads the repository with read-only tools,
+for a ticket narrowed by the ticket's text, and answers with one build and one
+test command and the files it relied on; the person keeps or edits them, and
+nothing runs until published. When one is configured, the `check` stage
 adds a detached scratch worktree at the synthesized branch's head under the
 runtime directory, runs the build and then the test there with the team's own
 shell commands, and records per command whether it passed, the exit code,
@@ -1516,6 +1528,13 @@ installs a desktop entry whose `Terminal` value is false. Opening that launcher
 without arguments lands on Bunkers and selects repositories through the native
 folder picker. The AppImage is a portable Linux alternative, while CLI archives
 remain automation and server artifacts rather than onboarding.
+
+The interface knows which core it is talking to. The Vite build stamps the
+package version into the interface, the core reports its own, and a mismatch
+shows a banner naming both and asking for a restart, so a stale worker or a
+stale interface never masquerades as a product bug. Pre-release tags (any tag
+with a hyphen) publish unsigned test builds as GitHub pre-releases, which the
+update check ignores; stable tags stay signed.
 
 Tagged Windows releases are an Authenticode boundary. The release workflow
 must refuse to publish when its certificate secrets are absent, sign and

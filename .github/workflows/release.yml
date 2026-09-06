@@ -78,11 +78,14 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           $isRelease = "$env:GITHUB_REF".StartsWith("refs/tags/v")
+          # A pre-release tag (v0.6.0-rc1, v0.6.0-beta.2) may ship unsigned so a
+          # team can test a build before it owns a certificate; a stable tag may not.
+          $isPrerelease = $isRelease -and ("$env:GITHUB_REF_NAME" -match "-")
           if (-not $env:WINDOWS_CERTIFICATE -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
-            if ($isRelease) {
-              throw "Tagged Windows releases require WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD repository secrets."
+            if ($isRelease -and -not $isPrerelease) {
+              throw "Stable Windows releases require WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD repository secrets. Tag a pre-release (v0.6.0-rc1) to publish unsigned test builds."
             }
-            Write-Warning "Building an unsigned workflow-dispatch artifact. Tagged releases cannot use this path."
+            Write-Warning "Building an unsigned artifact. Only pre-release tags and workflow dispatches use this path."
             exit 0
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP "ticketbunker-signing.pfx"
@@ -140,4 +143,9 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --generate-notes --verify-tag
+        run: |
+          flags=(--generate-notes --verify-tag)
+          case "${GITHUB_REF_NAME}" in
+            *-*) flags+=(--prerelease) ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" release-assets/* "${flags[@]}"

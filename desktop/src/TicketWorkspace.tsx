@@ -462,6 +462,69 @@ function Elapsed({ since }: { since: string }) {
   return <small className="elapsed"> · {label}</small>;
 }
 
+const CHECK_SOURCES: Record<string, string> = { ticket: "This ticket", project: "Project", bunker: "Bunker default", discovered: "Discovered", none: "Not configured" };
+
+// The build and test that will run before the next synthesis, where they come
+// from, and a way to give this ticket its own without leaving the page.
+function ChecksRow({ detail, bunkerId, onReload, notify }: { detail: TicketDetail; bunkerId: string; onReload: () => void; notify: (message: string, error?: boolean) => void }) {
+  const checks = detail.checks;
+  const [editing, setEditing] = useState(false);
+  const [build, setBuild] = useState("");
+  const [test, setTest] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  useEffect(() => { setBuild(checks?.source === "ticket" ? checks.build : ""); setTest(checks?.source === "ticket" ? checks.test : ""); }, [checks?.source, checks?.build, checks?.test, editing]);
+  if (!checks) return null;
+  async function save(clear = false) {
+    setBusy(true);
+    try {
+      await command("application.ticket.checks.set", { bunker_id: bunkerId, ticket_id: detail.ticket.id, build: clear ? "" : build, test: clear ? "" : test });
+      notify(clear ? "This ticket uses the project's checks again" : "Checks saved for this ticket");
+      setEditing(false);
+      onReload();
+    } catch (error) {
+      notify(String(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function ask() {
+    setAsking(true);
+    setReason("");
+    try {
+      const value = await command<{ build: string; test: string; reason: string }>("application.checks.discover", { bunker_id: bunkerId, ticket_id: detail.ticket.id });
+      setBuild(value.build);
+      setTest(value.test);
+      setReason(value.reason);
+    } catch (error) {
+      notify(String(error), true);
+    } finally {
+      setAsking(false);
+    }
+  }
+  const summary = checks.build || checks.test ? [checks.build && `build: ${checks.build}`, checks.test && `test: ${checks.test}`].filter(Boolean).join(" · ") : "No build or test runs before synthesis.";
+  return (
+    <div className="checks-row">
+      <div className="checks-summary"><span className={`checks-source ${checks.source}`}>{CHECK_SOURCES[checks.source] || checks.source}</span><small title={summary}>{summary}</small>{checks.detail && <small>{checks.detail}</small>}</div>
+      {!editing && <div className="checks-actions"><button type="button" onClick={() => setEditing(true)}>{checks.source === "ticket" ? "Edit this ticket's checks" : "Set checks for this ticket"}</button></div>}
+      {editing && (
+        <form className="checks-edit" onSubmit={(event) => { event.preventDefault(); save(); }}>
+          <label>Build<input value={build} placeholder="cmake --build build --target position" onChange={(event) => setBuild(event.target.value)} /></label>
+          <label>Test<input value={test} placeholder="ctest --test-dir build -R Position" onChange={(event) => setTest(event.target.value)} /></label>
+          {reason && <p className="quiet-note">Agent: {reason}</p>}
+          <div className="checks-actions">
+            <button type="submit" className="primary" disabled={busy || !(build || test)}>Save</button>
+            <button type="button" disabled={asking} onClick={ask}>{asking ? "Asking…" : "Ask the agent"}</button>
+            {checks.source === "ticket" && <button type="button" disabled={busy} onClick={() => save(true)}>Use project's</button>}
+            <button type="button" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function TicketRail({
   detail,
   bunkerId,
@@ -523,6 +586,7 @@ function TicketRail({
         <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}{synthesis.status === "updating" && <Elapsed since={String((synthesis.progress as Record<string, unknown> | undefined)?.started_at || "")} />}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
         {Boolean(synthesis.log) && <details className="diagnostic-path"><summary>Diagnostic location</summary><code>{String(synthesis.log)}</code><button onClick={() => navigator.clipboard.writeText(String(synthesis.log)).then(() => notify("Diagnostic path copied")).catch(() => notify("Copy was unavailable; the full path is shown above.", true))}>Copy path</button></details>}
         {repoRoot && synthesis.status !== "updating" && <button className="wide-action" disabled={busy} onClick={synthesize}>{synthesis.status === "current" ? "Synthesize again" : String(synthesis.action || "Synthesize")}</button>}
+        <ChecksRow detail={detail} bunkerId={bunkerId} onReload={onReload} notify={notify} />
       </section>
       <section className="branches-panel">
         <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" onClick={() => setCreating(!creating)}>+</button></header>

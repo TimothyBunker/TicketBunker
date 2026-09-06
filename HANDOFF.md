@@ -327,6 +327,17 @@ new Bunkers.
   tracker comment from the report's Standing and Checklist (`updates.py`),
   and `application.ticket.update.post` posts the edited text to the GitHub
   issue behind the ticket after a confirming click.
+- Version 0.6.0. Pre-release tags (`v0.6.0-rc1`) publish unsigned test builds
+  as GitHub pre-releases; stable tags still require the Windows certificate.
+  The interface carries its build version and shows a banner when the core's
+  version differs. GitHub Actions jobs on the private repository have not
+  started since September 2 (zero steps, no runner, three-second failures),
+  which is the account's Actions minutes or billing, not the code.
+- The `checks` document also carries `discover` and per-ticket `tickets`
+  overrides; `bunkerruntime.effective_checks` resolves ticket → project →
+  discovered → bunker and names the source; `application.ticket.checks.set`
+  edits one ticket's commands from its page; `application.checks.discover`
+  asks Pi (read-only tools) for commands at project or ticket level.
 - A Project's `checks` document (build, test, timeout) makes the bootstrap
   run the team's own commands in a detached scratch worktree at the branch
   head (`check` stage); outcomes prefill What and State and a failure asks

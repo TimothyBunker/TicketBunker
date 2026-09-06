@@ -414,6 +414,7 @@ export default function App() {
       {directEditor ? <DirectEditor projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} /> : <BunkerHub state={state} selection={selection} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} />}
       {settings && <Settings state={state} onState={setState} onClose={() => setSettings(false)} initialTab={!state.agent.decided ? "agent" : "local"} />}
       {offline && <div className="service-banner" role="alert"><span>{OFFLINE_MESSAGE}</span><button onClick={() => window.location.reload()}>Reload</button></div>}
+      {!offline && state.release?.current && state.release.current !== __TB_UI_VERSION__ && <div className="service-banner" role="alert"><span>This interface is version {__TB_UI_VERSION__} but the TicketBunker core it is talking to is {state.release.current}. Restart TicketBunker so both match.</span><button onClick={() => window.location.reload()}>Reload</button></div>}
       {notice && <div className={notice.error ? "toast error" : "toast"} role="status">{notice.message}</div>}
     </>
   );

@@ -20,15 +20,19 @@ installer, timestamps each signature, and rejects any output whose
 Authenticode status is not `Valid`. Certificate bytes and passwords are never
 written to the repository or release assets.
 
-A manual workflow dispatch may build an unsigned artifact for testing. A `v*`
-tag cannot publish through that path without both secrets.
+A manual workflow dispatch may build an unsigned artifact for testing, and so
+may a pre-release tag (any `v*` tag containing a hyphen, such as `v0.6.0-rc1`);
+those publish as GitHub pre-releases, and the app's update check ignores them
+because it accepts only stable semantic versions. A stable `v*` tag cannot
+publish without both secrets.
 
 ## Release procedure
 
 1. Confirm CI is green on the release commit.
 2. Confirm the package version agrees in `pyproject.toml`, `desktop/package.json`,
    `desktop/src-tauri/Cargo.toml`, and `desktop/src-tauri/tauri.conf.json`.
-3. Create and push the matching annotated `v<version>` tag.
+3. Create and push the matching annotated `v<version>` tag, or a
+   `v<version>-rc<n>` tag for an unsigned test build.
 4. The release workflow builds every platform from that tag, verifies the
    bundled core and Pi runtime, signs Windows output, creates adjacent SHA-256
    files, and publishes one GitHub Release.

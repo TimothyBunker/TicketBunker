@@ -1417,21 +1417,50 @@ CHECK_TIMEOUT_DEFAULT = 600
 CHECK_TIMEOUT_RANGE = (30, 3600)
 
 
-def _validated_checks(content: Mapping[str, Any]) -> dict[str, Any]:
-    """Build and test commands the pipeline runs in a scratch worktree at the
-    branch head before the agent writes. Commands are the team's own, run in
-    their own checkout; the document only bounds their shape and duration."""
-    normalized: dict[str, Any] = {}
+def _validated_check_commands(content: Mapping[str, Any], label: str = "") -> dict[str, str]:
+    commands: dict[str, str] = {}
     for name in ("build", "test"):
         value = content.get(name)
         if value is None or value == "":
-            normalized[name] = ""
+            commands[name] = ""
             continue
         if not isinstance(value, str) or "\n" in value:
-            raise BunkerDatabaseError(f"The {name} check must be one command line.")
+            raise BunkerDatabaseError(f"The {label}{name} check must be one command line.")
         if len(value) > CHECK_COMMAND_MAX:
-            raise BunkerDatabaseError(f"Keep the {name} check under {CHECK_COMMAND_MAX} characters.")
-        normalized[name] = value.strip()
+            raise BunkerDatabaseError(f"Keep the {label}{name} check under {CHECK_COMMAND_MAX} characters.")
+        commands[name] = value.strip()
+    return commands
+
+
+CHECK_TICKET_MAX = 200
+
+
+def _validated_checks(content: Mapping[str, Any]) -> dict[str, Any]:
+    """Build and test commands the pipeline runs in a scratch worktree at the
+    branch head before the agent writes. Commands are the team's own, run in
+    their own checkout; the document only bounds their shape and duration.
+
+    ``discover`` lets the pipeline fall back to commands detected from the
+    repository's manifests when none are configured. ``tickets`` holds
+    per-ticket overrides keyed by ticket id, for the ticket whose build is
+    narrower or different from the project's.
+    """
+    normalized: dict[str, Any] = dict(_validated_check_commands(content))
+    normalized["discover"] = bool(content.get("discover", False))
+    tickets_raw = content.get("tickets") or {}
+    if not isinstance(tickets_raw, Mapping):
+        raise BunkerDatabaseError("Per-ticket checks must be keyed by ticket id.")
+    if len(tickets_raw) > CHECK_TICKET_MAX:
+        raise BunkerDatabaseError(f"Keep per-ticket checks under {CHECK_TICKET_MAX} tickets.")
+    tickets: dict[str, dict[str, str]] = {}
+    for ticket_id, value in tickets_raw.items():
+        key = str(ticket_id or "").strip()
+        if not key or not isinstance(value, Mapping):
+            raise BunkerDatabaseError("Per-ticket checks must be keyed by ticket id.")
+        commands = _validated_check_commands(value, label=f"{key} ")
+        if commands["build"] or commands["test"]:
+            tickets[key] = commands
+    normalized["tickets"] = tickets
     timeout = content.get("timeout_seconds", CHECK_TIMEOUT_DEFAULT)
     try:
         timeout = int(timeout)

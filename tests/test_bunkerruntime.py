@@ -138,6 +138,41 @@ class BunkerRuntimeTests(unittest.TestCase):
                  "expected_revision": published["documents"]["checks"]["revision"], "content": {"build": "make", "timeout_seconds": 5}},
             )
 
+    def test_ticket_checks_override_project_and_discovery_fills_in(self) -> None:
+        from ticketbunker import checks
+
+        (self.repo / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+        # Nothing configured: no checks, source none.
+        self.assertEqual(bunkerruntime.effective_checks(self.bunker_id, self.project_id, "ECS-4", str(self.repo))["source"], "none")
+        # Discovery on, nothing configured: the manifest's commands apply.
+        self.dispatch(
+            "application.bunker.configuration.replace",
+            {"bunker_id": self.bunker_id, "project_id": self.project_id, "kind": "checks", "expected_revision": "",
+             "content": {"build": "", "test": "", "discover": True, "timeout_seconds": 90}},
+        )
+        found = bunkerruntime.effective_checks(self.bunker_id, self.project_id, "ECS-4", str(self.repo))
+        self.assertEqual((found["source"], found["test"], found["timeout_seconds"]), ("discovered", "python3 -m pytest -x -q", 90))
+        # A ticket override wins over everything and rides in the same document.
+        value = self.dispatch("application.ticket.checks.set", {"bunker_id": self.bunker_id, "ticket_id": "ECS-4", "build": "make position", "test": ""})
+        self.assertEqual((value["checks"]["source"], value["checks"]["build"]), ("ticket", "make position"))
+        detail = self.dispatch("application.ticket.get", {"bunker_id": self.bunker_id, "ticket_id": "ECS-4"})
+        self.assertEqual(detail["checks"]["source"], "ticket")
+        info = bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        self.assertEqual(info["checks"]["build"], "make position")
+        # Clearing the override falls back to discovery again.
+        cleared = self.dispatch("application.ticket.checks.set", {"bunker_id": self.bunker_id, "ticket_id": "ECS-4", "build": "", "test": ""})
+        self.assertEqual(cleared["checks"]["source"], "discovered")
+        # Agent discovery parses one JSON object and refuses nonsense.
+        self.assertEqual(checks._parse_discovery('Here you go:\n```json\n{"build": "cmake --build b", "test": "ctest", "reason": "CMakeLists.txt"}\n```'), {"build": "cmake --build b", "test": "ctest", "reason": "CMakeLists.txt"})
+        self.assertIsNone(checks._parse_discovery("I could not tell."))
+        fake = mock.Mock(returncode=0, stdout=b'{"build": "make", "test": "make test", "reason": "Makefile"}', stderr=b"")
+        with mock.patch.object(checks, "detect", return_value=[]), \
+             mock.patch("ticketbunker.agent_runtime.state", return_value={"ready": True, "enabled": True, "runtime": {"path": "/bin/pi"}, "provider": "p", "model": "m"}), \
+             mock.patch("ticketbunker.checks._run_process", return_value=fake) as run:
+            value = self.dispatch("application.checks.discover", {"bunker_id": self.bunker_id, "ticket_id": "ECS-4"})
+        self.assertEqual((value["build"], value["scope"]), ("make", "ticket"))
+        self.assertIn("ECS-4", run.call_args.args[0][-1])
+
     def test_coworker_names_missing_database_without_bunker(self) -> None:
         with self.assertRaises(commands.CommandRejected) as caught:
             self.dispatch("coworker.state", {"project": "", "ticket": "ECS-4", "category": "who", "scope": "combined"})

@@ -578,7 +578,84 @@ def command_ticket_get(
             detail["truth"] = {}
     else:
         detail["truth"] = {}
+    from . import bunkerruntime as _runtime
+
+    try:
+        detail["checks"] = _runtime.effective_checks(
+            str(payload.get("bunker_id") or ""),
+            str(detail["project"].get("id") or ""),
+            str(detail["ticket"].get("id") or ""),
+            str((repository or {}).get("local_path") or ""),
+        )
+    except bunkerdb.BunkerDatabaseError:
+        detail["checks"] = {}
     return detail
+
+
+@commands.register("application.ticket.checks.set")
+def command_ticket_checks_set(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Set or clear one ticket's own build/test commands in its Project's checks document."""
+    bunker_id = str(payload.get("bunker_id") or "")
+    ticket_id = str(payload.get("ticket_id") or "").strip()
+    if not ticket_id:
+        raise commands.CommandRejected("ticket_required", "Choose a ticket first.")
+    detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
+    project_id = str(detail["project"].get("id") or "")
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id or None)
+    document = (configuration.get("documents") or {}).get("checks") or {}
+    content = dict(document.get("content") or {"build": "", "test": "", "timeout_seconds": bunkerdb.CHECK_TIMEOUT_DEFAULT})
+    tickets = dict(content.get("tickets") or {})
+    build = str(payload.get("build") or "").strip()
+    test = str(payload.get("test") or "").strip()
+    if build or test:
+        tickets[ticket_id] = {"build": build, "test": test}
+    else:
+        tickets.pop(ticket_id, None)
+    content["tickets"] = tickets
+    proposal = _bunker_result(
+        bunkerdb.propose_configuration,
+        bunker_id,
+        project_id=project_id or None,
+        kind="checks",
+        expected_revision=str(document.get("revision") or ""),
+        content=content,
+    )
+    accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
+    _bunker_result(bunkerdb.apply_configuration_change, bunker_id, proposal, accepted=accepted)
+    from . import bunkerruntime as _runtime
+
+    repository = next((value for value in detail.get("repositories", []) if str(value.get("local_path") or "")), None)
+    return {"checks": _runtime.effective_checks(bunker_id, project_id, ticket_id, str((repository or {}).get("local_path") or ""))}
+
+
+@commands.register("application.checks.discover")
+def command_checks_discover(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Ask the local agent to propose build/test commands for a Project or one ticket."""
+    from . import checks as checks_mod
+
+    bunker_id = str(payload.get("bunker_id") or "")
+    ticket_id = str(payload.get("ticket_id") or "").strip()
+    project_id = str(payload.get("project_id") or "").strip()
+    ticket: dict[str, Any] = {}
+    if ticket_id:
+        detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
+        project_id = str(detail["project"].get("id") or "")
+        ticket = dict(detail.get("ticket") or {})
+        repositories = detail.get("repositories", [])
+    else:
+        configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id or None)
+        repositories = (configuration.get("repositories") or {}).get("items") or []
+    root = next((str(value.get("local_path") or "") for value in repositories if str(value.get("local_path") or "")), "")
+    if not root:
+        raise commands.CommandRejected("repository_required", "Attach a local repository first; the agent reads its files to find the build.")
+    try:
+        return checks_mod.discover_with_agent(Path(root), ticket=ticket)
+    except checks_mod.DiscoveryError as exc:
+        raise commands.CommandRejected("checks_discovery_failed", str(exc)) from exc
 
 
 @commands.register("application.repository.inspect")

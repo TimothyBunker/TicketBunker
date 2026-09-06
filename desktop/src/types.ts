@@ -141,9 +141,12 @@ export type TicketPage = {
   };
 };
 
+export type EffectiveChecks = { build: string; test: string; timeout_seconds: number; source: "ticket" | "project" | "bunker" | "discovered" | "none"; detail?: string };
+
 export type TicketDetail = {
   ticket: TicketReference & Record<string, unknown>;
   project: Project;
+  checks?: EffectiveChecks;
   repositories: Repository[];
   branches: Array<{
     name: string;
@@ -242,7 +245,7 @@ export type ConfigurationState = {
       kind: "checks";
       revision: string;
       updated_at: string;
-      content: { build: string; test: string; timeout_seconds: number };
+      content: { build: string; test: string; timeout_seconds: number; discover?: boolean; tickets?: Record<string, { build: string; test: string }> };
     };
   };
 };
