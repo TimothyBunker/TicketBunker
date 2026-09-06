@@ -585,7 +585,8 @@ class SharedBunkerTests(unittest.TestCase):
         self.assertEqual(shared["membership"]["role"], "owner")
         credential_path = credentials.store_path()
         self.assertTrue(credential_path.is_file())
-        self.assertEqual(stat.S_IMODE(credential_path.stat().st_mode), 0o600)
+        if os.name != "nt":  # Windows has no POSIX mode bits; the store relies on the profile directory's ACL there
+            self.assertEqual(stat.S_IMODE(credential_path.stat().st_mode), 0o600)
         owner_secret = credentials.resolve(credentials.find(self.origin))
         self.assertTrue(owner_secret)
         self.assertNotIn(owner_secret, json.dumps(shared))

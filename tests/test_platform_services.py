@@ -181,7 +181,9 @@ class HttpsContextTests(unittest.TestCase):
                 with mock.patch.object(platform_services.PlatformServices, "ca_bundle_candidates", return_value=(str(bundle),)):
                     with mock.patch.object(platform_services.ssl.SSLContext, "load_verify_locations") as load:
                         context = services.https_context()
-            load.assert_called_once_with(cafile=str(bundle))
+            # Windows' default context loads its certificate store through the
+            # same method, so count only the fallback's own cafile call.
+            self.assertEqual([call.kwargs.get("cafile") for call in load.call_args_list if call.kwargs.get("cafile")], [str(bundle)])
         self.assertEqual(context.verify_mode, platform_services.ssl.CERT_REQUIRED)
 
     def test_hosts_with_an_interpreter_bundle_keep_the_default_context(self) -> None:
@@ -197,5 +199,5 @@ class HttpsContextTests(unittest.TestCase):
             with mock.patch.object(platform_services.ssl, "get_default_verify_paths", return_value=present):
                 with mock.patch.object(platform_services.ssl.SSLContext, "load_verify_locations") as load:
                     services.https_context()
-        load.assert_not_called()
+        self.assertEqual([call for call in load.call_args_list if call.kwargs.get("cafile")], [])
 
