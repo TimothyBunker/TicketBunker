@@ -8,6 +8,8 @@ means knowing them all; every piece of instance state is addressable by path.
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
+import tempfile
 
 TB_DIR = ".tb"
 LOCATOR_FILE = ".ticketbunker.json"
@@ -39,6 +41,17 @@ TB_GITATTRIBUTES = """\
 
 def branch_slug(branch: str) -> str:
     return branch.replace("/", "__")
+
+
+@contextmanager
+def temporary_check_worktree():
+    """Own a short-lived checkout outside deeply nested runtime paths.
+
+    Git for Windows can reject a nested runtime checkout as '$GIT_DIR too big'.
+    Only disposable build files live here; observations remain in the bunker.
+    """
+    with tempfile.TemporaryDirectory(prefix="tb-check-") as temporary:
+        yield Path(temporary) / "work"
 
 
 def find_root(start: Path | None = None) -> Path | None:

@@ -7,6 +7,9 @@ on:
       - tools/two_participant_loop.py
       - tests/test_two_participant_loop.py
       - tests/test_workflow.py
+      - tests/test_bootstrap.py
+      - ticketbunker/layout.py
+      - ticketbunker/processors/stages.py
       - .github/workflows/portability.yml
 
 permissions:
@@ -33,3 +36,5 @@ jobs:
         run: python -m unittest discover -s tests -p test_two_participant_loop.py -v
       - name: Exercise Git refresh and branch locking
         run: python -m unittest discover -s tests -p test_workflow.py -v
+      - name: Exercise deterministic Checks and scratch cleanup
+        run: python -m unittest discover -s tests -p test_bootstrap.py -v

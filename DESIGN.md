@@ -524,8 +524,9 @@ local agent to propose commands: it reads the repository with read-only tools,
 for a ticket narrowed by the ticket's text, and answers with one build and one
 test command and the files it relied on; the person keeps or edits them, and
 nothing runs until published. When one is configured, the `check` stage
-adds a detached scratch worktree at the synthesized branch's head under the
-runtime directory, runs the build and then the test there with the team's own
+adds a detached scratch worktree at the synthesized branch's head in an owned,
+short OS temporary directory (avoiding Git for Windows' nested-path limit),
+runs the build and then the test there with the team's own
 shell commands, and records per command whether it passed, the exit code,
 the seconds it took, the first error line, and a bounded log under
 `observations/checks/`; a failed build skips the test. The worktree is

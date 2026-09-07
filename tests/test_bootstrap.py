@@ -193,12 +193,17 @@ class PeopleAndRiskTests(unittest.TestCase):
         self.assertEqual(outcome["build"]["first_error"], "error: boom at parse.py:2")
         self.assertNotIn("test", outcome, "a failed build skips the test command")
         self.assertTrue((self.observations.parent / outcome["build"]["log"]).is_file())
-        self.assertFalse((self.observations.parent / "checks" / "tim__TB-7-parser").exists(), "the worktree is removed")
+        check_commands = [entry for entry in self.ledger.entries()
+                          if entry.get("stage") == "check" and entry.get("argv") == [failing]]
+        scratch = Path(check_commands[0]["cwd"])
+        self.assertFalse(scratch.exists(), "the worktree is removed")
+        self.assertFalse(scratch.parent.exists(), "the owned temporary directory is removed")
+        self.assertFalse(scratch.is_relative_to(self.observations.parent), "Checks do not inherit the runtime path depth")
         recorded = json.loads((self.observations / "check.json").read_text())
         self.assertRegex(recorded["commit"], r"^[0-9a-f]{40,64}$")
         self.assertTrue(recorded["checked_at"])
         listed = subprocess.run(["git", "-C", str(self.repo), "worktree", "list"], capture_output=True, text=True, check=True).stdout
-        self.assertNotIn("tim__TB-7-parser", listed)
+        self.assertNotIn(scratch.parent.name, listed)
 
         passing = run_bootstrap(
             repo=self.repo, ticket_key="TB-7", baseline="main", obs_dir=self.observations, ledger=self.ledger,

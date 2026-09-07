@@ -21,6 +21,11 @@ and has a regression assertion. It does not inherit the developer's profile.
 Candidate rc2 passed that macOS exercise but exposed an existing race test's
 mock ending before the HTTP handler's post-response queue call. Both HTTP tests
 now await that call before releasing the mock; the repository lock is unchanged.
+Windows diagnostics then exposed a real Checks path-length failure: detached
+worktrees now use a short owned OS temporary directory through layout.py;
+observations/logs remain in the ticket runtime, with cleanup assertions. A
+path-triggered portability workflow exercises the two-user/locking fixtures on
+Windows and macOS without repeatedly compiling installers.
 
 Follow-up: configuration now uses the unsaved guard for fields, mappings,
 repositories and Checks, including sidebar navigation and opening a ticket

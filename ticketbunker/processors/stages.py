@@ -12,13 +12,25 @@ import re
 import time
 import subprocess
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..contracts import StageContract, run_stage
 from ..adapters.gitrun import GitError, git, git_status
-from ..layout import TB_DIR, branch_slug
+from ..layout import TB_DIR, branch_slug, temporary_check_worktree
 from ..ledger import Ledger
+
+
+@contextmanager
+def _check_worktree(repo: Path, branch: str, ledger: Ledger):
+    with temporary_check_worktree() as worktree:
+        try:
+            git(repo, ["worktree", "add", "--detach", str(worktree), branch], ledger, "check")
+            yield worktree
+        finally:
+            git_status(repo, ["worktree", "remove", "--force", str(worktree)], ledger, "check")
+            git_status(repo, ["worktree", "prune"], ledger, "check")
 
 CONTRACTS: dict[str, StageContract] = {
     "branch_resolution": StageContract(
@@ -565,12 +577,8 @@ def run_bootstrap(
         except (TypeError, ValueError):
             timeout = 600
         slug = branch_slug(check_branch)
-        worktree = obs_dir.parent / "checks" / slug
-        git_status(repo, ["worktree", "remove", "--force", str(worktree)], ledger, "check")
-        worktree.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, ["worktree", "add", "--detach", str(worktree), check_branch], ledger, "check")
         outcomes: dict[str, dict] = {}
-        try:
+        with _check_worktree(repo, check_branch, ledger) as worktree:
             checked_commit = git(worktree, ["rev-parse", "HEAD"], ledger, "check").strip()
             for name, command_line in configured.items():
                 started = time.monotonic()
@@ -610,9 +618,6 @@ def run_bootstrap(
                 }
                 if exit_code != 0:
                     break  # a failed build makes the test result meaningless
-        finally:
-            git_status(repo, ["worktree", "remove", "--force", str(worktree)], ledger, "check")
-            git_status(repo, ["worktree", "prune"], ledger, "check")
         result[check_branch] = outcomes
         _write_observation(
             obs_dir, "check", {"configured": True, "branch": check_branch, "commit": checked_commit,
