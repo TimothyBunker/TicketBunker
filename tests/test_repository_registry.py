@@ -81,7 +81,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_local_checkout_is_validated_and_never_in_the_registry(self):
         from test_bunkerruntime import git
-        checkout = Path(self.tmp.name) / "checkout"
+        checkout = Path(self.tmp.name).resolve() / "checkout"
         checkout.mkdir()
         git(checkout, "init")
         git(checkout, "remote", "add", "origin", "git@github.com:example/navigation.git")
