@@ -108,7 +108,10 @@ class Participant:
             if not state.get("running") and not state.get("queued") and state.get("last"):
                 last = state["last"]
                 if last.get("status") != "pass":
-                    raise AssertionError(f"{self.name}: synthesis failed: {last.get('detail')}")
+                    diagnostic = self.fixture(
+                        "p=autoagent.log_path(Path.cwd())\n"
+                        "print(json.dumps(p.read_text(encoding='utf-8',errors='replace')[-16000:] if p.exists() else 'No agent log'))")
+                    raise AssertionError(f"{self.name}: synthesis failed: {last.get('detail')}\n{diagnostic}")
                 return self.detail()
             time.sleep(0.15)
         raise AssertionError(f"{self.name}: synthesis did not finish within 45 seconds")

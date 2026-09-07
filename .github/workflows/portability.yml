@@ -1,0 +1,35 @@
+name: Portability regression
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tools/two_participant_loop.py
+      - tests/test_two_participant_loop.py
+      - tests/test_workflow.py
+      - .github/workflows/portability.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-workflow:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Exercise isolated participants
+        run: python -m unittest discover -s tests -p test_two_participant_loop.py -v
+      - name: Exercise Git refresh and branch locking
+        run: python -m unittest discover -s tests -p test_workflow.py -v
