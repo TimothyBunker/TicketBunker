@@ -654,7 +654,9 @@ class BunkerDatabaseTests(unittest.TestCase):
         self.assertIn(str(source.resolve()), bunkerdb.imported_companion_sources())
         (ticket / "reports" / "master.md").write_text("# Combined\n\nUpdated\n")
         refreshed = bunkerdb.get_ticket(result["bunker"]["id"], "ECS-4")
-        self.assertIn("Updated", refreshed["reports"][0]["content"])
+        self.assertNotIn("Updated", refreshed["reports"][0]["content"])
+        self.assertEqual({report["scope"] for report in refreshed["reports"]},
+                         {"combined", "branch:tim/ECS-4"})
         with self.assertRaisesRegex(bunkerdb.BunkerDatabaseError, "already been imported"):
             bunkerdb.import_companion(str(source))
 
@@ -802,4 +804,3 @@ class TicketBranchTests(unittest.TestCase):
         self.assertTrue(by_name["feature/no-key"]["local"])
         self.assertFalse(by_name["feature/no-key"]["remote"])
         self.assertEqual(len([b for b in detail["branches"] if b["name"] == "feature/no-key"]), 1)
-

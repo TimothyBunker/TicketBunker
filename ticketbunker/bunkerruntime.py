@@ -12,10 +12,11 @@ is written into a source repository.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
-from . import bunkerdb, config, layout, platform_services
+from . import bunkerdb, config, layout
 
 MARKER = "bunker.json"
 _PROJECTION_EXCLUDED = {"project", "source_kind", "source_reference"}
@@ -28,12 +29,36 @@ def _meaningful(value: dict[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if key not in _MECHANICAL}
 
 
-def runtime_root(bunker_id: str) -> Path:
-    return platform_services.current().data_home() / "bunkers" / bunker_id / "runtime"
+def runtime_root(bunker_id: str, repository_id: str = "") -> Path:
+    root = bunkerdb.database_path(bunker_id).parent / "runtime"
+    if repository_id:
+        # Reuse the database identifier guard, not unchecked path segments.
+        bunkerdb.database_path(repository_id)
+        root = root / "repositories" / repository_id
+    return root
 
 
-def ticket_dir(bunker_id: str, ticket_id: str) -> Path:
-    return runtime_root(bunker_id) / f"{ticket_id}_bunker"
+def ticket_dir(bunker_id: str, ticket_id: str, repository_id: str = "") -> Path:
+    detail = bunkerdb.get_ticket(bunker_id, ticket_id)
+    repository = select_repository(detail, repository_id=repository_id)
+    return runtime_root(bunker_id, str((repository or {}).get("id") or "")) / f"{ticket_id}_bunker"
+
+
+def select_repository(detail: dict[str, Any], *, repo: Path | None = None,
+                      repository_id: str = "") -> dict[str, Any] | None:
+    candidates = list(detail.get("repositories") or [])
+    if repository_id:
+        candidates = [value for value in candidates if value["id"] == repository_id]
+    if repo is not None:
+        candidates = [value for value in candidates if value.get("local_path")
+                      and Path(value["local_path"]).resolve() == Path(repo).resolve()]
+    elif not repository_id:
+        candidates = [value for value in candidates if value.get("local_path")]
+    if not candidates and (repository_id or repo is not None):
+        raise bunkerdb.BunkerDatabaseError("This repository is not attached to the ticket's Project. Select an allowed repository in Project configuration.")
+    if len(candidates) > 1:
+        raise bunkerdb.BunkerDatabaseError("Choose a repository for this ticket before starting work.")
+    return candidates[0] if candidates else None
 
 
 def marker(bunker_dir: Path) -> dict[str, Any] | None:
@@ -57,17 +82,26 @@ def _write_if_changed(path: Path, text: str) -> bool:
 
 
 def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str) -> list[Path]:
-    """Copy the Bunker's accepted reports into a runtime that has none.
+    """Reconcile accepted reports without discarding unpublished working text.
 
     The database owns accepted reports; this machine's runtime holds the
     working copies the pipeline, the truth commands, and the coworker read.
     A runtime materialized on a machine that never ran synthesis for the
     ticket (a replica, an imported copy) starts from the accepted text so
-    those readers see the same reports the page shows. An existing working
-    copy is never overwritten: the pipeline regenerates it and publication
-    hands it back to the database.
+    those readers see the same reports the page shows. A receipt identifies
+    clean working copies that may advance with the database; changed local
+    copies remain intact and their next publication checks that baseline.
     """
     paths = layout.paths(root)
+    receipt = root / "accepted-reports.json"
+    try:
+        previous = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        previous = {}
+    if not isinstance(previous, dict):
+        previous = {}
+    fingerprints = dict(previous)
+    revisions = dict(previous.get("_revisions") or {})
     written: list[Path] = []
     for report in reports:
         content = str(report.get("content") or "")
@@ -75,17 +109,37 @@ def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str)
         owner = str(report.get("repository_id") or "")
         if not content or (repository_id and owner and owner != repository_id):
             continue
+        if scope == "combined" and any(str(value.get("scope") or "").startswith("branch:")
+                                        and value.get("repository_id") == repository_id for value in reports):
+            continue  # Runtime Combined is repository-local, unlike the database aggregate.
         if scope == "combined":
             target = paths["master"]
         elif scope.startswith("branch:"):
             target = layout.child_report(root, scope.removeprefix("branch:"))
         else:
             continue
+        normalized = content if content.endswith("\n") else content + "\n"
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        key = target.relative_to(root).as_posix()
         if target.exists():
-            continue
+            current = hashlib.sha256(target.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+            if current == digest:
+                fingerprints[key] = digest
+                revisions[key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                continue
+            if current != previous.get(key):
+                # A locally changed/unpublished component must not be discarded.
+                continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+        target.write_text(normalized, encoding="utf-8")
+        fingerprints[key] = digest
+        revisions[key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
         written.append(target)
+    fingerprints["_revisions"] = revisions
+    _write_if_changed(receipt, json.dumps(fingerprints, sort_keys=True) + "\n")
+    if any(path.parent == paths["children"] for path in written) or not paths["master"].exists():
+        from .builders.master import regenerate
+        regenerate(root)
     return written
 
 
@@ -127,20 +181,28 @@ def _checks_for(bunker_id: str, project_id: str, ticket_id: str = "", repo_root:
     return value if value.get("build") or value.get("test") else {}
 
 
-def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
+def materialize(bunker_id: str, ticket_id: str, *, repo: Path | None = None,
+                repository_id: str = "") -> dict[str, Any]:
     """Project one Bunker ticket into its runtime directory.
 
     Idempotent and cheap: the ticket file is rewritten only when the database
-    row changed, and accepted reports are copied in only where the runtime
-    has no working copy yet. Returns the directory, the attached checkout,
+    row changed, and accepted reports advance only clean runtime copies.
+    Returns the directory, the attached checkout,
     the base branch, and the identities the publish step needs.
     """
     detail = bunkerdb.get_ticket(bunker_id, ticket_id)
-    repositories = [
-        value for value in detail.get("repositories", []) if str(value.get("local_path") or "")
-    ]
-    repository = repositories[0] if repositories else None
-    root = ticket_dir(bunker_id, ticket_id)
+    repository = select_repository(detail, repo=repo, repository_id=repository_id)
+    owner = str((repository or {}).get("id") or "")
+    root = runtime_root(bunker_id, owner) / f"{ticket_id}_bunker"
+    old = runtime_root(bunker_id) / f"{ticket_id}_bunker"
+    old_info = marker(old)
+    if owner and not root.exists() and old_info and old_info.get("repository_id") == owner:
+        from . import autoagent
+        state = autoagent.read_state(Path(repository["local_path"])) if repository.get("local_path") else {}
+        if state.get("running") or state.get("queued"):
+            raise bunkerdb.BunkerDatabaseError("A synthesis is still using the previous ticket runtime. Let it finish, then reopen the ticket to migrate its local work.")
+        root.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(root)  # Preserve all existing forms, observations, and drafts.
     layout.init_dirs(root)
     existing: dict[str, Any] = {}
     try:
@@ -159,14 +221,18 @@ def materialize(bunker_id: str, ticket_id: str) -> dict[str, Any]:
         payload["key"] = ticket_id
     if repository is not None:
         payload["repo"] = str(repository["local_path"])
-    assigned = existing.get("assigned_branches")
+    assignments = payload.get("branch_assignments")
+    assigned = (assignments if isinstance(assignments, dict) else {}).get(owner, payload.get("assigned_branches", []))
+    payload.pop("branch_assignments", None)
     payload["assigned_branches"] = [
         value for value in (assigned if isinstance(assigned, list) else []) if isinstance(value, str)
     ]
     for stamp in ("created", "updated"):
         if existing.get(stamp) and not payload.get(stamp):
             payload[stamp] = existing[stamp]
-    if not existing or _meaningful(existing) != _meaningful(payload) or existing.get("repo") != payload.get("repo"):
+    if (not existing or _meaningful(existing) != _meaningful(payload)
+            or existing.get("repo") != payload.get("repo")
+            or existing.get("assigned_branches") != payload.get("assigned_branches")):
         layout.paths(root)["ticket"].write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     _seed_reports(root, detail.get("reports") or [], str((repository or {}).get("id") or ""))
     info = {
@@ -193,7 +259,8 @@ def resolve(repo: Path, branch: str) -> Path | None:
     if found is None:
         return None
     try:
-        return materialize(found["bunker_id"], found["ticket_id"])["bunker"]
+        return materialize(found["bunker_id"], found["ticket_id"], repo=repo,
+                           repository_id=found["repository_id"])["bunker"]
     except bunkerdb.BunkerDatabaseError:
         return None
 
@@ -212,6 +279,14 @@ def publish_reports(bunker_dir: Path, branch: str, ledger: Any | None = None) ->
 
     paths = layout.paths(Path(bunker_dir))
     child = layout.child_report(Path(bunker_dir), branch).read_text(encoding="utf-8")
+    try:
+        receipts = json.loads((Path(bunker_dir) / "accepted-reports.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        receipts = {}
+    if not isinstance(receipts, dict):
+        receipts = {}
+    child_key = layout.child_report(Path(bunker_dir), branch).relative_to(bunker_dir).as_posix()
+    prior = str((receipts.get("_revisions") or {}).get(child_key) or receipts.get(child_key) or "")
     master_path = paths["master"]
     master = master_path.read_text(encoding="utf-8") if master_path.is_file() else ""
     result = application.publish_ticket_reports(
@@ -221,7 +296,10 @@ def publish_reports(bunker_dir: Path, branch: str, ledger: Any | None = None) ->
         branch,
         child,
         master,
+        expected_child_revision=f"r:{prior[:16]}" if prior else "",
     )
+    detail = bunkerdb.get_ticket(str(info["bunker_id"]), str(info["ticket_id"]))
+    _seed_reports(Path(bunker_dir), detail.get("reports") or [], str(info.get("repository_id") or ""))
     if ledger is not None:
         ledger.event(
             "bunker_report_published",

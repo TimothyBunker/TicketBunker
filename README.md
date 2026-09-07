@@ -218,6 +218,19 @@ Import is read-only with respect to both source and companion repositories and
 records its source digest and imported counts. The old store does not remain a
 second live writer.
 
+For a ticket spanning several repositories, choose its **Repository** in the
+ticket's right-hand panel. Branches, source files, synthesis, and check discovery
+follow that selection. The **+** action offers the repository's actual base
+branches and asks before creating a branch; it requires a clean worktree and
+never stashes or resets your work. These actions use the Bunker database and
+do not require `tb init` or a companion repository.
+
+Clean local report copies update from accepted database reports. Unpublished
+local drafts are preserved; an older draft cannot silently replace a newer
+accepted branch report. Conflict resolution is not yet available as an app
+flow. Shared-service report verification also remains a hardening task; the
+current server should not be treated as independently verifying source anchors.
+
 ## Optional CLI automation and migration
 
 The commands below are the compatibility and automation surface for the

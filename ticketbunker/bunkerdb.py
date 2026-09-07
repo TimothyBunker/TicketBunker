@@ -1793,104 +1793,10 @@ def _iso_order(value: str) -> float:
         return 0.0
 
 
-def _refresh_legacy_ticket(bunker_id: str, ticket_id: str) -> None:
-    """Refresh one imported ticket from its attached checkout without networking."""
-    with _database(bunker_id) as connection:
-        source = connection.execute(
-            """
-            SELECT t.source_kind, t.source_reference, p.key, rb.id AS repository_id,
-                   lr.local_path
-            FROM tickets t
-            JOIN projects p ON p.id = t.project_id
-            JOIN repository_bindings rb ON rb.project_id = p.id
-            JOIN local_repositories lr ON lr.binding_id = rb.id
-            WHERE t.id = ? LIMIT 1
-            """,
-            (ticket_id,),
-        ).fetchone()
-    if source is None or str(source["source_kind"]) not in {
-        "legacy-companion",
-        "legacy-embedded",
-    }:
-        return
-    root = Path(str(source["local_path"]))
-    if str(source["source_kind"]) == "legacy-embedded":
-        candidates = [
-            path
-            for path in layout.bunkers_dir(root).iterdir()
-            if path.is_dir() and (path / "ticket.json").is_file()
-        ] if layout.bunkers_dir(root).is_dir() else []
-        ticket_root = next(
-            (
-                path
-                for path in candidates
-                if str(_payload_object((path / "ticket.json").read_text(encoding="utf-8")).get("id") or "")
-                == ticket_id
-            ),
-            layout.bunkers_dir(root) / f"{ticket_id}_bunker",
-        )
-    else:
-        ticket_root = companion.tickets_dir(root, str(source["key"])) / ticket_id
-    ticket_path = ticket_root / "ticket.json"
-    try:
-        payload = json.loads(ticket_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return
-    if not isinstance(payload, dict):
-        return
-    report_values: list[tuple[str, str]] = []
-    master_path = ticket_root / "reports" / "master.md"
-    if master_path.is_file():
-        try:
-            report_values.append(("combined", master_path.read_text(encoding="utf-8")))
-        except OSError:
-            pass
-    branch_root = ticket_root / "reports" / "branches"
-    if branch_root.is_dir():
-        for path in sorted(branch_root.glob("*.md")):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            # Legacy files are named by branch slug; the report scope carries
-            # the real branch name so it folds with the checkout's refs.
-            stamp = anchorcheck.verified_stamp(text)
-            branch = str(stamp.get("branch") or "") or path.stem.replace("__", "/")
-            report_values.append((f"branch:{branch}", text))
-    now = _now()
-    with _database(bunker_id) as connection:
-        connection.execute(
-            "UPDATE tickets SET payload_json = ?, updated_at = ? WHERE id = ?",
-            (
-                json.dumps(payload, sort_keys=True),
-                str(payload.get("updated") or payload.get("updated_at") or now),
-                ticket_id,
-            ),
-        )
-        connection.execute("DELETE FROM reports WHERE ticket_id = ?", (ticket_id,))
-        connection.executemany(
-            """
-            INSERT INTO reports(ticket_id, scope, repository_id, content, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    ticket_id,
-                    scope,
-                    str(source["repository_id"]) if scope.startswith("branch:") else "",
-                    content,
-                    now,
-                )
-                for scope, content in report_values
-            ],
-        )
-
-
 def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     """Return one complete local ticket snapshot without network activity."""
     bunker_id = _id(bunker_id, "Bunker")
     ticket_id = _id(ticket_id, "ticket")
-    _refresh_legacy_ticket(bunker_id, ticket_id)
     with _database(bunker_id) as connection:
         row = connection.execute(
             """
@@ -1936,14 +1842,17 @@ def get_ticket(bunker_id: str, ticket_id: str) -> dict[str, Any]:
     reports = [dict(value) for value in report_rows]
     repositories = [dict(value) for value in repository_rows]
     assigned = payload.get("assigned_branches")
-    named = {
-        str(value.get("scope") or "").removeprefix("branch:")
-        for value in reports
-        if str(value.get("scope") or "").startswith("branch:")
-    } | {str(value) for value in (assigned if isinstance(assigned, list) else []) if value}
     branches: list[dict[str, Any]] = []
     for repository in repositories:
-        branches.extend(_repository_branches(repository, ticket_id, named))
+        work = payload.get("branch_assignments") or {}
+        if not isinstance(work, dict):
+            work = {}
+        scoped_names = {str(value["scope"]).removeprefix("branch:") for value in reports
+                        if value.get("repository_id") == repository["id"] and value["scope"].startswith("branch:")}
+        names = work.get(repository["id"], [])
+        scoped_names.update(str(value) for value in (names if isinstance(names, list) else []))
+        scoped_names.update(str(value) for value in (assigned if isinstance(assigned, list) else []))
+        branches.extend(_repository_branches(repository, ticket_id, scoped_names))
     known = {(str(value["repository_id"]), str(value["name"])) for value in branches}
     repositories_by_id = {str(value["id"]): value for value in repositories}
     for report in reports:
@@ -2753,6 +2662,11 @@ def propose_ticket_sync(
                 )
             current_raw = ""
             if existing is not None:
+                # Provider snapshots cannot erase TicketBunker's repository-scoped work.
+                saved = _payload_object(existing["payload_json"])
+                if "branch_assignments" in saved:
+                    payload["branch_assignments"] = saved["branch_assignments"]
+                    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
                 current_raw = json.dumps(
                     _payload_object(existing["payload_json"]), sort_keys=True, separators=(",", ":")
                 )
@@ -2805,6 +2719,18 @@ def apply_ticket_sync_change(
     with _database(bunker_id) as connection:
         if rows:
             _require_acceptance(_mode(connection, bunker_id), accepted)
+        connection.execute("BEGIN IMMEDIATE")
+        expected = {change["record_id"]: change["expected_revision"]
+                    for change in proposal.get("changes", [])}
+        for row in rows:
+            if row["id"] not in expected:
+                raise BunkerDatabaseError("The ticket change has no base revision. Reload and retry.")
+            current = connection.execute("SELECT payload_json FROM tickets WHERE id = ?", (row["id"],)).fetchone()
+            current_raw = json.dumps(_payload_object(current["payload_json"]), sort_keys=True,
+                                     separators=(",", ":")) if current else ""
+            revision = _ticket_revision(current_raw) if current else ""
+            if revision != expected[row["id"]]:
+                raise BunkerDatabaseError("The ticket changed while this action ran. Sync the Bunker and retry.")
         now = _now()
         for row in rows:
             payload = row["payload"]
@@ -2842,6 +2768,39 @@ def apply_ticket_sync_change(
         "updated": sum(item["action"] == "updated" for item in results),
         "unchanged": sum(item["action"] == "unchanged" for item in results),
     }
+
+
+def propose_branch_assignment(bunker_id: str, ticket_id: str, repository_id: str,
+                              branch: str) -> dict[str, Any]:
+    """Record work independently of tracker fields, through the ticket change contract."""
+    with _database(bunker_id) as connection:
+        row = connection.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        if row is None:
+            raise BunkerDatabaseError("That ticket is not in this Bunker.")
+        binding = connection.execute("SELECT project_id FROM repository_bindings WHERE id = ?",
+                                     (repository_id,)).fetchone()
+        if binding is None or binding["project_id"] != row["project_id"]:
+            raise BunkerDatabaseError("Choose a repository attached to this ticket's Project.")
+        payload = _payload_object(row["payload_json"])
+        key = str(payload.get("key") or ticket_id)
+        if not re.search(rf"(?<![A-Za-z0-9]){re.escape(key)}(?![A-Za-z0-9])", branch):
+            raise BunkerDatabaseError(f"The branch must contain ticket key {key}. Rename it and retry.")
+        _repository_branch(branch)
+        assignments = dict(payload.get("branch_assignments") or {})
+        branches = list(assignments.get(repository_id) or [])
+        if branch in branches:
+            return {"mode": _mode(connection, bunker_id), "rows": [], "changes": [], "results": []}
+        previous = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        assignments[repository_id] = [*branches, branch]
+        payload["branch_assignments"] = assignments
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        value = {"id": ticket_id, "project_id": row["project_id"], "payload": payload,
+                 "source_kind": row["source_kind"], "source_reference": row["source_reference"]}
+        change = remote.change_record(key=uuid.uuid4().hex, kind="ticket", record_id=ticket_id,
+                                      expected_revision=_ticket_revision(previous),
+                                      revision=_ticket_revision(raw), payload=value)
+        return {"mode": _mode(connection, bunker_id), "rows": [value], "changes": [change],
+                "results": [{"ticket": ticket_id, "action": "updated"}]}
 
 
 def find_bunker_ticket(repo_root: Path | str, branch: str) -> dict[str, Any] | None:
@@ -2913,6 +2872,14 @@ def propose_report_publication(
         mode = _mode(connection, bunker_id)
         if connection.execute("SELECT 1 FROM tickets WHERE id = ?", (ticket_id,)).fetchone() is None:
             raise BunkerDatabaseError("That ticket is not in this Bunker.")
+        from .builders.master import from_records
+
+        children = [dict(row) for row in connection.execute(
+            "SELECT scope, repository_id, content FROM reports WHERE ticket_id = ? AND scope LIKE 'branch:%'",
+            (ticket_id,)).fetchall()
+            if not (row["scope"] == f"branch:{branch_name}" and row["repository_id"] == repository_key)]
+        children.append(candidates[0])
+        candidates[1]["content"] = from_records(ticket_id, children)
         rows: list[dict[str, Any]] = []
         changes: list[dict[str, Any]] = []
         results: list[dict[str, Any]] = []
@@ -2954,6 +2921,15 @@ def apply_report_publication(
     with _database(bunker_id) as connection:
         if rows:
             _require_acceptance(_mode(connection, bunker_id), accepted)
+        connection.execute("BEGIN IMMEDIATE")
+        expected = {change["record_id"]: change["expected_revision"] for change in proposal.get("changes", [])}
+        for row in rows:
+            key = f"{row['ticket_id']}|{row['scope']}|{row['repository_id']}"
+            current = connection.execute("SELECT content FROM reports WHERE ticket_id = ? AND scope = ? AND repository_id = ?",
+                                         (row["ticket_id"], row["scope"], row["repository_id"])).fetchone()
+            revision = _report_revision(str(current["content"])) if current else ""
+            if key not in expected or expected[key] != revision:
+                raise BunkerDatabaseError("Reports changed while this action ran. Sync the Bunker and retry.")
         now = _now()
         for row in rows:
             connection.execute(
@@ -3736,6 +3712,10 @@ def import_companion(source_root: str, *, bunker_name: str = "") -> dict[str, An
                         content = report_path.read_text(encoding="utf-8")
                     except OSError:
                         continue
+                    if scope.startswith("branch:"):
+                        stamp = anchorcheck.verified_stamp(content) or {}
+                        branch = str(stamp.get("branch") or "") or report_path.stem.replace("__", "/")
+                        scope = f"branch:{branch}"
                     report_relative = report_path.relative_to(ticket_dir).as_posix()
                     digest.update(report_relative.encode("utf-8"))
                     digest.update(content.encode("utf-8"))

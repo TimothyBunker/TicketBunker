@@ -42,6 +42,28 @@ def _section(text: str, name: str) -> list[str]:
     return lines
 
 
+def from_records(ticket_id: str, reports: list[dict]) -> str:
+    """Pure Bunker aggregate, preserving repository identity and child text.
+
+    Unlike a runtime's master, this includes accepted children from every
+    repository. No local files or model calls participate in the shared view.
+    """
+    children = [value for value in reports if str(value.get("scope") or "").startswith("branch:")]
+    children.sort(key=lambda value: (str(value.get("repository_id") or ""), str(value["scope"])))
+    parts = ["<!-- master report — regenerated mechanically from accepted Bunker children. Do not edit. -->",
+             "# Master report", "", f"Ticket: {ticket_id}", "", "## Digest", ""]
+    for child in children:
+        label = f"{child.get('repository_id') or 'Imported repository'} / {child['scope'][7:]}"
+        parts.extend([f"**{label}**", *_section(str(child["content"]), "Reader brief"),
+                      *_section(str(child["content"]), "State"), ""])
+    for child in children:
+        label = f"{child.get('repository_id') or 'Imported repository'} / {child['scope'][7:]}"
+        content = str(child["content"])
+        parts.extend(["---", f"# Branch: {label}",
+                      f"<!-- child-digest: {digest(content)} -->", "", content.rstrip(), ""])
+    return "\n".join(parts) + "\n"
+
+
 def regenerate(bunker: Path, ledger: Ledger | None = None) -> Path:
     bunker = Path(bunker)
     paths = layout.paths(bunker)

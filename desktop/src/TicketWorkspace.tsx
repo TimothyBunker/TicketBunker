@@ -75,7 +75,7 @@ function StreamEntry({ entry, fallbackKind }: { entry: Record<string, unknown>; 
 }
 
 function agentProject(detail: TicketDetail): string {
-  return detail.ticket.source_kind === "legacy-embedded" ? "" : detail.project.key;
+  return detail.project.key;
 }
 
 function flattenProjects(projects: Project[]): Project[] {
@@ -337,7 +337,7 @@ function UpdatePanel({ bunkerId, detail, scope, notify, onClose }: { bunkerId: s
   useEffect(() => {
     let active = true;
     setError("");
-    command<UpdateDraft>("application.ticket.update.draft", { bunker_id: bunkerId, ticket_id: detail.ticket.id, scope: scope === "all" ? "" : scope })
+    command<UpdateDraft>("application.ticket.update.draft", { bunker_id: bunkerId, ticket_id: detail.ticket.id, repository_id: detail.selected_repository_id, scope: scope === "all" ? "" : scope })
       .then((value) => { if (!active) return; setDraft(value); setText(value.text); })
       .catch((reason) => active && setError(String(reason)));
     return () => { active = false; };
@@ -479,7 +479,7 @@ function ChecksRow({ detail, bunkerId, onReload, notify }: { detail: TicketDetai
   async function save(clear = false) {
     setBusy(true);
     try {
-      await command("application.ticket.checks.set", { bunker_id: bunkerId, ticket_id: detail.ticket.id, build: clear ? "" : build, test: clear ? "" : test });
+      await command("application.ticket.checks.set", { bunker_id: bunkerId, ticket_id: detail.ticket.id, repository_id: detail.selected_repository_id, build: clear ? "" : build, test: clear ? "" : test });
       notify(clear ? "This ticket uses the project's checks again" : "Checks saved for this ticket");
       setEditing(false);
       onReload();
@@ -493,7 +493,7 @@ function ChecksRow({ detail, bunkerId, onReload, notify }: { detail: TicketDetai
     setAsking(true);
     setReason("");
     try {
-      const value = await command<{ build: string; test: string; reason: string }>("application.checks.discover", { bunker_id: bunkerId, ticket_id: detail.ticket.id });
+      const value = await command<{ build: string; test: string; reason: string }>("application.checks.discover", { bunker_id: bunkerId, ticket_id: detail.ticket.id, repository_id: detail.selected_repository_id });
       setBuild(value.build);
       setTest(value.test);
       setReason(value.reason);
@@ -529,6 +529,9 @@ function TicketRail({
   detail,
   bunkerId,
   repoRoot,
+  repositoryId,
+  onRepository,
+  repositoryLocked,
   scope,
   onScope,
   onReload,
@@ -537,6 +540,9 @@ function TicketRail({
   detail: TicketDetail;
   bunkerId: string;
   repoRoot: string;
+  repositoryId: string;
+  onRepository: (value: string) => void;
+  repositoryLocked: boolean;
   scope: string;
   onScope: (value: string) => void;
   onReload: () => void;
@@ -545,6 +551,19 @@ function TicketRail({
   const [creating, setCreating] = useState(false);
   const [candidate, setCandidate] = useState<{ name: string; base: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [bases, setBases] = useState<string[]>([]);
+  const [baseError, setBaseError] = useState("");
+  useEffect(() => {
+    if (!creating || !repoRoot) return;
+    let cancelled = false;
+    setBases([]);
+    setBaseError("");
+    command<{ base_branches: string[] }>("workflow.state", { ticket: detail.ticket.id, bunker_id: bunkerId }, repoRoot)
+      .then((value) => { if (!cancelled) setBases(value.base_branches); })
+      .catch((reason) => { if (!cancelled) setBaseError(String(reason)); });
+    return () => { cancelled = true; };
+  }, [creating, repoRoot, bunkerId, detail.ticket.id]);
+  useEffect(() => { setCreating(false); setCandidate(null); }, [repositoryId]);
   const synthesis = (detail.truth?.synthesis || {}) as Record<string, unknown>;
   const ticket = detail.ticket;
   async function synthesize() {
@@ -566,6 +585,7 @@ function TicketRail({
     try {
       const result = await command<{ branch: string }>("workflow.start", {
         ticket: ticket.id,
+        bunker_id: bunkerId,
         name: candidate.name,
         base: candidate.base,
       }, repoRoot);
@@ -581,6 +601,7 @@ function TicketRail({
   }
   return (
     <aside className="ticket-rail">
+      {detail.repositories.length > 1 && <label>Repository<select aria-label="Working repository" value={repositoryId} disabled={busy || repositoryLocked} title={repositoryLocked ? "Return to the ticket before changing repositories." : undefined} onChange={(event) => onRepository(event.target.value)}>{detail.repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.name}{repo.local_path ? "" : " (not connected)"}</option>)}</select></label>}
       <section className="state-hub">
         <header><h2>Synthesis</h2></header>
         <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}{synthesis.status === "updating" && <Elapsed since={String((synthesis.progress as Record<string, unknown> | undefined)?.started_at || "")} />}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
@@ -589,7 +610,7 @@ function TicketRail({
         <ChecksRow detail={detail} bunkerId={bunkerId} onReload={onReload} notify={notify} />
       </section>
       <section className="branches-panel">
-        <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" onClick={() => setCreating(!creating)}>+</button></header>
+        <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" disabled={!repoRoot || busy} onClick={() => setCreating(!creating)}>+</button></header>
         {detail.branches.length === 0 && <p className="rail-empty">No branch carries {detail.ticket.id} yet. Use + to start one.</p>}
         {detail.branches.map((branch) => {
           const compare = branchCompare(branch);
@@ -603,7 +624,7 @@ function TicketRail({
             </button>
           );
         })}
-        {creating && !candidate && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setCandidate({ name: String(data.get("name") || ""), base: String(data.get("base") || "") }); }}><label>Short description<input name="name" placeholder="position-system" required /></label><label>Branch from<select name="base">{detail.repositories.map((repo) => <option key={repo.id} value={repo.default_branch || "main"}>{repo.default_branch || "main"}</option>)}</select></label><button className="primary">Review branch</button></form>}
+        {creating && !candidate && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setCandidate({ name: String(data.get("name") || ""), base: String(data.get("base") || "") }); }}><label>Short description<input name="name" placeholder="position-system" required /></label><label>Branch from<select name="base" disabled={!bases.length}>{bases.map((base) => <option key={base} value={base}>{base}</option>)}</select></label>{baseError && <p role="alert">{baseError}</p>}<button className="primary" disabled={!bases.length}>Review branch</button></form>}
         {candidate && <div className="confirmation"><strong>Create this branch?</strong><p>TicketBunker will require a clean worktree, switch to <code>{candidate.base}</code>, fast-forward it when possible, then create the ticket branch.</p><div><button onClick={() => setCandidate(null)}>Back</button><button className="primary" disabled={busy} onClick={createBranch}>Create branch</button></div></div>}
       </section>
     </aside>
@@ -1014,7 +1035,15 @@ function SourceEditor({
 }
 
 export default function TicketWorkspace({ bunker, reference, onBack, notify }: Props) {
-  const [detail, setDetail] = useState<TicketDetail | null>(null);
+  const [snapshot, setDetail] = useState<TicketDetail | null>(null);
+  const [repositoryChoice, setRepositoryChoice] = useState("");
+  const repositoryId = repositoryChoice || snapshot?.selected_repository_id || snapshot?.repositories[0]?.id || "";
+  const detail = useMemo(() => snapshot ? ({ ...snapshot,
+    selected_repository_id: repositoryId,
+    branches: snapshot.branches.filter((branch) => branch.repository_id === repositoryId),
+    reports: snapshot.reports.filter((report) => report.repository_id === repositoryId ||
+      (report.scope === "combined" && snapshot.repositories.length <= 1)),
+  }) : null, [snapshot, repositoryId]);
   const [error, setError] = useState("");
   const [scope, setScope] = useState("");
   const [section, setSection] = useState("details");
@@ -1022,15 +1051,17 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   const [quote, setQuote] = useState<Quote | null>(null);
   const [pending, setPending] = useState<{ quote: Quote; message: string; id: number } | null>(null);
   const [editor, setEditor] = useState<SourceDraft | null>(null);
-  const repoRoot = useMemo(() => detail?.repositories.find((value) => value.local_path)?.local_path || "", [detail]);
+  const repoRoot = detail?.repositories.find((value) => value.id === repositoryId)?.local_path || "";
+  const readSequence = useRef(0);
 
   function load() {
+    const sequence = ++readSequence.current;
     setError("");
-    command<TicketDetail>("application.ticket.get", { bunker_id: bunker.id, ticket_id: reference.id })
-      .then(setDetail)
-      .catch((reason) => setError(String(reason)));
+    command<TicketDetail>("application.ticket.get", { bunker_id: bunker.id, ticket_id: reference.id, repository_id: repositoryChoice })
+      .then((value) => { if (readSequence.current === sequence) setDetail(value); })
+      .catch((reason) => { if (readSequence.current === sequence) setError(String(reason)); });
   }
-  useEffect(load, [bunker.id, reference.id]);
+  useEffect(load, [bunker.id, reference.id, repositoryChoice]);
   // While a synthesis runs, the page follows it: poll the ticket every few
   // seconds and take one more read when it finishes, so the report appears
   // without a manual refresh. A hidden tab stays quiet; returning to it
@@ -1142,7 +1173,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
             <div id="agent-work"><AgentTab detail={detail} bunkerId={bunker.id} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} notify={notify} /></div>
           </SourceActionsContext.Provider>}
         </main>
-        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
+        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} repositoryId={repositoryId} repositoryLocked={Boolean(editor)} onRepository={(value) => { setRepositoryChoice(value); setScope(""); setQuote(null); setPending(null); }} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
       </div>
       <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} pending={pending} onPendingSent={() => setPending(null)} openFile={editor?.path || ""} onReload={load} notify={notify} />
     </div>

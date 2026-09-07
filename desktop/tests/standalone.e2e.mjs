@@ -68,6 +68,17 @@ try {
   await page.screenshot({ path: output, fullPage: true });
   await page.getByRole("heading", { name: "Agent work" }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-agent.png"), fullPage: true });
+  // Opt-in only: the caller must provide a disposable, clean checkout with
+  // a reachable scratch origin. Ordinary viewer smoke tests never create work.
+  if (process.env.TB_E2E_CREATE_BRANCH) {
+    const name = process.env.TB_E2E_CREATE_BRANCH;
+    await page.getByRole("button", { name: "Create branch", exact: true }).click();
+    await page.getByLabel("Short description").fill(name);
+    await page.getByRole("button", { name: "Review branch", exact: true }).click();
+    await page.locator(".confirmation").getByRole("button", { name: "Create branch", exact: true }).click();
+    await page.locator(".branch-item").filter({ hasText: name }).waitFor();
+    await page.screenshot({ path: output.replace(/\.png$/, "-branch-created.png"), fullPage: true });
+  }
   for (const width of [900, 640]) {
     await page.setViewportSize({ width, height: 820 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

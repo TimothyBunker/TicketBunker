@@ -56,6 +56,31 @@ exercise unless a live boundary is explicitly called out.
 
 ### Bunker database and application onboarding
 
+- **6 September cutover slice:** imported tickets are one-time copies, never
+  reread from companion storage. Native workflow state/start/attach use Bunker
+  configuration and publish repository-scoped ticket branch links through the
+  service when shared. The app offers a repository selector only when needed,
+  uses actual base refs, and retains branch-creation confirmation. Check
+  discovery and ticket update drafting receive the selected binding too.
+- Runtime directories are now repository-scoped. Clean accepted report copies
+  reconcile on materialization; local drafts retain their accepted baseline
+  and cannot overwrite a newer database revision. Normal publication derives
+  Combined from all repository children, not caller text. Ticket/report applies
+  are revision-checked inside SQLite write transactions. Tests in
+  `test_bunker_cutover.py` exercise disposable source repos and a local service.
+- **Still open:** service-side report gates/trusted publisher policy, server
+  aggregate derivation, draft-conflict UI, deletion reconciliation, and full
+  Bunker-owned coworker-session storage. Do not represent this slice as the
+  complete architecture migration. Native installed-app testing on Tim's
+  machines, second-participant product validation, and Jira transport remain
+  separate work. Keep the existing release pipeline, Standing, editor/file
+  conversations, and project/ticket Checks contracts intact.
+- Cutover validation: 349 Python tests, 30 UI tests, production UI build, and
+  the real browser smoke flow (including opt-in source branch creation) passed
+  on disposable Linux fixtures. This is not live Windows/macOS installer or
+  second-participant validation. Existing Markdown tests still emit their
+  pre-existing nested-element warnings; this slice does not alter that renderer.
+
 - `ticketbunker/bunkerdb.py` owns the new storage boundary: one SQLite database
   per Bunker plus a machine registry. The schema includes recursive Projects,
   shared repository identities, device-local checkout paths, versioned config
@@ -114,7 +139,7 @@ exercise unless a live boundary is explicitly called out.
   hold `tickets:write`) before writing locally. `TrackerSyncTests` and the
   shared-Bunker test cover it with the GitHub transport mocked.
 - Agent reports are Bunker records. `ticketbunker/bunkerruntime.py` projects a
-  Bunker ticket into `<data home>/bunkers/<id>/runtime/<TICKET>_bunker/` so the
+  Bunker ticket into `<data home>/bunkers/<id>/runtime/repositories/<binding>/<TICKET>_bunker/` so the
   unchanged pipeline (bootstrap, compose, harness, lint, anchors, master) runs
   there; `tb run`/`tb publish`/coworker acceptance then call
   `publish_reports`, which writes the child and master into `reports` and, on

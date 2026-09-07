@@ -232,6 +232,11 @@ def _read_ticket(bunker: Path) -> dict[str, Any]:
 
 
 def resolve_bunker(repo: Path, branch: str) -> Path | None:
+    from . import bunkerruntime
+
+    adopted = bunkerruntime.resolve(repo, branch)
+    if adopted is not None:
+        return adopted
     root = layout.find_root(repo)
     if root is None:
         from . import bunkerruntime

@@ -93,7 +93,8 @@ def _ticket(
         from . import bunkerruntime
         from .api import RuntimeTicketDatabase
 
-        return RuntimeTicketDatabase(root, bunkerruntime.runtime_root(bunker_id)).get_ticket(
+        info = bunkerruntime.materialize(bunker_id, ticket_id, repo=root)
+        return RuntimeTicketDatabase(root, info["bunker"].parent).get_ticket(
             ticket_id, refresh_branches=live_branches
         )
     if project_key:
@@ -511,7 +512,7 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
         from . import bunkerruntime
 
         try:
-            bunkerruntime.materialize(bunker_id, ticket_id)
+            bunkerruntime.materialize(bunker_id, ticket_id, repo=root)
         except Exception as exc:  # the database names the problem
             raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
 
@@ -602,7 +603,7 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
         from . import bunkerruntime
 
         try:
-            info = bunkerruntime.materialize(bunker_id, ticket_id)
+            info = bunkerruntime.materialize(bunker_id, ticket_id, repo=root)
         except Exception as exc:  # the database names the problem
             raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
         if info["repo"] is None:

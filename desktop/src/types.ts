@@ -144,6 +144,7 @@ export type TicketPage = {
 export type EffectiveChecks = { build: string; test: string; timeout_seconds: number; source: "ticket" | "project" | "bunker" | "discovered" | "none"; detail?: string };
 
 export type TicketDetail = {
+  selected_repository_id?: string;
   ticket: TicketReference & Record<string, unknown>;
   project: Project;
   checks?: EffectiveChecks;

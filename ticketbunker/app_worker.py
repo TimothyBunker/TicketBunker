@@ -78,6 +78,7 @@ DESKTOP_ACTIONS = frozenset(
         "truth.refresh",
         "truth.synthesize",
         "workflow.start",
+        "workflow.state",
         "workflow.attach",
     }
 )

@@ -541,33 +541,21 @@ def command_ticket_get(
         (
             value
             for value in detail.get("repositories", [])
-            if str(value.get("local_path") or "")
+            if (value["id"] == payload["repository_id"] if payload.get("repository_id")
+                else bool(value.get("local_path")))
         ),
         None,
     )
-    if repository is not None and detail["ticket"].get("source_kind") in {
-        "legacy-companion",
-        "legacy-embedded",
-    }:
-        try:
-            detail["truth"] = truth.state(
-                Path(str(repository["local_path"])),
-                (
-                    str(detail["project"].get("key") or "")
-                    if detail["ticket"].get("source_kind") == "legacy-companion"
-                    else ""
-                ),
-                str(detail["ticket"].get("id") or ""),
-            )
-        except (OSError, ValueError):
-            detail["truth"] = {}
-    elif repository is not None:
+    if payload.get("repository_id") and repository is None:
+        raise commands.CommandRejected("repository_missing", "That repository is no longer attached to this Project. Reload the ticket and choose another.")
+    detail["selected_repository_id"] = str((repository or {}).get("id") or "")
+    if repository is not None and repository.get("local_path"):
         from . import bunkerruntime
 
         bunker_id = str(payload.get("bunker_id") or "")
         ticket_id = str(detail["ticket"].get("id") or "")
         try:
-            bunkerruntime.materialize(bunker_id, ticket_id)
+            bunkerruntime.materialize(bunker_id, ticket_id, repository_id=str(repository["id"]))
             detail["truth"] = truth.state(
                 Path(str(repository["local_path"])),
                 str(detail["project"].get("key") or ""),
@@ -603,6 +591,9 @@ def command_ticket_checks_set(
         raise commands.CommandRejected("ticket_required", "Choose a ticket first.")
     detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
     project_id = str(detail["project"].get("id") or "")
+    from . import bunkerruntime as _runtime
+    repository = _bunker_result(_runtime.select_repository, detail,
+                               repository_id=str(payload.get("repository_id") or ""))
     configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id or None)
     document = (configuration.get("documents") or {}).get("checks") or {}
     content = dict(document.get("content") or {"build": "", "test": "", "timeout_seconds": bunkerdb.CHECK_TIMEOUT_DEFAULT})
@@ -624,9 +615,6 @@ def command_ticket_checks_set(
     )
     accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
     _bunker_result(bunkerdb.apply_configuration_change, bunker_id, proposal, accepted=accepted)
-    from . import bunkerruntime as _runtime
-
-    repository = next((value for value in detail.get("repositories", []) if str(value.get("local_path") or "")), None)
     return {"checks": _runtime.effective_checks(bunker_id, project_id, ticket_id, str((repository or {}).get("local_path") or ""))}
 
 
@@ -649,7 +637,11 @@ def command_checks_discover(
     else:
         configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id or None)
         repositories = (configuration.get("repositories") or {}).get("items") or []
-    root = next((str(value.get("local_path") or "") for value in repositories if str(value.get("local_path") or "")), "")
+    from . import bunkerruntime
+
+    repository = _bunker_result(bunkerruntime.select_repository, {"repositories": repositories},
+                               repository_id=str(payload.get("repository_id") or ""))
+    root = str((repository or {}).get("local_path") or "")
     if not root:
         raise commands.CommandRejected("repository_required", "Attach a local repository first; the agent reads its files to find the build.")
     try:
@@ -1067,6 +1059,8 @@ def publish_ticket_reports(
     branch: str,
     child: str,
     master: str,
+    *,
+    expected_child_revision: str | None = None,
 ) -> dict[str, Any]:
     """Record an accepted child report and its master in the Bunker.
 
@@ -1082,6 +1076,13 @@ def publish_ticket_reports(
         child=child,
         master=master,
     )
+    if expected_child_revision is not None:
+        child_change = next((value for value in proposal["changes"]
+                             if value["payload"]["scope"] == f"branch:{branch}"), None)
+        if child_change and child_change["expected_revision"] != expected_child_revision:
+            raise commands.CommandRejected("report_conflict",
+                "This branch report changed in the Bunker while the local draft was being prepared. "
+                "The shared report and local draft are preserved. Sync and review the newer report before retrying.")
     accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
     result = _bunker_result(bunkerdb.apply_report_publication, bunker_id, proposal, accepted=accepted)
     return {**result, "shared": proposal["mode"] == "remote"}
@@ -1100,8 +1101,10 @@ def _github_target(ticket: Mapping[str, Any]) -> dict[str, Any] | None:
     return {"provider": "github", "repository": repository, "number": number, "label": f"{repository}#{number}", "url": str(ticket.get("source_reference") or metadata.get("source_url") or "")}
 
 
-def _report_for_update(detail: Mapping[str, Any], scope: str) -> dict[str, Any] | None:
+def _report_for_update(detail: Mapping[str, Any], scope: str, repository_id: str = "") -> dict[str, Any] | None:
     reports = [value for value in detail.get("reports") or [] if str(value.get("scope") or "").startswith("branch:")]
+    if repository_id:
+        reports = [value for value in reports if value.get("repository_id") == repository_id]
     if scope:
         for value in reports:
             if value.get("scope") == f"branch:{scope}":
@@ -1122,7 +1125,7 @@ def command_ticket_update_draft(
     ticket_id = str(payload.get("ticket_id") or "")
     scope = str(payload.get("scope") or "").strip()
     detail = _bunker_result(bunkerdb.get_ticket, bunker_id, ticket_id)
-    report = _report_for_update(detail, scope)
+    report = _report_for_update(detail, scope, str(payload.get("repository_id") or ""))
     if report is None:
         raise commands.CommandRejected("report_missing", "Synthesize a branch report first; the update is drafted from its Standing.")
     branch = str(report.get("scope") or "").removeprefix("branch:")

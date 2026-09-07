@@ -218,6 +218,21 @@ of legacy data is a separate, explicit operation after the user verifies the new
 Bunker. Git bundles or JSON/markdown packages remain valid explicit export and
 air-gap transport formats (§3.17).
 
+Import is a one-time copy: subsequent ticket reads never refresh from the
+legacy store. Imported tickets use the same Bunker runtime and truth actions
+as newly synced tickets. Import resolves branch slugs to the report's verified
+branch name when available.
+
+The app selects one attached repository for local ticket work. Its branch
+list, source links, synthesis, and check discovery use that explicit binding.
+`workflow.state`, `workflow.start`, and `workflow.attach` accept a Bunker id
+and use its ticket/configuration, without requiring companion initialization.
+Creation retains the clean-worktree preflight, explicit UI confirmation, and
+fast-forward-only base update. Repository-scoped branch links are Bunker-owned
+ticket metadata and survive tracker sync. Shared links require service
+acceptance; if publication fails after Git succeeds, the branch is preserved
+and the action reports the pending link rather than undoing Git work.
+
 The harness session stays local-first and separately owned. The Bunker stores
 TicketBunker facts, observations, ledgers, reports, and bounded coworker state;
 Pi continues to own its native session implementation. Reports remain readable
@@ -403,7 +418,7 @@ consequences:
 
 **The pipeline runs in a machine-local runtime directory.** For a Bunker
 ticket, `ticketbunker/bunkerruntime.py` projects the database row into
-`<data home>/bunkers/<bunker>/runtime/<TICKET>_bunker/`, a directory shaped
+`<data home>/bunkers/<bunker>/runtime/repositories/<binding>/<TICKET>_bunker/`, a directory shaped
 exactly like a legacy ticket bunker, so the observation stages, context
 composition, harness session, lint and anchor gates, and master builder run
 unchanged. The projection is rewritten only when the ticket itself changes, so
@@ -414,14 +429,31 @@ brief the agent with the current rules. A runtime that has no working copy of a
 report the Bunker has accepted (a replica, an imported copy, a machine that
 never ran synthesis for the ticket) is seeded with the accepted text when it
 is materialized, so the truth commands and the coworker read the same reports
-the page shows; an existing working copy is never overwritten, because the
-pipeline regenerates it and publication hands it back. The coworker session
+the page shows. Accepted-content receipts let clean runtime copies advance
+when the database changes, while preserving locally changed drafts. Publication
+checks the draft's recorded base revision, and both ticket and report applies
+check revisions inside an immediate SQLite transaction. A conflicting draft
+is retained and rejected, not silently written over newer accepted content;
+an in-app conflict-resolution flow is still pending. Old unscoped runtime
+directories move only to their recorded repository, and not during a queued
+or running synthesis. The coworker session
 reads a Bunker ticket through this same runtime when the page passes the
 Bunker id. Observations, session forms, transcripts,
 inferences, and the ledger stay in that directory as this machine's evidence;
 the accepted reports are handed to the Bunker database by `publish_reports`
 and the database is the only shared truth. Nothing is written into the source
 repository, and a Bunker ticket needs no `.tb` layout or companion repository.
+
+Normal Bunker publication mechanically derives Combined from accepted children
+across all repository bindings plus the proposed child, never the caller's
+master text. Repository identity separates same-named branches. Without shared
+development-recency observations, this database aggregate uses stable
+repository/branch ordering; the repository-local runtime master retains its
+observed recency ordering. This is a client publication guarantee, not yet a
+service-enforced guarantee: direct HTTP report writes still require a separate
+server trust/verification decision and server-owned aggregate derivation.
+The service initializes ticket/report revisions from content; it also accepts
+the matching content baseline for legacy initial publications stamped `1`.
 
 **Report component schema** — each new child leads with a compact Reader brief,
 then carries the complete who / what / where / why / state evidence trail. Each

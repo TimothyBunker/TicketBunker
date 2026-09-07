@@ -833,7 +833,7 @@ class ServiceStore:
         if record_id != f"{ticket_id}|{scope}|{repository_id}":
             raise ServiceError(400, "changes_invalid", "The report record identity does not match its payload.")
         current = self._current_revision(connection, bunker_id, "report", record_id)
-        if current != expected:
+        if current != expected and not self._initial_content_revision(connection, bunker_id, "report", record_id, current, expected):
             raise ServiceError(409, "report_conflict", "The report changed elsewhere.")
         value = {
             "ticket_id": ticket_id,
@@ -860,7 +860,7 @@ class ServiceStore:
         if _identifier(payload.get("id"), "ticket") != record_id:
             raise ServiceError(400, "changes_invalid", "The ticket record identity does not match its payload.")
         current = self._current_revision(connection, bunker_id, "ticket", record_id)
-        if current != expected:
+        if current != expected and not self._initial_content_revision(connection, bunker_id, "ticket", record_id, current, expected):
             raise ServiceError(409, "ticket_conflict", "The ticket changed elsewhere.")
         value = {
             "id": record_id,
@@ -875,6 +875,22 @@ class ServiceStore:
             raise ServiceError(400, "changes_invalid", "A ticket is too large.")
         self._upsert(connection, bunker_id, "ticket", record_id, value, revision, now)
         return revision
+
+    def _initial_content_revision(self, connection, bunker_id, kind, record_id, current, expected) -> bool:
+        """Older initial publications used 1 instead of the client's content revision."""
+        if current != "1":
+            return False
+        row = connection.execute(
+            "SELECT payload_json FROM records WHERE bunker_id = ? AND kind = ? AND record_id = ?",
+            (bunker_id, kind, record_id),
+        ).fetchone()
+        if not row:
+            return False
+        value = json.loads(row["payload_json"])
+        content = (json.dumps(value["payload"], sort_keys=True, separators=(",", ":"))
+                   if kind == "ticket" else value["content"])
+        prefix = "t:" if kind == "ticket" else "r:"
+        return expected == prefix + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
     def _current_revision(
         self, connection: sqlite3.Connection, bunker_id: str, kind: str, record_id: str
@@ -1101,7 +1117,7 @@ def _validated_publication(payload: Mapping[str, Any]) -> dict[str, Any]:
                     "payload": dict(ticket_payload),
                     "source_kind": str(value.get("source_kind") or "remote")[:64],
                     "source_reference": str(value.get("source_reference") or "")[:512],
-                    "revision": "1",
+                    "revision": "t:" + hashlib.sha256(json.dumps(dict(ticket_payload), sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16],
                     "updated_at": str(value.get("updated_at") or ""),
                 },
             )
@@ -1129,7 +1145,7 @@ def _validated_publication(payload: Mapping[str, Any]) -> dict[str, Any]:
                     "scope": scope,
                     "repository_id": repository_id,
                     "content": content,
-                    "revision": "1",
+                    "revision": "r:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:16],
                     "updated_at": str(value.get("updated_at") or ""),
                 },
             )

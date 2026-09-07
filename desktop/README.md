@@ -110,6 +110,12 @@ npm test
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+The committed browser smoke flow also exercises native Bunker branch creation
+when `TB_E2E_CREATE_BRANCH=<unique-short-description>` is set. Use this option
+only against a disposable Bunker with a clean scratch checkout and reachable
+scratch Git origin; it confirms and creates an actual branch. Without the
+option, the flow does not create source branches.
+
 The production bundle embeds frozen `tb` as a Tauri sidecar and the verified Pi
 distribution as private resources. `--core` and `TB_DESKTOP_CORE` are explicit
 development or managed-install overrides.

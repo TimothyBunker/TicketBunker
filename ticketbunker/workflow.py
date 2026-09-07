@@ -17,7 +17,19 @@ def _work_ledger(source_root: Path) -> Ledger:
     return Ledger(source_root / ".git" / "ticketbunker-work.jsonl")
 
 
-def _ticket(source_root: Path, ticket_id: str) -> tuple[dict[str, Any], Path, str]:
+def _ticket(source_root: Path, ticket_id: str, bunker_id: str = "") -> tuple[dict[str, Any], Path, str]:
+    from . import bunkerdb, bunkerruntime
+
+    if not bunker_id:
+        found = bunkerdb.find_bunker_ticket(source_root, f"work/{ticket_id}")
+        bunker_id = str((found or {}).get("bunker_id") or "")
+    if bunker_id:
+        try:
+            info = bunkerruntime.materialize(bunker_id, ticket_id, repo=source_root)
+        except bunkerdb.BunkerDatabaseError as exc:
+            raise commands.CommandRejected("repository_unavailable", str(exc)) from exc
+        payload = json.loads(layout.paths(info["bunker"])["ticket"].read_text(encoding="utf-8"))
+        return payload, info["bunker"], info["project_key"]
     locator = project.load_locator(source_root)
     if locator is None:
         raise commands.CommandRejected("not_initialized", "Run 'tb init' before starting ticket work.")
@@ -32,7 +44,12 @@ def _ticket(source_root: Path, ticket_id: str) -> tuple[dict[str, Any], Path, st
     return dict(snapshot.data), snapshot.bunker, project_key
 
 
-def _project_document(source_root: Path, project_key: str) -> dict[str, Any]:
+def _project_document(source_root: Path, project_key: str, bunker: Path | None = None) -> dict[str, Any]:
+    from . import bunkerruntime
+
+    info = bunkerruntime.marker(bunker) if bunker else None
+    if info:
+        return {"base_branch": info["base_branch"]}
     path = project.project_config_dir(source_root, project_key) / "project.json"
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -49,11 +66,11 @@ def _run(repo: Path, args: list[str], ledger: Ledger, stage: str, message: str) 
         raise commands.CommandRejected("git_workflow_failed", f"{message}\nGit said: {detail}") from exc
 
 
-def state(source_root: Path, ticket_id: str) -> dict[str, Any]:
+def state(source_root: Path, ticket_id: str, bunker_id: str = "") -> dict[str, Any]:
     """Return current local work choices without mutating repository state."""
     source_root = Path(source_root).resolve()
-    ticket, _bunker, project_key = _ticket(source_root, ticket_id)
-    ledger = _work_ledger(source_root)
+    ticket, _bunker, project_key = _ticket(source_root, ticket_id, bunker_id)
+    ledger = Ledger(layout.paths(_bunker)["ledger"])
     branches = [
         value.strip()
         for value in _run(
@@ -76,7 +93,7 @@ def state(source_root: Path, ticket_id: str) -> dict[str, Any]:
         ).splitlines()
         if value.strip() and not value.strip().endswith("/HEAD")
     ]
-    document = _project_document(source_root, project_key)
+    document = _project_document(source_root, project_key, _bunker)
     configured_base = str(document.get("base_branch") or "main")
     available = list(branches)
     available.extend(value.removeprefix("origin/") for value in remotes if value.startswith("origin/"))
@@ -117,8 +134,9 @@ def _preflight(
     short_name: str,
     requested_user: str | None,
     requested_base: str | None,
+    bunker_id: str = "",
 ) -> tuple[dict[str, Any], Path, Ledger, str, str, list[str], list[str]]:
-    ticket, bunker, project_key = _ticket(source_root, ticket_id)
+    ticket, bunker, project_key = _ticket(source_root, ticket_id, bunker_id)
     ledger = Ledger(layout.paths(bunker)["ledger"])
     top = _run(
         source_root,
@@ -155,7 +173,7 @@ def _preflight(
         "branch_preflight",
         f"{full!r} is not a valid Git branch name. Choose a simpler short description.",
     )
-    document = _project_document(source_root, project_key)
+    document = _project_document(source_root, project_key, bunker)
     base = str(requested_base or document.get("base_branch") or "main")
     remotes = [
         line.strip()
@@ -213,6 +231,33 @@ def _preflight(
     return ticket, bunker, ledger, full, normalized_base, local_branches, remote_branches
 
 
+@commands.register("workflow.state")
+def command_state(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    return state(context.project_root, str(payload.get("ticket") or ""), str(payload.get("bunker_id") or ""))
+
+
+def _publish_assignment(source_root: Path, bunker: Path, branch: str, ledger: Ledger) -> dict[str, Any]:
+    from . import application, bunkerdb, bunkerruntime
+
+    info = bunkerruntime.marker(bunker)
+    if info is None:
+        handlers.assign_branch(bunker, branch, ledger)
+        return project.publish_data(source_root, f"Attach {branch} to ticket")
+    try:
+        proposal = bunkerdb.propose_branch_assignment(info["bunker_id"], info["ticket_id"],
+                                                     info["repository_id"], branch)
+        accepted = application._publish_changes(info["bunker_id"], proposal) if proposal["mode"] == "remote" else None
+        result = bunkerdb.apply_ticket_sync_change(info["bunker_id"], proposal, accepted=accepted)
+    except (bunkerdb.BunkerDatabaseError, commands.CommandRejected) as exc:
+        ledger.event("branch_assignment_pending", branch=branch)
+        raise commands.CommandRejected("branch_assignment_pending",
+            f"Branch {branch} exists locally, but its ticket link was not saved. "
+            "Your branch and files are preserved. Sync the Bunker, then attach this existing branch again.") from exc
+    handlers.assign_branch(bunker, branch, ledger)
+    ledger.event("bunker_branch_assigned", branch=branch, repository_id=info["repository_id"])
+    return {**result, "shared": proposal["mode"] == "remote"}
+
+
 @commands.register("workflow.start")
 def command_start(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
     source_root = Path(context.project_root).resolve()
@@ -229,6 +274,7 @@ def _command_start_locked(source_root: Path, payload: dict[str, Any]) -> dict[st
         short_name,
         str(payload.get("user") or "") or None,
         str(payload.get("base") or "") or None,
+        str(payload.get("bunker_id") or ""),
     )
     if base not in locals_:
         _run(
@@ -265,9 +311,8 @@ def _command_start_locked(source_root: Path, payload: dict[str, Any]) -> dict[st
     if ticket.get("repo") != str(source_root):
         ticket["repo"] = str(source_root)
         handlers.intake_ticket(bunker, ticket, ledger)
-    handlers.assign_branch(bunker, full, ledger)
     handlers.intake_session_config(bunker, {"branch": full, "user": user, "baseline": base}, ledger)
-    publication = project.publish_data(source_root, f"Start {ticket_id} on {full}")
+    publication = _publish_assignment(source_root, bunker, full, ledger)
     return {
         "ticket": ticket_id,
         "branch": full,
@@ -282,7 +327,7 @@ def command_attach(context: commands.CommandContext, payload: dict[str, Any]) ->
     source_root = Path(context.project_root).resolve()
     ticket_id = str(payload.get("ticket") or "").strip()
     branch = str(payload.get("branch") or "").strip()
-    ticket, bunker, _project_key = _ticket(source_root, ticket_id)
+    ticket, bunker, _project_key = _ticket(source_root, ticket_id, str(payload.get("bunker_id") or ""))
     ledger = Ledger(layout.paths(bunker)["ledger"])
     names = [
         line.strip()
@@ -308,7 +353,6 @@ def command_attach(context: commands.CommandContext, payload: dict[str, Any]) ->
     session = {"branch": branch}
     if user:
         session["user"] = user
-    handlers.assign_branch(bunker, branch, ledger)
     handlers.intake_session_config(bunker, session, ledger)
-    publication = project.publish_data(source_root, f"Attach {branch} to {ticket_id}")
+    publication = _publish_assignment(source_root, bunker, branch, ledger)
     return {"ticket": ticket_id, "branch": branch, "publication": publication}

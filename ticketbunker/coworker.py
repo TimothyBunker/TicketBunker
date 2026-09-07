@@ -222,10 +222,10 @@ def _ticket(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -
         from .api import RuntimeTicketDatabase
 
         try:
-            bunkerruntime.materialize(bunker_id, ticket_id)
+            info = bunkerruntime.materialize(bunker_id, ticket_id, repo=root)
         except Exception as exc:  # the database names the problem
             raise commands.CommandRejected("ticket_unavailable", str(exc)) from exc
-        return RuntimeTicketDatabase(root, bunkerruntime.runtime_root(bunker_id)).get_ticket(
+        return RuntimeTicketDatabase(root, info["bunker"].parent).get_ticket(
             ticket_id, refresh_branches=True
         )
     if project_key:

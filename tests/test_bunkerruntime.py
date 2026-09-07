@@ -280,6 +280,8 @@ class BunkerRuntimeTests(unittest.TestCase):
         (self.repo / ".git" / autoagent.STATE_DIR / autoagent.FINGERPRINT_FILE).unlink()
         with bunkerdb._database(self.bunker_id) as connection:
             connection.execute("DELETE FROM reports WHERE ticket_id = 'ECS-4'")
+        # A refused first publication has no accepted-base receipt either.
+        (bunkerruntime.ticket_dir(self.bunker_id, "ECS-4") / "accepted-reports.json").unlink()
 
         with mock.patch.object(autoagent, "_spawn_worker"):
             self.dispatch("truth.synthesize", {"project": "ECS", "ticket": "ECS-4", "bunker_id": self.bunker_id})
@@ -318,8 +320,8 @@ class BunkerRuntimeTests(unittest.TestCase):
             self.bunker_id, ticket_id="ECS-4", repository_id=self.repository_id,
             branch="Ada/ECS-4-automatic", child="# child\n", master="# master v2\n",
         )
-        self.assertEqual({item["scope"]: item["action"] for item in again["results"]}, {"branch:Ada/ECS-4-automatic": "unchanged", "combined": "updated"})
-        self.assertEqual(again["changes"][0]["expected_revision"], proposal["changes"][1]["revision"])
+        self.assertEqual({item["scope"]: item["action"] for item in again["results"]}, {"branch:Ada/ECS-4-automatic": "unchanged", "combined": "unchanged"})
+        self.assertEqual(again["changes"], [])  # Combined cannot be independently authored.
 
     def test_shared_bunker_reports_reach_the_service(self) -> None:
         store = service_storage.ServiceStore(self.root / "service.sqlite3")
