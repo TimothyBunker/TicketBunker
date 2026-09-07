@@ -8,6 +8,7 @@ Run with PYTHONPATH=. python tools/two_participant_loop.py [--keep].
 from __future__ import annotations
 
 import argparse
+import difflib
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -218,7 +219,12 @@ def exercise(root: Path) -> list[str]:
         first = alice.synthesize()
         report_one = next(r["content"] for r in first["reports"] if r["scope"] == f"branch:{alice_branch}")
         bob.sync()
-        check(bob.runtime_report(alice_branch) == report_one and "<!-- tb:verified" in report_one,
+        seeded = bob.runtime_report(alice_branch)
+        if seeded != report_one:
+            difference = "".join(difflib.unified_diff(report_one.splitlines(keepends=True), seeded.splitlines(keepends=True),
+                                fromfile="published", tofile="seeded"))
+            raise AssertionError(f"Seeded report differs ({len(report_one)} vs {len(seeded)} chars):\n{difference[:8000]}")
+        check("<!-- tb:verified" in report_one,
               "member reads and seeds the owner's gated report")
         (alice.repo / "alice.py").write_text("POSITION = (1, 2, 3)\n", encoding="utf-8")
         alice.git("commit", "-am", "Update position")
