@@ -125,8 +125,12 @@ class ServiceStore:
         connection = self._connect()
         try:
             with connection:
+                migrate_admins = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='service_admins'").fetchone() is None
                 connection.executescript(
                     """
+                    CREATE TABLE IF NOT EXISTS service_admins (
+                        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
+                    );
                     CREATE TABLE IF NOT EXISTS service (
                         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                         id TEXT NOT NULL,
@@ -204,6 +208,10 @@ class ServiceStore:
                     "INSERT OR IGNORE INTO service(singleton, id, created_at) VALUES (1, ?, ?)",
                     (str(uuid.uuid4()), _now()),
                 )
+                if migrate_admins:
+                    # The first authenticated user came from one-time setup.
+                    # Never promote a member when an administrator is removed.
+                    connection.execute("INSERT OR IGNORE INTO service_admins(user_id) SELECT id FROM users WHERE EXISTS (SELECT 1 FROM service WHERE setup_completed_at <> '') ORDER BY rowid LIMIT 1")
         finally:
             connection.close()
 
@@ -272,6 +280,7 @@ class ServiceStore:
                     (user_id, display_name, email, now),
                 )
                 credential = self._issue_credential(connection, user_id)
+                connection.execute("INSERT INTO service_admins(user_id) VALUES (?)", (user_id,))
                 connection.execute(
                     "UPDATE service SET setup_token_hash = '', setup_completed_at = ? WHERE singleton = 1",
                     (now,),
@@ -356,6 +365,8 @@ class ServiceStore:
         connection = self._connect()
         try:
             with connection:
+                if connection.execute("SELECT 1 FROM service_admins WHERE user_id=?", (user_id,)).fetchone() is None:
+                    raise ServiceError(403, "service_admin_required", "Only a service administrator can create a shared Bunker.")
                 requested = publication["bunker"].get("id") or ""
                 bunker_id = requested if requested and connection.execute(
                     "SELECT 1 FROM bunkers WHERE id = ?", (requested,)
@@ -925,6 +936,14 @@ class ServiceStore:
         if not isinstance(payload, Mapping):
             raise ServiceError(400, "changes_invalid", "A configuration change needs a document object.")
         value = _validated_config_document(payload, {})
+        if value["kind"] == "repository-registry":
+            from ..repository_registry import validate
+            if value["scope_type"] != "bunker":
+                raise ServiceError(400, "changes_invalid", "Allowed repositories belong to the Bunker.")
+            try:
+                value["content"] = validate(value["content"], self._records(connection, bunker_id, "repository-binding"))
+            except ValueError as exc:
+                raise ServiceError(400, "changes_invalid", str(exc)) from exc
         if value["scope_type"] == "bunker":
             value["scope_id"] = bunker_id
         elif self._current_revision(connection, bunker_id, "project", value["scope_id"]) == "":
@@ -953,6 +972,11 @@ class ServiceStore:
         if remote.repository_list_revision(current_rows) != expected:
             raise ServiceError(409, "revision_conflict", "The project repositories changed elsewhere.")
         rows = [_validated_binding(item, {project_id}) for item in _objects(payload, "repository")]
+        registry = next((doc for doc in self._records(connection, bunker_id, "config-document") if doc.get("scope_type") == "bunker" and doc.get("kind") == "repository-registry"), None)
+        if registry is not None:
+            allowed = {item["canonical_remote"] for item in registry["content"]["items"]}
+            if any(row["canonical_remote"] not in allowed for row in rows):
+                raise ServiceError(400, "changes_invalid", "Select repositories allowed by the Bunker.")
         if remote.repository_list_revision(rows) != revision:
             raise ServiceError(400, "changes_invalid", "The repository revision does not match its rows.")
         ids = {row["id"] for row in rows}
@@ -1095,6 +1119,14 @@ def _validated_publication(payload: Mapping[str, Any]) -> dict[str, Any]:
     documents: list[tuple[str, dict[str, Any]]] = []
     for value in _objects(payload.get("config_documents"), "configuration document"):
         validated = _validated_config_document(value, project_ids)
+        if validated["kind"] == "repository-registry":
+            from ..repository_registry import validate
+            if validated["scope_type"] != "bunker":
+                raise ServiceError(400, "bunker_invalid", "Allowed repositories belong to the Bunker.")
+            try:
+                validated["content"] = validate(validated["content"], [row for _, row in bindings])
+            except ValueError as exc:
+                raise ServiceError(400, "bunker_invalid", str(exc)) from exc
         record_id = f"{validated['scope_type']}:{validated['scope_id']}:{validated['kind']}"
         documents.append((record_id, {**validated, "updated_at": str(value.get("updated_at") or "")}))
     tickets: list[tuple[str, dict[str, Any]]] = []

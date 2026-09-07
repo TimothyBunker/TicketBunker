@@ -74,10 +74,13 @@ live storage.
 - A **Project** is a recursive work scope inside one Bunker. A Project may have
   a parent and any number of child Projects. It is not synonymous with a Git
   repository or a tracker project.
-- A **Repository binding** attaches a canonical Git repository identity to one
-  Project. It is the Project's shared allowlist: a Project may permit zero or
-  more repositories, and the shared binding never contains a device filesystem
-  path.
+- The **Bunker repository registry** is the owner-maintained set of allowed
+  canonical Git remote identities. These are source repositories, not database
+  storage or membership credentials.
+- A **Repository binding** selects one registry identity for one Project. A
+  Project may select zero or more repositories, with its own base branch.
+  Binding IDs remain stable for branch/report references; shared rows never
+  contain a device filesystem path.
 - A **local repository attachment** maps one shared binding to one checkout path
   on one device. That path never synchronizes.
 - A **ticket** belongs to one Project and may relate to work across any
@@ -149,8 +152,12 @@ clients cannot observe or depend on that choice.
 `bunker:share`, `members:invite`, `members:manage`, and `config:write` in
 addition to reading and writing tickets. A **member** reads and writes tickets
 and reads configuration. Creating a local Bunker makes the device user its
-owner, publishing it keeps that ownership, and an invitation carries the role
-it grants. Only owners see or use service settings, invitations, and shared
+owner locally. Creating a shared Bunker additionally requires a **service
+administrator** credential established by the operator's setup token; joining
+as a member or Bunker owner does not grant that service-wide privilege. The
+reference service migrates its original setup user once into this role. An
+invitation carries only the Bunker role it grants. Only owners see or use
+Project creation, service settings, invitations, and shared
 configuration publication. The role and capability vocabulary lives in
 `ticketbunker/remote.py`; every compatible service enforces it on its own side,
 and a cached capability only decides what the editor offers.
@@ -164,7 +171,7 @@ and sync time. Device paths and the credential reference are untouched. The
 Bunker page states "Shared on host · role · synced N minutes ago".
 
 **Sharing is the owner's inverse of joining.** A local Bunker is published to a
-chosen service with **Share Bunker**: the app signs in (with the one-time owner
+chosen service with **Share Bunker**: the app signs in as a service administrator (with the one-time owner
 setup token a fresh reference service prints, or a credential this computer
 already holds for that server), sends the complete local publication (Projects,
 repository allowlists without device paths, configuration documents, tickets,
@@ -192,12 +199,26 @@ Joining is server-first and authorization-first:
 6. The user maps permitted repository identities to local checkout paths.
 
 The optional remote relationship is configured only at Bunker scope. Projects
-cannot connect their own databases or services. A Project configurator may
-publish repository binding rows; every device then validates the selected
+cannot connect their own databases or services. A Bunker owner saves allowed
+remotes in **Repositories**, then selects those identities in each Project's
+**Configure → Repositories** table (or when creating the Project). The Bunker
+registry is a revision-checked `repository-registry` configuration document;
+selection changes and registry removal are revalidated under the database
+transaction. An identity in use by any Project cannot be removed. Existing
+doc-less Bunkers derive their initial registry from their bindings without
+rewriting report IDs or paths; saving it establishes the new policy. The
+legacy binding API remains compatible only while that document is absent.
+Every device then validates the selected
 checkout's credential-free `origin` identity against those rows and completes
 `git fetch --prune origin` before saving its local path. A failed fetch leaves
 the local mapping unchanged. The same checkout may serve multiple Project
 scopes in a monorepo because permission is evaluated per Project.
+
+**Link board** saves the board and then calls the same ticket-sync handler as
+**Sync tickets**. Success refreshes the ticket catalog. A failed initial sync
+leaves the board connected and existing tickets intact, returning a failure
+message with the manual retry action. Linking does not schedule agent work or
+create provider-side tickets. Configuration controls say **Save**, not Publish.
 
 A ticket belongs to one Project rather than one repository. Each branch report
 records the repository binding it observed, so one ticket can retain distinct

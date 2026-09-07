@@ -56,8 +56,8 @@ and report provenance easier to reach. It should disappear into the task.
 13. Make it one application. One compiled interface opens to Bunkers, then Projects, then attached repositories and tickets; Tauri loads it directly and browser fallback serves the same files. Keep the Python API/action registry as the behavior boundary; CLI automation remains an optional client.
 14. Treat Project as a recursive work scope, not a repository synonym. A Project may contain subprojects and attach zero or more repositories.
 15. Keep discovery separate from authority. Cloning code never joins a Bunker; authenticated invitation or explicit local creation does.
-16. Configure connectivity at its real scope. A Bunker alone owns its optional remote relationship. Each Project publishes an allowlist of canonical Git repositories, and each device may map only matching local checkouts to those rows.
-16. Keep operating systems outside the domain. Linux and Windows select thin
+16. Configure connectivity at its real scope. A Bunker alone owns its optional remote service relationship and allowed Git repository registry. Owners select repositories from that registry for each Project; members only connect matching local folders. Linking a board syncs its tickets automatically, with an explicit retry if sync fails. Use Save for shared configuration and Connect folder for a device-local path, not Publish. Shared Bunker creation requires service-administrator authority; Project creation requires Bunker ownership. Local creation grants no authority on a server.
+17. Keep operating systems outside the domain. Linux and Windows select thin
     machine-service implementations for paths, processes, credentials, dialogs,
     and packaging; WSL is a Linux runtime location, never a Bunker type.
 

@@ -54,7 +54,8 @@ repositories:
     └── <LOCAL-BUNKER-ID>/bunker.sqlite3
 ```
 
-The database stores the Project tree, shared per-Project repository allowlists, device-local
+The database stores the Project tree, the Bunker's allowed repository registry,
+per-Project repository selections, device-local
 checkout mappings, configuration revisions, tickets, reports, migration
 records, and remote replica state. Attaching a repository writes no locator,
 database, ignore entry, or authorization hint into that repository.
@@ -162,19 +163,24 @@ targets.
 
 The desktop launcher is the primary onboarding path:
 
-1. **Create Bunker** makes a local Bunker and its first Project without asking
-   for a repository.
+1. **Create Bunker** makes a local Bunker and its first Project. Add allowed Git
+   remotes here and select the first Project's repository, or do that later.
 2. **Join Bunker** first shows the service and Bunker identity from the
    invitation, then authenticates and enrolls the user before creating a local
    replica.
 3. A Bunker page lists its Projects with their allowed repositories and ticket
    counts; **Add project** builds the recursive work hierarchy. Tickets are
    listed only inside a selected Project.
-4. In a Project, **Configure → Repositories** publishes allowed Git remotes.
-   **Connect** accepts only a matching checkout, fetches `origin`, and then saves
-   that computer's path.
-5. At Bunker level, **Share Bunker** publishes the Bunker to a TicketBunker
-   service you run and makes you its owner. **Members** then lists members and,
+4. Bunker owners manage allowed Git remotes in **Repositories**. In each
+   Project, **Configure → Repositories** selects from that list. Members use
+   **Connect folder** to choose a matching checkout; TicketBunker fetches
+   `origin` and saves the path only on this computer. Source remotes never
+   store the Bunker database or grant team membership.
+5. At Bunker level, **Share Bunker** connects it to your TicketBunker service.
+   Creating a shared Bunker requires the service administrator's credentials,
+   established by its setup token. A member invitation is not an administrator
+   credential. Only Bunker owners create Projects or change shared setup.
+   **Members** lists members and,
    for owners, creates single-use invitation links and revokes pending ones.
    Nothing accepts a database connection string.
 
@@ -186,7 +192,9 @@ The desktop launcher is the primary onboarding path:
 2. Open the Project and choose **Connect a board**. Pick a Project board or
    repository from the list the token can see and press **Link board**. Link
    as many as the Project mirrors; **Unlink** removes one and keeps its tickets.
-3. Press **Sync tickets**. Issues arrive as tickets keyed by the Project key
+3. Tickets sync automatically when the board is linked. If sync fails, the board
+   stays connected; use **Sync tickets** to retry or refresh later.
+   Issues arrive as tickets keyed by the Project key
    and issue number unless their titles already carry a key. Syncing again
    reports what was new, updated, or unchanged. Field mappings and ticket
    fields sit under the Board view as advanced disclosures.
@@ -322,7 +330,7 @@ export/import formats, especially across air gaps, but they are not live state.
 The Ticket fields page has separate project and Global defaults views. Global
 changes create a new immutable field-set version for projects initialized in
 the future; existing projects retain their pinned composition. Integrations
-use an editable field-pair matrix: add or remove rows, then publish the complete
+use an editable field-pair matrix: add or remove rows, then save the complete
 mapping atomically. GitHub Issues, GitLab Issues, and Jira Cloud start with
 editable templates; custom integrations use the exact same mapping and local
 token surfaces.
@@ -438,9 +446,9 @@ Failed saves—including a file changed by another editor—keep your draft open
 Browser tab close/reload uses the browser's own unsaved-changes warning.
 
 Configuration uses the same prompt for ticket fields, mappings, repositories
-and Checks. Drafts survive switching tabs and publishing another section.
-**Save** publishes changed settings to the Bunker; sections save separately.
-If one fails, its draft stays open and retry does not republish successful
+and Checks. Drafts survive switching tabs and saving another section.
+**Save** applies changed settings to the Bunker; sections save separately.
+If one fails, its draft stays open and retry does not resubmit successful
 sections. Concurrent changes still require reconciliation, never an automatic
 overwrite of a teammate's settings.
 
@@ -472,7 +480,7 @@ Bunkers. **Create Bunker** and **Join Bunker** are peer actions. Each Bunker row
 shows its recursive Projects, local database, optional remote-service state,
 repository attachments, and ticket counts. Remote connectivity exists only at
 Bunker level. Source repositories enter through the selected Project's indexed
-**Configure → Repositories** allowlist.
+**Configure → Repositories** selection from the Bunker's allowed remotes.
 The local profile defaults from Git and can be changed from the identity button
 without changing global Git configuration. The existing portable CLI release
 continues to provide the same backend commands. Agent login and model choice
@@ -483,9 +491,10 @@ to its request and all behavior still passes through the shared typed action
 registry.
 
 **Configure** opens either Bunker defaults or the selected Project's pinned
-configuration and repository allowlist. New Projects copy the current defaults;
+configuration and repository selection. Allowed remotes live in Bunker settings.
+New Projects copy the current ticket-field and integration defaults;
 later default changes do not silently alter old Projects. Ticket fields and the
-complete GitHub, GitLab, Jira, or custom integration matrix publish as revision-checked documents. Local
+complete GitHub, GitLab, Jira, or custom integration matrix save as revision-checked documents. Local
 Bunkers are editable on the device. Remote replicas render their service-owned
 snapshot read-only until an authenticated service sync publishes the change, so
 a cached capability can never elevate itself.

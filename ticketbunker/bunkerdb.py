@@ -730,6 +730,7 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "project_count": len(projects),
         "repositories": repositories,
         "repository_count": len(repositories),
+        "repository_registry": _repository_registry(connection, str(row["id"])),
         "ticket_count": tickets,
     }
 
@@ -927,11 +928,11 @@ def _config_permission(
     if state == "ready" and "config:write" in capabilities:
         return {
             "can_write": True,
-            "reason": f"Changes are published through {server} before they apply here.",
+            "reason": f"Changes are saved on {server} before they apply here.",
             "capabilities": capabilities,
         }
     if state != "ready":
-        reason = f"Shared configuration is controlled by {server}; reconnect to it before publishing changes."
+        reason = f"Shared configuration is controlled by {server}; reconnect to it before saving changes."
     else:
         reason = f"Shared configuration is controlled by {server}; only a Bunker owner can change it."
     return {"can_write": False, "reason": reason, "capabilities": capabilities}
@@ -951,7 +952,7 @@ def get_configuration(
             SELECT kind, revision, content_json, updated_at
             FROM config_documents
             WHERE scope_type = ? AND scope_id = ?
-              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'tracker-sources', 'connections', 'checks')
+              AND kind IN ('ticket-fields', 'integrations', 'tracker-source', 'tracker-sources', 'connections', 'checks', 'repository-registry')
             ORDER BY kind
             """,
             (scope_type, scope_id),
@@ -971,6 +972,9 @@ def get_configuration(
             if scope_type == "project"
             else {"revision": "", "items": []}
         )
+        registry = _repository_registry(connection, bunker_id)
+        if scope_type == "bunker":
+            repositories = registry
     return {
         "scope_type": scope_type,
         "scope_id": scope_id,
@@ -978,7 +982,17 @@ def get_configuration(
         "permission": permission,
         "composition": "pinned" if scope_type == "project" else "defaults-for-new-projects",
         "repositories": repositories,
+        "repository_registry": registry,
     }
+
+
+def _repository_registry(connection: sqlite3.Connection, bunker_id: str) -> dict[str, Any]:
+    from .repository_registry import from_bindings
+    row = connection.execute("SELECT revision, content_json FROM config_documents WHERE scope_type='bunker' AND scope_id=? AND kind='repository-registry'", (bunker_id,)).fetchone()
+    content = json.loads(row["content_json"]) if row else from_bindings(_repository_rows(connection))
+    return {"revision": str(row["revision"]) if row else "", "items": [
+        {**value, "id": value["canonical_remote"], "project_id": "", "local_path": None}
+        for value in content.get("items", [])]}
 
 
 _FIELD_TYPES = {
@@ -1095,8 +1109,8 @@ def propose_configuration(
     """
     bunker_id = _id(bunker_id, "Bunker")
     document_kind = str(kind or "").strip()
-    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "tracker-sources", "connections", "checks"}:
-        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Boards, Connections, or Checks to publish.")
+    if document_kind not in {"ticket-fields", "integrations", "tracker-source", "tracker-sources", "connections", "checks", "repository-registry"}:
+        raise BunkerDatabaseError("Choose Ticket fields, Integrations, Boards, Connections, Repositories, or Checks to save.")
     if not isinstance(content, Mapping):
         raise BunkerDatabaseError("Configuration content must be one object.")
     with _database(bunker_id) as connection:
@@ -1105,8 +1119,8 @@ def propose_configuration(
         )
         if document_kind in {"tracker-source", "tracker-sources"} and scope_type != "project":
             raise BunkerDatabaseError("Boards belong to one Project, not to Bunker defaults.")
-        if document_kind == "connections" and scope_type != "bunker":
-            raise BunkerDatabaseError("Tracker connections belong to the Bunker, not to one Project.")
+        if document_kind in {"connections", "repository-registry"} and scope_type != "bunker":
+            raise BunkerDatabaseError("Tracker connections and allowed repositories belong to the Bunker, not to one Project.")
         mode = str(bunker.get("mode") or "local")
         permission = _config_permission(connection, bunker)
         if not permission["can_write"]:
@@ -1118,7 +1132,7 @@ def propose_configuration(
             """,
             (scope_type, scope_id, document_kind),
         ).fetchone()
-        if current is None and document_kind not in CREATABLE_DOCUMENTS:
+        if current is None and document_kind not in CREATABLE_DOCUMENTS | {"repository-registry"}:
             raise BunkerDatabaseError("That configuration document is missing. Reopen the editor.")
         current_revision = str(current["revision"]) if current is not None else ""
         if current is None:
@@ -1130,7 +1144,13 @@ def propose_configuration(
             raise BunkerDatabaseError(
                 "Configuration changed after this editor opened. Reload it and review the latest revision."
             )
-        if document_kind == "tracker-source":
+        if document_kind == "repository-registry":
+            from .repository_registry import validate
+            try:
+                normalized = validate(content, _repository_rows(connection))
+            except ValueError as exc:
+                raise BunkerDatabaseError(str(exc)) from exc
+        elif document_kind == "tracker-source":
             normalized = _validated_tracker_source(content)
         elif document_kind == "tracker-sources":
             normalized = _validated_tracker_sources(content)
@@ -1235,7 +1255,14 @@ def apply_configuration_change(
     bunker_id = _id(bunker_id, "Bunker")
     raw = json.dumps(proposal["content"], sort_keys=True, separators=(",", ":"))
     with _database(bunker_id) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         _require_acceptance(_mode(connection, bunker_id), accepted)
+        if proposal.get("kind") == "repository-registry":
+            from .repository_registry import validate
+            try:
+                validate(proposal["content"], _repository_rows(connection))
+            except ValueError as exc:
+                raise BunkerDatabaseError(str(exc)) from exc
         if not str(proposal.get("expected_revision") or ""):
             try:
                 changed = connection.execute(
@@ -1927,6 +1954,7 @@ def propose_project(
     name: str,
     parent_id: str | None = None,
     description: str = "",
+    repository_remotes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate a new Project and return the typed changes that create it.
 
@@ -1963,6 +1991,9 @@ def propose_project(
             """,
             (bunker_id,),
         ).fetchall()
+        registry = _repository_registry(connection, bunker_id)
+        repositories = select_registry_rows(registry, [] if repository_remotes is None else repository_remotes)
+        repositories = [{**row, "id": str(uuid.uuid4()), "project_id": project_id} for row in repositories]
     project = {
         "id": project_id,
         "parent_id": parent or "",
@@ -2001,7 +2032,21 @@ def propose_project(
                 },
             )
         )
-    return {"mode": mode, "project": project, "documents": documents, "changes": changes}
+    if repositories:
+        changes.append(remote.change_record(key=uuid.uuid4().hex, kind="repository-bindings", record_id=project_id,
+            expected_revision=remote.repository_list_revision([]), revision=remote.repository_list_revision(repositories), payload=repositories))
+    return {"mode": mode, "project": project, "documents": documents, "repositories": repositories, "changes": changes}
+
+
+def select_registry_rows(registry: Mapping[str, Any], remotes: Any) -> list[dict[str, Any]]:
+    """Resolve selections to allowed identities; never interpret a local path."""
+    if not isinstance(remotes, list) or any(not isinstance(value, str) for value in remotes):
+        raise BunkerDatabaseError("Select repositories from the Bunker registry.")
+    remotes = [canonical_remote(value) for value in remotes]
+    rows = {row["canonical_remote"]: row for row in registry["items"]}
+    if len(set(remotes)) != len(remotes) or any(value not in rows for value in remotes):
+        raise BunkerDatabaseError("Select repositories from the Bunker registry.")
+    return [rows[value] for value in remotes]
 
 
 def apply_project_change(
@@ -2016,7 +2061,9 @@ def apply_project_change(
     now = _now()
     try:
         with _database(bunker_id) as connection:
+            connection.execute("BEGIN IMMEDIATE")
             _require_acceptance(_mode(connection, bunker_id), accepted)
+            select_registry_rows(_repository_registry(connection, bunker_id), [row["canonical_remote"] for row in proposal.get("repositories", [])])
             connection.execute(
                 """
                 INSERT INTO projects(
@@ -2050,6 +2097,9 @@ def apply_project_change(
                         now,
                     ),
                 )
+            for repository in proposal.get("repositories", []):
+                connection.execute("INSERT INTO repository_bindings(id,bunker_id,project_id,name,canonical_remote,default_branch,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (repository["id"], bunker_id, project["id"], repository["name"], repository["canonical_remote"], repository["default_branch"], now, now))
             if accepted:
                 _record_acceptance(connection, accepted)
     except sqlite3.IntegrityError as exc:
@@ -2136,7 +2186,7 @@ def canonical_remote(raw: str) -> str:
 
 
 def _repository_rows(
-    connection: sqlite3.Connection, project_id: str
+    connection: sqlite3.Connection, project_id: str = ""
 ) -> list[dict[str, Any]]:
     return [
         dict(row)
@@ -2147,10 +2197,10 @@ def _repository_rows(
                    lr.last_seen_at AS last_fetched_at
             FROM repository_bindings rb
             LEFT JOIN local_repositories lr ON lr.binding_id = rb.id
-            WHERE rb.project_id = ?
+            WHERE (? = '' OR rb.project_id = ?)
             ORDER BY rb.name COLLATE NOCASE, rb.canonical_remote, rb.id
             """,
-            (project_id,),
+            (project_id, project_id),
         ).fetchall()
     ]
 
@@ -2213,6 +2263,7 @@ def propose_repository_bindings(
         if not permission["can_write"]:
             raise BunkerDatabaseError(str(permission["reason"]))
         current_rows = _repository_rows(connection, project_id)
+        registry = _repository_registry(connection, bunker_id)
     current_revision = _repository_revision(current_rows)
     if not expected_revision or expected_revision != current_revision:
         raise BunkerDatabaseError(
@@ -2234,6 +2285,8 @@ def propose_repository_bindings(
                 "A Project repository changed after this editor opened. Reload it and retry."
             )
         identity = canonical_remote(str(raw.get("canonical_remote") or ""))
+        if registry["revision"] and identity not in {row["canonical_remote"] for row in registry["items"]}:
+            raise BunkerDatabaseError("This repository is not allowed by the Bunker. Ask an administrator to add it in Bunker settings.")
         if not identity:
             raise BunkerDatabaseError(
                 "Enter an allowed Git remote, such as github.com/owner/repository."
@@ -2298,6 +2351,9 @@ def apply_repository_bindings_change(
     with _database(bunker_id) as connection:
         _require_acceptance(_mode(connection, bunker_id), accepted)
         connection.execute("BEGIN IMMEDIATE")
+        registry = _repository_registry(connection, bunker_id)
+        if registry["revision"]:
+            select_registry_rows(registry, [row["canonical_remote"] for row in proposal["rows"]])
         current_rows = _repository_rows(connection, project_id)
         if _repository_revision(current_rows) != str(proposal.get("expected_revision") or ""):
             raise BunkerDatabaseError(

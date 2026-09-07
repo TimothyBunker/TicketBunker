@@ -71,6 +71,7 @@ export type Bunker = {
   repositories: Repository[];
   project_count: number;
   repository_count: number;
+  repository_registry?: { revision: string; items: Repository[] };
   ticket_count: number;
 };
 
@@ -201,6 +202,7 @@ export type Integration = {
 };
 
 export type ConfigurationState = {
+  repository_registry?: { revision: string; items: Repository[] };
   scope_type: "bunker" | "project";
   scope_id: string;
   composition: "pinned" | "defaults-for-new-projects";

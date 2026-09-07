@@ -184,9 +184,10 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .danger-control { color: var(--red); }
 .repository-matrix { min-width: 700px; overflow: hidden; }
 .repository-heading, .repository-row { display: grid; grid-template-columns: 24px 110px minmax(200px, 1.2fr) 110px minmax(190px, 1fr) 30px; align-items: center; gap: 7px; border-bottom: 1px solid var(--soft-line); }
+.repository-registry .repository-heading, .repository-registry .repository-row { grid-template-columns: 24px 130px minmax(200px, 1fr) 110px 30px; }
 .repository-heading { min-height: 30px; color: #7a8798; font-size: 9px; font-weight: 720; }
 .repository-row { padding: 7px 0; }
-.repository-row > input { min-width: 0; height: 33px; font-size: 10px; }
+.repository-row > input, .repository-row > select { min-width: 0; height: 33px; font-size: 10px; }
 .repository-row > button { width: 30px; min-width: 30px; min-height: 30px; padding: 0; }
 .repository-index { color: #8a95a4; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; }
 .repository-local { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; }

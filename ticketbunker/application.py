@@ -428,12 +428,35 @@ def command_project_connect(
 def command_bunker_create(
     _context: commands.CommandContext, payload: dict[str, Any]
 ) -> dict[str, Any]:
+    registry = None
+    if "repositories" in payload:
+        from .repository_registry import validate
+        try:
+            registry = validate({"items": payload["repositories"]})
+        except ValueError as exc:
+            raise commands.CommandRejected("repositories_invalid", str(exc)) from exc
+        if payload.get("first_repository"):
+            first = _bunker_result(bunkerdb.canonical_remote, str(payload["first_repository"]))
+            if first not in {row["canonical_remote"] for row in registry["items"]}:
+                raise commands.CommandRejected("repositories_invalid", "Choose the first Project's repository from the allowed remotes.")
+    elif payload.get("first_repository"):
+        raise commands.CommandRejected("repositories_invalid", "Add the first Project's repository to the Bunker's allowed remotes first.")
     bunker = _bunker_result(
         bunkerdb.create_bunker,
         str(payload.get("name") or ""),
         project_key=str(payload.get("project_key") or ""),
         project_name=str(payload.get("project_name") or ""),
     )
+    if registry is not None:
+        _apply_document(bunker["id"], "", "repository-registry", "", registry)
+        bunker = bunkerdb.get_bunker(bunker["id"])
+        if payload.get("first_repository"):
+            identity = bunkerdb.canonical_remote(str(payload["first_repository"]))
+            rows = _bunker_result(bunkerdb.select_registry_rows, bunker["repository_registry"], [identity])
+            project_id = bunker["projects"][0]["id"]
+            result = command_project_repositories_select(_context, {"bunker_id": bunker["id"], "project_id": project_id,
+                "expected_revision": remote.repository_list_revision([]), "repositories": [{**row, "id": ""} for row in rows]})
+            bunker = result["bunker"]
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
 
 
@@ -449,6 +472,7 @@ def command_bunker_project_create(
         name=str(payload.get("name") or ""),
         parent_id=str(payload.get("parent_id") or "") or None,
         description=str(payload.get("description") or ""),
+        repository_remotes=payload.get("repository_remotes"),
     )
     accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
     bunker = _bunker_result(
@@ -691,6 +715,9 @@ def command_bunker_repository_replace(
             "repositories_invalid", "Project repositories must be a list."
         )
     bunker_id = str(payload.get("bunker_id") or "")
+    if not payload.get("project_id"):
+        configuration = _apply_document(bunker_id, "", "repository-registry", str(payload.get("expected_revision") or ""), {"items": repositories})
+        return {"configuration": configuration, "bunker": bunkerdb.get_bunker(bunker_id), "bunkers": bunkerdb.list_bunkers()}
     proposal = _bunker_result(
         bunkerdb.propose_repository_bindings,
         bunker_id,
@@ -707,6 +734,21 @@ def command_bunker_repository_replace(
         "bunker": bunkerdb.get_bunker(str(payload.get("bunker_id") or "")),
         "bunkers": bunkerdb.list_bunkers(),
     }
+
+
+@commands.register("application.project.repositories.select")
+def command_project_repositories_select(
+    context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Select Bunker-approved identities, preserving existing Project binding IDs."""
+    if not payload.get("project_id"):
+        raise commands.CommandRejected("project_required", "Choose a Project before selecting its repositories.")
+    configuration = _bunker_result(bunkerdb.get_configuration, str(payload.get("bunker_id") or ""), project_id=str(payload.get("project_id") or ""))
+    rows = payload.get("repositories")
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise commands.CommandRejected("repositories_invalid", "Select repositories from the Bunker registry.")
+    _bunker_result(bunkerdb.select_registry_rows, configuration["repository_registry"], [row.get("canonical_remote") for row in rows])
+    return command_bunker_repository_replace(context, payload)
 
 
 @commands.register("application.bunker.repository.detach")
@@ -947,11 +989,16 @@ def _apply_document(
 def command_project_link(
     _context: commands.CommandContext, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    """Link a chosen board: scan it, build the Project's model, record the board."""
+    """Link a board and sync its tickets; a failed sync retains the saved link."""
     from .integrations import github
 
     bunker_id = str(payload.get("bunker_id") or "")
     project_id = str(payload.get("project_id") or "")
+    if not project_id:
+        raise commands.CommandRejected("project_required", "Choose a Project before linking a board.")
+    configuration = _bunker_result(bunkerdb.get_configuration, bunker_id, project_id=project_id)
+    if not configuration["permission"]["can_write"]:
+        raise commands.CommandRejected("configuration_read_only", configuration["permission"]["reason"])
     board = payload.get("board")
     if not isinstance(board, dict):
         raise commands.CommandRejected("board_required", "Choose a board from the list first.")
@@ -1014,7 +1061,13 @@ def command_project_link(
         revision if kind == "tracker-sources" else "",
         {"sources": kept},
     )
+    try:
+        first_sync = command_project_sync(_context, {"bunker_id": bunker_id, "project_id": project_id})
+        sync = {"status": "complete", **first_sync["sync"]}
+    except commands.CommandRejected as exc:
+        sync = {"status": "failed", "message": str(exc), "action": "Retry sync"}
     return {
+        "sync": sync,
         "configuration": configuration,
         "bunker": bunkerdb.get_bunker(bunker_id),
         "bunkers": bunkerdb.list_bunkers(),
@@ -1300,7 +1353,7 @@ def command_bunker_share(
     elif not reference:
         raise commands.CommandRejected(
             "service_setup_required",
-            "Paste the setup token printed by tb serve, or join this server from an invitation first.",
+            "Paste the setup token from the server operator to create a shared Bunker. An invitation grants access to an existing Bunker instead.",
         )
     adapter = remote.HTTPRemoteAdapter(
         server, bearer=credentials.resolve(reference), credential_reference=reference

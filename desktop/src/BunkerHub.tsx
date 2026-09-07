@@ -351,15 +351,17 @@ function ActionPanel({
 
   async function handle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const form = new FormData(event.currentTarget);
+    const values = Object.fromEntries(form);
     if (mode === "create") {
-      await submit("application.bunker.create", values, `Created ${values.name}`);
+      const repositories = String(values.allowed_remotes || "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean).map((canonical_remote) => ({ canonical_remote, default_branch: "main" }));
+      await submit("application.bunker.create", { ...values, repositories }, `Created ${values.name}`);
     } else if (mode === "join") {
       await submit("application.bunker.join", values, "Bunker joined");
     } else if (mode === "project" && bunker) {
       await submit(
         "application.bunker.project.create",
-        { ...values, bunker_id: bunker.id, parent_id: project?.id || values.parent_id || "" },
+        { ...values, bunker_id: bunker.id, parent_id: project?.id || values.parent_id || "", repository_remotes: form.getAll("repository_remotes") },
         `Added ${values.name}`,
       );
     } else if (mode === "share" && bunker) {
@@ -401,6 +403,7 @@ function ActionForm({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onClose: () => void;
 }) {
+  const [allowedRemotes, setAllowedRemotes] = useState("");
   const title = {
     create: "Create Bunker",
     join: "Join Bunker",
@@ -410,25 +413,28 @@ function ActionForm({
     config: "Configuration",
     "": "",
   }[mode];
-  const submitLabel = { create: "Create Bunker", join: "Join Bunker", project: title, share: "Publish and share", members: "", config: "", "": "" }[mode];
+  const submitLabel = { create: "Create Bunker", join: "Join Bunker", project: title, share: "Share Bunker", members: "", config: "", "": "" }[mode];
   return (
     <aside className="action-drawer" aria-label={title}>
       <header><h2>{title}</h2><button className="icon-control" onClick={onClose} aria-label="Close">←</button></header>
       <form onSubmit={onSubmit}>
         {mode === "create" && <>
           <label>Bunker name<input name="name" autoFocus required /></label>
+          <p className="field-note">This creates a local Bunker. Sharing it requires a service administrator.</p>
+          <label>Allowed Git remotes<textarea name="allowed_remotes" rows={3} placeholder="One remote per line" value={allowedRemotes} onChange={(event) => setAllowedRemotes(event.target.value)} /></label>
           <label>First project key<input name="project_key" placeholder="ECS" maxLength={32} required /></label>
           <label>First project name<input name="project_name" placeholder="Entity Component System" required /></label>
+          <label>First project repository<select name="first_repository"><option value="">Choose later</option>{allowedRemotes.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).map((value) => <option key={value}>{value}</option>)}</select></label>
         </>}
         {mode === "join" && <>
           <p className="drawer-copy">Paste the link a Bunker owner sent you. TicketBunker signs this computer in to their server and installs a copy of the Bunker with its projects and setup already configured.</p>
           <label>Invitation link<input name="invitation" type="password" placeholder="ticketbunker://join?…" autoComplete="off" autoFocus required /></label>
         </>}
         {mode === "share" && <>
-          <p className="drawer-copy">Publish this Bunker to a TicketBunker service you run. You become its owner; members join with invitation links. Run <code>tb serve</code> on a machine you control to get a server address and a one-time setup token.</p>
+          <p className="drawer-copy">Only a service administrator can create a shared Bunker. Members join through an invitation. The service operator provides its address and initial setup token.</p>
           <label>Server address<input name="server_url" type="url" placeholder="https://tickets.example.com" autoFocus required /></label>
           <label>Setup token<input name="setup_token" type="password" autoComplete="off" placeholder="Printed once by tb serve" /></label>
-          <small className="field-note">Leave the token empty if this computer already joined a Bunker on that server.</small>
+          <small className="field-note">Leave empty if this computer is already signed in as a service administrator.</small>
         </>}
         {mode === "project" && <>
           {project
@@ -436,6 +442,7 @@ function ActionForm({
             : <label>Parent<select name="parent_id"><option value="">Top level</option>{flatten(bunker?.projects || []).map(({ project: value, depth }) => <option key={value.id} value={value.id}>{"· ".repeat(depth)}{value.key} · {value.name}</option>)}</select></label>}
           <label>Project key<input name="key" placeholder="ECS" maxLength={32} required /></label>
           <label>Project name<input name="name" required /></label>
+          <fieldset><legend>Repositories</legend>{(bunker?.repository_registry?.items || []).map((row) => <label key={row.canonical_remote}><input type="checkbox" name="repository_remotes" value={row.canonical_remote} />{row.name} · {row.canonical_remote}</label>)}{!bunker?.repository_registry?.items.length && <p>Add allowed repositories in Bunker settings, or connect this Project later.</p>}</fieldset>
           <label>Description<textarea name="description" rows={3} /></label>
         </>}
         {error && <div className="inline-error">{error}</div>}
@@ -495,7 +502,7 @@ function Hub({
   }
 
   async function syncTickets() {
-    if (!bunker || !project) return;
+    if (!bunker || !project) return false;
     setSyncing(true);
     try {
       const result = await command<{ sync: { created: number; updated: number; unchanged: number; source: string }; bunkers: Bunker[] }>(
@@ -505,8 +512,10 @@ function Hub({
       onState({ ...state, bunkers: result.bunkers });
       setCatalogVersion((value) => value + 1);
       notify(`Synced ${result.sync.source}: ${result.sync.created} new, ${result.sync.updated} updated, ${result.sync.unchanged} unchanged`);
+      return true;
     } catch (reason) {
       notify(String(reason), true);
+      return false;
     } finally {
       setSyncing(false);
     }
@@ -607,8 +616,9 @@ function Hub({
               {bunker.remote && <button disabled={pulling} onClick={() => pullBunker(bunker)}>{pulling ? "Syncing…" : "Sync now"}</button>}
               <button onClick={() => openConfiguration("trackers")}>Trackers</button>
               <button onClick={() => openConfiguration("defaults")}>Defaults</button>
+              <button onClick={() => openConfiguration("repositories")}>Repositories</button>
               {bunker.remote ? <button onClick={() => navigateAction("members")}>Members</button> : <button onClick={() => navigateAction("share")}>Share Bunker</button>}
-              <button className="primary" onClick={() => navigateAction("project")}>Add project</button>
+              {(!bunker.remote || bunker.sharing?.is_owner) && <button className="primary" onClick={() => navigateAction("project")}>Add project</button>}
             </div>
           </header>
           <ProjectCatalog bunker={bunker} projects={bunker.projects} title="Projects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />
@@ -631,7 +641,7 @@ function Hub({
               {(project.trackers || []).length
                 ? <button disabled={syncing} onClick={syncTickets}>{syncing ? "Syncing…" : "Sync tickets"}</button>
                 : <button onClick={() => openConfiguration("board")}>Connect a board</button>}
-              <button className="primary" onClick={() => navigateAction("project")}>Add subproject</button>
+              {(!bunker.remote || bunker.sharing?.is_owner) && <button className="primary" onClick={() => navigateAction("project")}>Add subproject</button>}
             </div>
           </header>
           {(project.children || []).length > 0 && <ProjectCatalog bunker={bunker} projects={project.children || []} title="Subprojects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />}
@@ -640,7 +650,7 @@ function Hub({
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
       {action === "members" && bunker && <MembersPanel bunker={bunker} onClose={() => setAction("")} notify={notify} />}
-      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) })} onConnected={(trackers, _connection, refreshed) => onState({ ...state, trackers, bunkers: refreshed ? state.bunkers.map((item) => item.id === refreshed.id ? refreshed : item) : state.bunkers })} onSync={syncTickets} notify={notify} />}
+      {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => { onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) }); setCatalogVersion((version) => version + 1); }} onConnected={(trackers, _connection, refreshed) => onState({ ...state, trackers, bunkers: refreshed ? state.bunkers.map((item) => item.id === refreshed.id ? refreshed : item) : state.bunkers })} onSync={syncTickets} notify={notify} />}
     </div>
   );
 }

@@ -714,7 +714,7 @@ class SharedBunkerTests(unittest.TestCase):
         self.as_user("tim")
         inspection = {"kind": "project", "title": "Voxel ECS", "url": "https://github.com/users/example/projects/8", "items": 2, "fields": [{"name": "Status", "type": "SINGLE_SELECT", "options": ["Todo", "Done"]}], "labels": []}
         with mock.patch.dict(os.environ, {"GITHUB_ACCESS_TOKEN": "ghp_owner"}):
-            with mock.patch.object(github, "inspect_board", return_value=inspection):
+            with mock.patch.object(github, "inspect_board", return_value=inspection), mock.patch.object(github, "collect_entries", return_value=[]):
                 linked = self.dispatch(
                     "application.project.link",
                     {"bunker_id": created["id"], "project_id": project_id, "board": {"kind": "project", "owner": "example", "number": 8, "repository": "", "title": "Voxel ECS", "url": ""}},
@@ -1017,12 +1017,14 @@ class TrackerConnectionTests(TrackerSyncTests):
         self.assertEqual(missing.exception.code, "tracker_token_required")
 
         self.dispatch("credentials.update", {"provider": "github", "token": "ghp_test"})
-        with mock.patch.object(github, "inspect_board", return_value=inspection) as inspect:
+        with mock.patch.object(github, "inspect_board", return_value=inspection) as inspect, mock.patch.object(github, "collect_entries", return_value=[]) as collected:
             result = self.dispatch(
                 "application.project.link",
                 {"bunker_id": created["id"], "project_id": project_id, "board": board},
             )
         inspect.assert_called_once()
+        collected.assert_called_once()
+        self.assertEqual(result["sync"]["status"], "complete")
         documents = result["configuration"]["documents"]
         sources, kind, _revision = bunkerdb.tracker_sources(documents)
         self.assertEqual(kind, "tracker-sources")
@@ -1051,7 +1053,7 @@ class TrackerConnectionTests(TrackerSyncTests):
         # A second board links alongside the first; sync reads both and keeps
         # one copy of an issue that sits on both.
         repository_board = discovery()["boards"][1]
-        with mock.patch.object(github, "inspect_board", return_value={"kind": "issues", "title": "example/voxel", "url": repository_board["url"], "items": 3, "fields": [], "labels": ["bug"]}):
+        with mock.patch.object(github, "inspect_board", return_value={"kind": "issues", "title": "example/voxel", "url": repository_board["url"], "items": 3, "fields": [], "labels": ["bug"]}), mock.patch.object(github, "collect_entries", return_value=[]):
             second = self.dispatch(
                 "application.project.link",
                 {"bunker_id": created["id"], "project_id": project_id, "board": repository_board},
@@ -1082,4 +1084,3 @@ class TrackerConnectionTests(TrackerSyncTests):
         with self.assertRaises(commands.CommandRejected) as missing:
             self.dispatch("application.tracker.boards", {"provider": "github"})
         self.assertEqual(missing.exception.code, "tracker_token_required")
-

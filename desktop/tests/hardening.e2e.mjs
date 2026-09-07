@@ -28,13 +28,48 @@ try {
   if (await closeSettings.isVisible()) await closeSettings.click();
   await page.getByRole('button', { name: 'Bunkers', exact: true }).click();
   await page.locator('.bunker-overview > button').first().click();
+  // Adopt an existing Bunker's registry, then select a registered remote for
+  // a new Project. Local folders remain a separate member action.
+  await page.getByRole('button', { name: 'Repositories', exact: true }).click();
+  await expect(page.getByRole('table', { name: 'Allowed repositories' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect folder' })).toHaveCount(0);
+  await page.getByRole('button', { name: '+ Add repository', exact: true }).click();
+  await page.getByLabel('Repository 2 name', { exact: true }).fill('Navigation');
+  await page.getByLabel('Repository 2 allowed remote', { exact: true }).fill('github.com/example/navigation');
+  await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Save repositories', exact: true })).toBeEnabled();
+  await page.screenshot({ path: '/tmp/ticketbunker-bunker-repositories.png' });
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Add project', exact: true }).click();
+  const projectDrawer = page.getByRole('complementary', { name: 'Add project', exact: true });
+  await projectDrawer.getByLabel('Project key', { exact: true }).fill('TOOLS');
+  await projectDrawer.getByLabel('Project name', { exact: true }).fill('Navigation tools');
+  await projectDrawer.getByRole('checkbox', { name: /Navigation · github.com\/example\/navigation/ }).check();
+  await projectDrawer.getByRole('button', { name: 'Add project', exact: true }).click();
+  await page.locator('.project-row').filter({ hasText: 'Navigation tools' }).click();
+  await page.getByRole('button', { name: 'Configure', exact: true }).click();
+  await page.getByRole('button', { name: 'Repositories', exact: true }).click();
+  await expect(page.getByLabel('Repository 1 allowed remote')).toHaveValue('github.com/example/navigation');
+  await expect(page.getByRole('button', { name: 'Connect folder' })).toBeEnabled();
+  await page.screenshot({ path: '/tmp/ticketbunker-project-repository-selection.png' });
+  await page.getByRole('button', { name: 'Boards', exact: true }).click();
+  await page.getByRole('list', { name: 'Boards', exact: true }).getByRole('button', { name: /Navigation board/ }).click();
+  await page.getByRole('button', { name: 'Link board', exact: true }).click();
+  await expect(page.getByText(/Board connected. Ticket sync failed:/)).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Linked boards' })).toContainText('Navigation board');
+  await page.getByRole('complementary', { name: 'Configuration' }).getByRole('button', { name: 'Sync tickets', exact: true }).click();
+  await expect(page.getByText(/Board connected. Ticket sync failed:/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
+  await page.screenshot({ path: '/tmp/ticketbunker-board-sync-recovered.png' });
+  await page.locator('.breadcrumbs .breadcrumb').first().click();
   await page.locator('.project-row').first().click();
   await page.getByRole('button', { name: 'Configure', exact: true }).click();
   await page.getByRole('button', { name: 'Checks', exact: true }).click();
   const buildCommand = page.getByLabel('Build command', { exact: true });
   await buildCommand.fill('make navigation');
   await page.getByRole('button', { name: 'Repositories', exact: true }).click();
-  await page.getByRole('button', { name: 'Publish repositories', exact: true }).click();
+  await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
   await page.getByRole('button', { name: 'Checks', exact: true }).click();
   await expect(buildCommand).toHaveValue('make navigation');
   // The drawer leaves part of the ticket list visible; that route is guarded too.
@@ -43,7 +78,7 @@ try {
   await expect(buildCommand).toHaveValue('make navigation');
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   const configDialog = page.getByRole('dialog', { name: 'You have unsaved changes' });
-  await expect(configDialog).toContainText('Save publishes these settings');
+  await expect(configDialog).toContainText('Save applies these settings');
   await page.screenshot({ path: '/tmp/ticketbunker-unsaved-configuration.png' });
   await configDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(buildCommand).toHaveValue('make navigation');
@@ -101,7 +136,7 @@ try {
   await expect(page.getByLabel('Search tickets')).toBeVisible();
   if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== 'saved through confirmation\n') throw new Error('Save did not reach disk');
   if (errors.length) throw new Error(errors.join('\n'));
-  console.log('PASS real-browser configuration draft preservation and cancel/discard/save, default type, branch creation, clear filters, unsaved file cancel/discard/save, external-edit conflict');
+  console.log('PASS real-browser Bunker registry, Project repository selection, automatic board sync failure/retry, configuration draft preservation and cancel/discard/save, default type, branch creation, clear filters, unsaved file cancel/discard/save, external-edit conflict');
 } catch (error) {
   await page.screenshot({ path: '/tmp/ticketbunker-hardening-failure.png' });
   console.error(await page.locator('body').innerText());

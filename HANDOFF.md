@@ -4,6 +4,51 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Bunker repository setup and automatic board sync (2026-09-07)
+
+Current source changes, after the rc3 installer below:
+
+- Bunker **Repositories** owns the allowed source-remotes registry. Create
+  Bunker accepts allowed remotes and an optional first-Project selection.
+  Project creation and **Configure → Repositories** select from that registry;
+  **Connect folder** still verifies `origin`, fetches, and stores only the
+  device-local path. It grants no shared authority and changes no database host.
+- `repository-registry` is a Bunker-scoped, revision-checked config document.
+  The new `application.project.repositories.select` action and existing backend
+  gates validate selections; the service independently enforces them. Project
+  binding IDs stay unchanged for branch/report references. Removal is refused
+  while any Project uses the remote, including stale-proposal races.
+- Existing doc-less Bunkers derive the initial list from their existing
+  bindings. Saving it adopts the registry without rewriting user data. Legacy
+  binding mutation remains compatible only until a registry is saved; new UI
+  creation always writes one. Field templates remain pinned copies, whereas
+  repository approval is a Bunker-wide policy, not a Project template copy.
+- Only reference-service administrators may create shared Bunkers. One-time
+  setup establishes that privilege; a one-time schema migration recognizes
+  the original setup user on existing services. Bunker owner invitations do
+  not make service administrators. Bunker owners create Projects and configure
+  shared repositories; members connect local folders. Forged writes are rejected
+  server-side. Local-only Bunkers remain available without server authority.
+- **Link board** invokes the existing sync handler automatically. Failed sync
+  retains the saved board and existing tickets, with **Sync tickets** as retry.
+  A successful retry clears the error and refreshes the catalog. Provider HTTP
+  is mocked in the new browser scenario; no real tracker tickets were touched.
+- Setup controls say **Save** / **Connect folder** / **Share Bunker**, not
+  Publish. Report-publication gate vocabulary is unchanged.
+
+Verification commands: `python -m unittest discover -s tests`,
+`npm run build --prefix desktop`, `npm test --prefix desktop`, and
+`node desktop/tests/hardening.e2e.mjs`. New coverage lives in
+`tests/test_repository_registry.py`, the configuration/Hub component tests,
+and the committed real-browser flow. It includes separate admin/member data
+homes on a dummy service, forbidden Project/Bunker creation, registry
+validation, local remote matching, and automatic sync recovery. No new release
+tag or installer was produced for these changes.
+
+Verified: 369 backend tests, 54 interface tests, TypeScript/production asset
+build, and the full real-browser hardening flow passed. The 14 focused registry
+tests also passed after the final shared/local input-limit alignment.
+
 ## Interface hardening (2026-09-07)
 
 Published: `v0.6.1-rc3` at `c86b912`, with Windows x64 NSIS, Linux x64

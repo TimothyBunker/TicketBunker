@@ -61,8 +61,8 @@ try {
   await page.getByRole("button", { name: "Boards", exact: true }).click();
   await page.getByText("Adjust field mapping").click();
   await page.locator('.mapping-row input[value="title"]').first().waitFor();
-  await page.getByRole("button", { name: "Publish mappings" }).click();
-  await page.getByText("Integration mappings published").waitFor();
+  await page.getByRole("button", { name: "Save mappings" }).click();
+  await page.getByText("Integration mappings saved").waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-configuration.png"), fullPage: true });
   await page.getByRole("button", { name: "Back" }).click();
   await page.locator(".ticket-row").first().click();

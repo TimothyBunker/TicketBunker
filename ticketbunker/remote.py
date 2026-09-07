@@ -120,6 +120,7 @@ _CODE_MESSAGES = {
     "invitation_used": "That invitation was already used. Ask the Bunker owner for a new one.",
     "already_member": "You already belong to this Bunker on this server.",
     "capability_required": "Only the Bunker owner can do that on this server.",
+    "service_admin_required": "Only a service administrator can create a shared Bunker. Ask the server operator to create it or invite you to an existing Bunker.",
     "revision_conflict": "The shared Bunker changed elsewhere. Reload it and retry.",
     "project_key_taken": "That project key already exists in the shared Bunker.",
     "bunker_invalid": "The Bunker could not be published because its content did not validate.",
