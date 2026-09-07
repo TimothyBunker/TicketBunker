@@ -172,8 +172,11 @@ def exercise(root: Path) -> list[str]:
               "two local database identities connect to one shared Bunker")
         check(not joined["repositories"][0].get("local_path"), "joining does not copy the owner's checkout path")
         bob.attach()
-        check(alice.detail()["repositories"][0]["local_path"] == str(alice.repo)
-              and bob.detail()["repositories"][0]["local_path"] == str(bob.repo), "checkout mappings remain device-local")
+        # The application stores canonical paths. macOS aliases /var to
+        # /private/var, so compare actual directories rather than spellings.
+        check(Path(alice.detail()["repositories"][0]["local_path"]).samefile(alice.repo)
+              and Path(bob.detail()["repositories"][0]["local_path"]).samefile(bob.repo),
+              "checkout mappings remain device-local")
         secrets = [(p.area / "data" / "credentials.json").read_text() for p in (alice, bob)]
         check(secrets[0] != secrets[1], "participants have independent credential stores")
         reuse = bob.action("application.bunker.join", invitation=invite, allow_error=True)

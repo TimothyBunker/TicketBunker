@@ -7,11 +7,14 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 ## Interface hardening (2026-09-07)
 
 Release preparation: runtime, UI and native package versions are now 0.6.1;
-the intended installer tag is `v0.6.1-rc1`. The browser version assertion reads
+the intended installer tag is `v0.6.1-rc2`. The browser version assertion reads
 the package version rather than hardcoding it. This remains a prerelease under
 the existing unsigned-Windows policy; do not bypass the stable signing gate.
 Verify the tag's Release workflow and assets before claiming an installer is
 available. The historical validation notes below predate release preparation.
+Candidate rc1 passed Linux CI but its macOS release job found an audit-harness
+path assertion comparing /var with /private/var; directory identity comparison
+now handles canonical paths. No product path/authentication rule was relaxed.
 
 Follow-up: configuration now uses the unsaved guard for fields, mappings,
 repositories and Checks, including sidebar navigation and opening a ticket
