@@ -7,7 +7,7 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 ## Interface hardening (2026-09-07)
 
 Release preparation: runtime, UI and native package versions are now 0.6.1;
-the intended installer tag is `v0.6.1-rc2`. The browser version assertion reads
+the intended installer tag is `v0.6.1-rc3`. The browser version assertion reads
 the package version rather than hardcoding it. This remains a prerelease under
 the existing unsigned-Windows policy; do not bypass the stable signing gate.
 Verify the tag's Release workflow and assets before claiming an installer is
@@ -18,6 +18,9 @@ now handles canonical paths. No product path/authentication rule was relaxed.
 Windows also exposed the harness's stripped USERPROFILE, which prevented
 Python home-directory resolution; the fixture now supplies a disposable profile
 and has a regression assertion. It does not inherit the developer's profile.
+Candidate rc2 passed that macOS exercise but exposed an existing race test's
+mock ending before the HTTP handler's post-response queue call. Both HTTP tests
+now await that call before releasing the mock; the repository lock is unchanged.
 
 Follow-up: configuration now uses the unsaved guard for fields, mappings,
 repositories and Checks, including sidebar navigation and opening a ticket

@@ -212,9 +212,12 @@ class TicketWorkflowTests(unittest.TestCase):
         try:
             # This test owns the HTTP/CSRF contract. The dedicated refresh-race
             # test below owns ticket-open background work and waits for it.
-            with mock.patch.object(viewer.truth, "queue_refresh", return_value=False):
+            refresh_suppressed = threading.Event()
+            with mock.patch.object(viewer.truth, "queue_refresh",
+                    side_effect=lambda *_args, **_kwargs: refresh_suppressed.set() or False):
                 with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
                     page = opened.read().decode("utf-8")
+                self.assertTrue(refresh_suppressed.wait(timeout=8))
             with urlopen(f"{base}/work/state/ECS-4") as opened:
                 state = json.loads(opened.read().decode("utf-8"))
             token = re.search(r'data-token="([^"]+)"', page).group(1)
@@ -267,9 +270,14 @@ class TicketWorkflowTests(unittest.TestCase):
         client_thread: threading.Thread | None = None
         try:
             with mock.patch.object(project, "refresh_source_refs", held_refresh):
-                with mock.patch.object(viewer.truth, "queue_refresh", return_value=False):
+                refresh_suppressed = threading.Event()
+                with mock.patch.object(viewer.truth, "queue_refresh",
+                        side_effect=lambda *_args, **_kwargs: refresh_suppressed.set() or False):
                     with urlopen(f"{base}/project/ECS/ticket/ECS-4") as opened:
                         page = opened.read().decode("utf-8")
+                    # The server queues after sending the response. Reading
+                    # the body alone does not mean this patch can be removed.
+                    self.assertTrue(refresh_suppressed.wait(timeout=8))
                 token = re.search(r'data-token="([^"]+)"', page).group(1)
                 self.assertTrue(
                     viewer.truth.queue_refresh(
