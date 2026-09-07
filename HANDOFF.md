@@ -6,6 +6,15 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Interface hardening (2026-09-07)
 
+Published: `v0.6.1-rc3` at `c86b912`, with Windows x64 NSIS, Linux x64
+DEB/AppImage, Apple Silicon macOS DMG, runtime bundles and adjacent checksums.
+Release: https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.1-rc3
+All three Release platform jobs passed, alongside branch CI/browser and focused
+Windows/macOS portability checks. The backend suite is now 355 tests; UI 50;
+native-shell 9. Windows is an unsigned prerelease. Installed-app interaction
+still needs Tim's smoke test; CI packaging is not a claim of that manual run.
+The candidate history below explains why rc1/rc2 were not published.
+
 Release preparation: runtime, UI and native package versions are now 0.6.1;
 the intended installer tag is `v0.6.1-rc3`. The browser version assertion reads
 the package version rather than hardcoding it. This remains a prerelease under
