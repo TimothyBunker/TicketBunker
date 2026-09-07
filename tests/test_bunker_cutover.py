@@ -72,8 +72,30 @@ class BunkerCutoverTests(unittest.TestCase):
         with self.assertRaises(commands.CommandRejected) as caught:
             self.dispatch("workflow.start", {"name": "position", "user": "Ada"})
         self.assertEqual(caught.exception.code, "worktree_dirty")
+        self.assertIn("README.md", str(caught.exception))
         self.assertEqual(git(self.repo, "branch", "--show-current"), "main")
         self.assertEqual(path.read_text(), "unsaved work\n")
+
+    def test_default_ticket_and_tracker_labels_start_work(self):
+        self.offline_origin()
+        for index, fields in enumerate(({}, {"type": "Task", "status": "Todo"})):
+            with self.subTest(fields=fields):
+                proposal = bunkerdb.propose_ticket_sync(self.bid, project_id=self.pid,
+                    source_kind="manual", tickets=[{"id": "ECS-4", "title": "Default ticket", **fields}])
+                bunkerdb.apply_ticket_sync_change(self.bid, proposal)
+                result = self.dispatch("workflow.start", {"name": f"default-{index}", "user": "Ada"})
+                self.assertEqual(git(self.repo, "branch", "--show-current"), result["branch"])
+
+    def test_invalid_ticket_rejected_before_any_git_mutation(self):
+        proposal = bunkerdb.propose_ticket_sync(self.bid, project_id=self.pid,
+            source_kind="manual", tickets=[{"id": "ECS-4", "title": "Custom ticket", "type": "unsupported-kind"}])
+        bunkerdb.apply_ticket_sync_change(self.bid, proposal)
+        before = git(self.repo, "show-ref")
+        with self.assertRaises(commands.CommandRejected) as caught:
+            self.dispatch("workflow.start", {"name": "invalid", "user": "Ada"})
+        self.assertEqual(caught.exception.code, "ticket_invalid")
+        self.assertEqual(git(self.repo, "show-ref"), before)
+        self.assertEqual(git(self.repo, "branch", "--show-current"), "main")
 
     def test_attach_keeps_existing_branch_and_rejects_wrong_ticket(self):
         git(self.repo, "branch", "Ada/ECS-4-existing")

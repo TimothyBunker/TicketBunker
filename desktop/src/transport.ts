@@ -2,6 +2,10 @@ import type { AppState } from "./types";
 
 type TauriGlobal = {
   core: { invoke<T>(name: string, payload?: Record<string, unknown>): Promise<T> };
+  window?: { getCurrentWindow(): {
+    onCloseRequested(callback: (event: { preventDefault(): void }) => void): Promise<() => void>;
+    destroy(): Promise<void>;
+  } };
   dialog?: {
     open(options: Record<string, unknown>): Promise<string | string[] | null>;
   };

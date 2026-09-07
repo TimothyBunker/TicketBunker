@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
+import { UnsavedChangesBoundary, useGuardedAction } from "./UnsavedChanges";
 import { command } from "./transport";
 import { trackersSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
 import { relativeTime } from "./report";
 
 type Selection = { bunkerId: string; projectId?: string };
+// Keep failures visible when a ticket or settings temporarily unmounts the hub.
+const lastSyncErrors: Record<string, string> = {};
 
 type Props = {
   state: AppState;
@@ -269,6 +272,7 @@ function TicketCatalog({
           <option value="">Any label</option>
           {(page?.facets.labels || []).map((value) => <option key={value}>{value}</option>)}
         </select>
+        {(query || status !== "active" || assignee || reporter || label) && <button onClick={() => { setQuery(""); setCommittedQuery(""); setStatus("active"); setAssignee(""); setReporter(""); setLabel(""); setPageNumber(1); }}>Clear filters</button>}
       </div>
       {error && <div className="inline-error">{error}</div>}
       {!page && !error && <div className="ticket-loading">Loading tickets</div>}
@@ -280,7 +284,7 @@ function TicketCatalog({
       )}
       {groups.map(([group, tickets]) => (
         <section className="status-group" key={group}>
-          <header><h2>{group}</h2><span>{tickets.length}</span></header>
+          <header><h2>{group}</h2><span title="Tickets on this page">{tickets.length}</span></header>
           <div className="ticket-rows">
             {tickets.map((ticket) => (
               <button className="ticket-row" key={ticket.id} onClick={() => onTicket(ticket)}>
@@ -441,19 +445,27 @@ function ActionForm({
   );
 }
 
-export default function BunkerHub({
+export default function BunkerHub(props: Props) {
+  return <UnsavedChangesBoundary><Hub {...props} /></UnsavedChangesBoundary>;
+}
+
+function Hub({
   state,
   selection,
-  onSelection,
+  onSelection: select,
   onTicket,
   onState,
   onSettings,
   notify,
 }: Props) {
+  const protect = useGuardedAction();
+  const onSelection = (value: Selection | null) => protect(() => { setAction(""); setConfigTab(undefined); select(value); });
+  const navigateAction = (value: ActionMode) => protect(() => setAction(value));
   const [action, setAction] = useState<ActionMode>("");
   const [configTab, setConfigTab] = useState<ConfigurationTab | undefined>(undefined);
   const [syncing, setSyncing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [syncErrors, setSyncErrors] = useState<Record<string, string>>({ ...lastSyncErrors });
   const [catalogVersion, setCatalogVersion] = useState(0);
   const pulledAt = useRef<Record<string, number>>({});
   const [importing, setImporting] = useState("");
@@ -505,11 +517,15 @@ export default function BunkerHub({
     try {
       const result = await command<{ sync: { tickets: number; reports: number }; bunkers: Bunker[] }>("application.bunker.sync", { bunker_id: target.id });
       pulledAt.current[target.id] = Date.now();
+      delete lastSyncErrors[target.id];
+      setSyncErrors((values) => ({ ...values, [target.id]: "" }));
       onState({ ...state, bunkers: result.bunkers });
       setCatalogVersion((value) => value + 1);
       if (!quiet) notify(`Synced with ${remoteLabel(target).replace(/^Shared on /, "")}: ${result.sync.tickets} tickets, ${result.sync.reports} reports`);
     } catch (reason) {
-      if (!quiet) notify(String(reason), true);
+      lastSyncErrors[target.id] = String(reason);
+      setSyncErrors((values) => ({ ...values, [target.id]: String(reason) }));
+      notify(String(reason), true);
     } finally {
       setPulling(false);
     }
@@ -562,7 +578,7 @@ export default function BunkerHub({
         {!selection && <>
           <header className="workspace-header">
             <div><p className="eyebrow">Your work</p><h1>Bunkers</h1></div>
-            <div className="header-actions"><button onClick={() => setAction("join")}>Join</button><button className="primary" onClick={() => setAction("create")}>Create Bunker</button></div>
+            <div className="header-actions"><button onClick={() => navigateAction("join")}>Join</button><button className="primary" onClick={() => navigateAction("create")}>Create Bunker</button></div>
           </header>
           {state.bunkers.length === 0 ? (
             <div className="quiet-empty large"><h2>Create or join a Bunker</h2><p>A Bunker owns projects, tickets, configuration, and membership. Repositories attach to its projects afterward.</p></div>
@@ -584,14 +600,15 @@ export default function BunkerHub({
             <div>
               <button className="breadcrumb" onClick={() => onSelection(null)}>Bunkers</button>
               <h1>{bunker.name}</h1>
-              <p className="bunker-meta"><i className={!bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}{bunker.remote ? ` · synced ${bunker.remote.last_synced_at ? relativeTime(bunker.remote.last_synced_at) : "never"}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
+              <p className="bunker-meta"><i className={pulling ? "state-dot loading" : syncErrors[bunker.id] ? "state-dot failed" : !bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}{bunker.remote ? ` · last synced ${bunker.remote.last_synced_at ? relativeTime(bunker.remote.last_synced_at) : "never"}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
+              {syncErrors[bunker.id] && <p className="inline-error" role="alert">Sync failed: {syncErrors[bunker.id]} <button disabled={pulling} onClick={() => pullBunker(bunker)}>Retry sync</button></p>}
             </div>
             <div className="header-actions">
               {bunker.remote && <button disabled={pulling} onClick={() => pullBunker(bunker)}>{pulling ? "Syncing…" : "Sync now"}</button>}
               <button onClick={() => openConfiguration("trackers")}>Trackers</button>
               <button onClick={() => openConfiguration("defaults")}>Defaults</button>
-              {bunker.remote ? <button onClick={() => setAction("members")}>Members</button> : <button onClick={() => setAction("share")}>Share Bunker</button>}
-              <button className="primary" onClick={() => setAction("project")}>Add project</button>
+              {bunker.remote ? <button onClick={() => navigateAction("members")}>Members</button> : <button onClick={() => navigateAction("share")}>Share Bunker</button>}
+              <button className="primary" onClick={() => navigateAction("project")}>Add project</button>
             </div>
           </header>
           <ProjectCatalog bunker={bunker} projects={bunker.projects} title="Projects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />
@@ -614,11 +631,11 @@ export default function BunkerHub({
               {(project.trackers || []).length
                 ? <button disabled={syncing} onClick={syncTickets}>{syncing ? "Syncing…" : "Sync tickets"}</button>
                 : <button onClick={() => openConfiguration("board")}>Connect a board</button>}
-              <button className="primary" onClick={() => setAction("project")}>Add subproject</button>
+              <button className="primary" onClick={() => navigateAction("project")}>Add subproject</button>
             </div>
           </header>
           {(project.children || []).length > 0 && <ProjectCatalog bunker={bunker} projects={project.children || []} title="Subprojects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} />}
-          <TicketCatalog bunker={bunker} project={project} version={catalogVersion} onTicket={(ticket) => onTicket(bunker.id, ticket)} />
+          <TicketCatalog bunker={bunker} project={project} version={catalogVersion} onTicket={(ticket) => protect(() => onTicket(bunker.id, ticket))} />
         </>}
       </main>
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />

@@ -1,5 +1,6 @@
 import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
+import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
 import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
 import { command } from "./transport";
@@ -506,6 +507,11 @@ function ChecksRow({ detail, bunkerId, onReload, notify }: { detail: TicketDetai
   const summary = checks.build || checks.test ? [checks.build && `build: ${checks.build}`, checks.test && `test: ${checks.test}`].filter(Boolean).join(" · ") : "No build or test runs before synthesis.";
   return (
     <div className="checks-row">
+      {detail.check_results?.results?.length ? <div className="check-results" aria-label="Check results">
+        <strong>Last checks{detail.check_results.stale ? " · Out of date" : ""}</strong>
+        <small>{detail.check_results.branch} · {detail.check_results.commit ? detail.check_results.commit.slice(0, 8) : "Commit not recorded"} · {detail.check_results.checked_at ? relativeTime(detail.check_results.checked_at) : "Time not recorded"}</small>
+        {detail.check_results.results.map((result) => <details key={result.kind}><summary>{result.kind === "build" ? "Build" : "Test"}: {result.timed_out ? "Timed out" : result.passed ? "Passed" : "Failed"}</summary><code>{result.command}</code><p>Exit {result.exit ?? "unavailable"} · {result.seconds}s</p><pre>{result.log_text || result.first_error || "No output recorded."}</pre></details>)}
+      </div> : <small>No check results on this computer yet.</small>}
       <div className="checks-summary"><span className={`checks-source ${checks.source}`}>{CHECK_SOURCES[checks.source] || checks.source}</span><small title={summary}>{summary}</small>{checks.detail && <small>{checks.detail}</small>}</div>
       {!editing && <div className="checks-actions"><button type="button" onClick={() => setEditing(true)}>{checks.source === "ticket" ? "Edit this ticket's checks" : "Set checks for this ticket"}</button></div>}
       {editing && (
@@ -535,6 +541,7 @@ function TicketRail({
   scope,
   onScope,
   onReload,
+  onFetch,
   notify,
 }: {
   detail: TicketDetail;
@@ -546,6 +553,7 @@ function TicketRail({
   scope: string;
   onScope: (value: string) => void;
   onReload: () => void;
+  onFetch: () => void;
   notify: (message: string, error?: boolean) => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -553,18 +561,22 @@ function TicketRail({
   const [busy, setBusy] = useState(false);
   const [bases, setBases] = useState<string[]>([]);
   const [baseError, setBaseError] = useState("");
+  const [workError, setWorkError] = useState("");
+  const [existing, setExisting] = useState<string[]>([]);
+  const [attachment, setAttachment] = useState("");
   useEffect(() => {
     if (!creating || !repoRoot) return;
     let cancelled = false;
     setBases([]);
     setBaseError("");
-    command<{ base_branches: string[] }>("workflow.state", { ticket: detail.ticket.id, bunker_id: bunkerId }, repoRoot)
-      .then((value) => { if (!cancelled) setBases(value.base_branches); })
+    command<{ base_branches: string[]; related_branches: string[] }>("workflow.state", { ticket: detail.ticket.id, bunker_id: bunkerId }, repoRoot)
+      .then((value) => { if (!cancelled) { setBases(value.base_branches); setExisting(value.related_branches || []); } })
       .catch((reason) => { if (!cancelled) setBaseError(String(reason)); });
     return () => { cancelled = true; };
   }, [creating, repoRoot, bunkerId, detail.ticket.id]);
-  useEffect(() => { setCreating(false); setCandidate(null); }, [repositoryId]);
+  useEffect(() => { setCreating(false); setCandidate(null); setWorkError(""); setAttachment(""); }, [repositoryId]);
   const synthesis = (detail.truth?.synthesis || {}) as Record<string, unknown>;
+  const gitState = (detail.truth?.git || {}) as Record<string, unknown>;
   const ticket = detail.ticket;
   async function synthesize() {
     if (!repoRoot) return notify("Attach a local repository before synthesizing.", true);
@@ -582,6 +594,7 @@ function TicketRail({
   async function createBranch() {
     if (!candidate || !repoRoot) return;
     setBusy(true);
+    setWorkError("");
     try {
       const result = await command<{ branch: string }>("workflow.start", {
         ticket: ticket.id,
@@ -594,10 +607,29 @@ function TicketRail({
       setCreating(false);
       onReload();
     } catch (reason) {
+      setWorkError(String(reason));
+      setCandidate(null);
+      setCreating(false);
       notify(String(reason), true);
     } finally {
       setBusy(false);
+      onReload();
     }
+  }
+  async function attachBranch() {
+    if (!attachment || !repoRoot) return;
+    setBusy(true); setWorkError("");
+    try {
+      await command("workflow.attach", { ticket: ticket.id, bunker_id: bunkerId, branch: attachment }, repoRoot);
+      notify(`Attached ${attachment}`); setAttachment(""); setCreating(false);
+    } catch (reason) { setWorkError(String(reason)); notify(String(reason), true); }
+    finally { setBusy(false); onReload(); }
+  }
+  async function syncBeforeRetry() {
+    setBusy(true);
+    try { await command("application.bunker.sync", { bunker_id: bunkerId }); setWorkError(""); notify("Bunker synced. Use + to attach the existing branch."); }
+    catch (reason) { setWorkError(String(reason)); }
+    finally { setBusy(false); onReload(); }
   }
   return (
     <aside className="ticket-rail">
@@ -610,7 +642,10 @@ function TicketRail({
         <ChecksRow detail={detail} bunkerId={bunkerId} onReload={onReload} notify={notify} />
       </section>
       <section className="branches-panel">
-        <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" disabled={!repoRoot || busy} onClick={() => setCreating(!creating)}>+</button></header>
+        <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" disabled={!repoRoot || busy || repositoryLocked} title={repositoryLocked ? "Return to the ticket before creating a branch." : undefined} onClick={() => setCreating(!creating)}>+</button></header>
+        {repoRoot && <div className="checks-actions"><button disabled={gitState.status === "refreshing"} onClick={onFetch} title="Fetch remote-tracking refs without changing your checkout or files.">{gitState.status === "refreshing" ? "Fetching branches…" : "Fetch branches"}</button></div>}
+        {gitState.status === "cached" && <p className="inline-error" role="status">Using cached branches. {String(gitState.detail || "Could not reach the Git remote.")}</p>}
+        {workError && <div className="inline-error" role="alert">{workError}{workError.includes("branch_assignment_pending") || workError.includes("Sync") || workError.includes("sync") ? <button disabled={busy} onClick={syncBeforeRetry}>Sync Bunker</button> : null}</div>}
         {detail.branches.length === 0 && <p className="rail-empty">No branch carries {detail.ticket.id} yet. Use + to start one.</p>}
         {detail.branches.map((branch) => {
           const compare = branchCompare(branch);
@@ -625,6 +660,7 @@ function TicketRail({
           );
         })}
         {creating && !candidate && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setCandidate({ name: String(data.get("name") || ""), base: String(data.get("base") || "") }); }}><label>Short description<input name="name" placeholder="position-system" required /></label><label>Branch from<select name="base" disabled={!bases.length}>{bases.map((base) => <option key={base} value={base}>{base}</option>)}</select></label>{baseError && <p role="alert">{baseError}</p>}<button className="primary" disabled={!bases.length}>Review branch</button></form>}
+        {creating && !candidate && existing.length > 0 && <div className="branch-form"><label>Existing branch<select value={attachment} onChange={(event) => setAttachment(event.target.value)}><option value="">Choose branch</option>{existing.map((name) => <option key={name}>{name}</option>)}</select></label><p>Link this branch to the ticket. Your checkout will not change.</p><button disabled={busy || !attachment} onClick={attachBranch}>Attach branch</button></div>}
         {candidate && <div className="confirmation"><strong>Create this branch?</strong><p>TicketBunker will require a clean worktree, switch to <code>{candidate.base}</code>, fast-forward it when possible, then create the ticket branch.</p><div><button onClick={() => setCandidate(null)}>Back</button><button className="primary" disabled={busy} onClick={createBranch}>Create branch</button></div></div>}
       </section>
     </aside>
@@ -785,7 +821,7 @@ function CoworkerDrawer({
         </div>
       )}
       {topic !== "files" && <div className="chat-messages">{!coworker && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
-      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
+      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
       {topic === "files" && error && <p className="inline-error">{error}</p>}
     </aside>
   );
@@ -920,8 +956,10 @@ function SourceEditor({
       onDraft({ ...draft, content: result.content, digest: result.digest });
       setContent(result.content);
       notify(result.saved ? `Saved ${draft.path}` : `${draft.path} is unchanged`);
+      return true;
     } catch (reason) {
       notify(String(reason), true);
+      return String(reason);
     } finally {
       setBusy(false);
     }
@@ -929,6 +967,7 @@ function SourceEditor({
   function quoteOf(start: number, end: number, text: string): Quote {
     return { kind: "source", category: "file", scope: draft.branch || "all", branch: draft.branch, path: draft.path, line_start: start, line_end: end, unsaved: content !== draft.content, text: text.slice(0, 4000) };
   }
+  useUnsavedEditor({ dirty: content !== draft.content, busy, save, discard: () => setContent(draft.content) });
   // Selecting text in the file offers the same toolbar as selecting report
   // text: Send to chat, Copy. Nothing happens until a button is pressed.
   function selected() {
@@ -990,7 +1029,7 @@ function SourceEditor({
                   return <div key={index} className={classes.join(" ")}>{line || " "}</div>;
                 })}
               </div>
-              <textarea ref={editor} value={content} onChange={(event) => { setContent(event.target.value); setSelection(null); }} onMouseUp={selected} onKeyUp={(event) => { if (event.shiftKey || event.key === "Shift") selected(); }} onBlur={(event) => { if (!(event.relatedTarget as HTMLElement | null)?.closest?.(".floating-actions")) setSelection(null); }} spellCheck={false} wrap={wrap ? "soft" : "off"} rows={lines.length} />
+              <textarea ref={editor} aria-label={`Edit ${draft.path}`} disabled={busy} value={content} onChange={(event) => { setContent(event.target.value); setSelection(null); }} onMouseUp={selected} onKeyUp={(event) => { if (event.shiftKey || event.key === "Shift") selected(); }} onBlur={(event) => { if (!(event.relatedTarget as HTMLElement | null)?.closest?.(".floating-actions")) setSelection(null); }} spellCheck={false} wrap={wrap ? "soft" : "off"} rows={lines.length} />
               {selection && (
                 <FloatingActions
                   label="Selection actions"
@@ -1034,7 +1073,12 @@ function SourceEditor({
   );
 }
 
-export default function TicketWorkspace({ bunker, reference, onBack, notify }: Props) {
+export default function TicketWorkspace(props: Props) {
+  return <UnsavedChangesBoundary><Workspace {...props} /></UnsavedChangesBoundary>;
+}
+
+function Workspace({ bunker, reference, onBack, notify }: Props) {
+  const protect = useGuardedAction();
   const [snapshot, setDetail] = useState<TicketDetail | null>(null);
   const [repositoryChoice, setRepositoryChoice] = useState("");
   const repositoryId = repositoryChoice || snapshot?.selected_repository_id || snapshot?.repositories[0]?.id || "";
@@ -1062,6 +1106,18 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       .catch((reason) => { if (readSequence.current === sequence) setError(String(reason)); });
   }
   useEffect(load, [bunker.id, reference.id, repositoryChoice]);
+  useEffect(() => {
+    if (!repoRoot) return;
+    let active = true;
+    command("truth.queue", { bunker_id: bunker.id, project: detail!.project.key, ticket: reference.id }, repoRoot)
+      .then(() => { if (active) load(); })
+      .catch((reason) => { if (active) notify(String(reason), true); });
+    return () => { active = false; };
+  }, [repoRoot, bunker.id, reference.id]);
+  function fetchBranches() {
+    command("truth.queue", { bunker_id: bunker.id, project: detail!.project.key, ticket: reference.id, force: true }, repoRoot)
+      .then(load).catch((reason) => notify(String(reason), true));
+  }
   // While a synthesis runs, the page follows it: poll the ticket every few
   // seconds and take one more read when it finishes, so the report appears
   // without a manual refresh. A hidden tab stays quiet; returning to it
@@ -1069,7 +1125,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   const synthesisStatus = String((detail?.truth?.synthesis as Record<string, unknown> | undefined)?.status || "");
   const wasUpdating = useRef(false);
   useEffect(() => {
-    const updating = synthesisStatus === "updating";
+    const updating = synthesisStatus === "updating" || detail?.truth?.refresh === "running";
     if (!updating && wasUpdating.current) load();
     wasUpdating.current = updating;
     if (!updating) return;
@@ -1077,7 +1133,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     const timer = window.setInterval(tick, 3000);
     document.addEventListener("visibilitychange", tick);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
-  }, [synthesisStatus, bunker.id, reference.id]);
+  }, [synthesisStatus, detail?.truth?.refresh, bunker.id, reference.id]);
   useEffect(() => {
     if (!detail || editor) return;
     const targets = ["details", "description", "agent-work"].map((id) => document.getElementById(id)).filter((value): value is HTMLElement => Boolean(value));
@@ -1094,8 +1150,10 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   }, [detail, editor]);
 
   function jumpTo(id: string) {
-    setEditor(null);
-    window.requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    protect(() => {
+      setEditor(null);
+      window.requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    });
   }
 
   useEffect(() => {
@@ -1107,7 +1165,10 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     setScope(current && withReports.includes(current) ? current : withReports[0] || current || detail.branches[0]?.name || "");
   }, [detail]);
 
-  async function openSource(path: string, line: number) {
+  function openSource(path: string, line: number) {
+    protect(() => { void readSource(path, line); });
+  }
+  async function readSource(path: string, line: number) {
     if (!repoRoot) return notify("Attach this ticket’s local repository before opening source.", true);
     try {
       const value = await command<SourceDraft>("editor.read", { path, line }, repoRoot);
@@ -1152,7 +1213,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
     const source = chosen.length ? chosen : branchReports;
     return source.flatMap((report) => sourceNotes(report.content, editor.path));
   }, [editor?.path, detail, scope]);
-  if (error) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
+  if (error && !detail) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;
   const link = sourceLink(detail);
@@ -1160,7 +1221,7 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
   return (
     <div className="ticket-shell">
       <header className="ticket-header">
-        <button className="back-control" onClick={onBack}>← Tickets</button>
+        <button className="back-control" onClick={() => protect(onBack)}>← Tickets</button>
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
         {!editor && <nav className="section-jumps" aria-label="Sections">
           {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
@@ -1168,12 +1229,13 @@ export default function TicketWorkspace({ bunker, reference, onBack, notify }: P
       </header>
       <div className="ticket-layout">
         <main className="ticket-main">
-          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => setEditor(null)} onDraft={setEditor} onQuote={quoteSource} onReply={replyFromEditor} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
+          {error && <div role="alert" className="inline-error">{error} <button onClick={load}>Retry</button></div>}
+          {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => protect(() => setEditor(null))} onDraft={setEditor} onQuote={quoteSource} onReply={replyFromEditor} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>
             <TicketTab detail={detail} trackers={trackers} openSource={openSource} copySource={copySource} />
             <div id="agent-work"><AgentTab detail={detail} bunkerId={bunker.id} scope={scope} onScope={setScope} onQuote={quoteReport} openSource={openSource} copySource={copySource} notify={notify} /></div>
           </SourceActionsContext.Provider>}
         </main>
-        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} repositoryId={repositoryId} repositoryLocked={Boolean(editor)} onRepository={(value) => { setRepositoryChoice(value); setScope(""); setQuote(null); setPending(null); }} scope={scope} onScope={(value) => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} onReload={load} notify={notify} />
+        <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} repositoryId={repositoryId} repositoryLocked={Boolean(editor)} onRepository={(value) => { setRepositoryChoice(value); setScope(""); setQuote(null); setPending(null); }} scope={scope} onScope={(value) => protect(() => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); })} onReload={load} onFetch={fetchBranches} notify={notify} />
       </div>
       <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} pending={pending} onPendingSent={() => setPending(null)} openFile={editor?.path || ""} onReload={load} notify={notify} />
     </div>

@@ -18,7 +18,7 @@ export default function FloatingActions({
   style?: CSSProperties;
   anchor?: RefObject<HTMLElement | null>;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     function away(event: Event) {
       const target = event.target as Node;
@@ -36,10 +36,10 @@ export default function FloatingActions({
     };
   }, [onClose, anchor]);
   return (
-    <div ref={ref} className="floating-actions" role="toolbar" aria-label={label} style={style} onMouseDown={(event) => event.preventDefault()}>
+    <span ref={ref} className="floating-actions" role="toolbar" aria-label={label} style={style} onMouseDown={(event) => event.preventDefault()}>
       {actions.map((action) => (
         <button key={action.label} type="button" onClick={() => { action.onSelect(); onClose(); }}>{action.label}</button>
       ))}
-    </div>
+    </span>
   );
 }

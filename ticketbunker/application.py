@@ -577,6 +577,10 @@ def command_ticket_get(
         )
     except bunkerdb.BunkerDatabaseError:
         detail["checks"] = {}
+    if repository is not None and repository.get("local_path"):
+        root = _runtime.ticket_dir(str(payload.get("bunker_id") or ""), str(detail["ticket"]["id"]), str(repository["id"]))
+        detail["check_results"] = _runtime.check_results(root,
+            [row for row in detail.get("branches", []) if row.get("repository_id") == repository["id"]], detail["checks"])
     return detail
 
 

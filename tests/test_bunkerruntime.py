@@ -138,6 +138,26 @@ class BunkerRuntimeTests(unittest.TestCase):
                  "expected_revision": published["documents"]["checks"]["revision"], "content": {"build": "make", "timeout_seconds": 5}},
             )
 
+    def test_check_results_are_local_bounded_and_independent_of_reports(self) -> None:
+        info = bunkerruntime.materialize(self.bunker_id, "ECS-4")
+        root = info["bunker"]
+        observations = layout.paths(root)["observations"]
+        (observations / "checks").mkdir(parents=True, exist_ok=True)
+        (observations / "checks" / "test.log").write_text("x" * 30000)
+        value = {"branch": "main", "commit": git(self.repo, "rev-parse", "HEAD"), "checked_at": "2026-09-07T00:00:00Z",
+                 "per_branch": {"main": {"test": {"passed": False, "exit": 1, "command": "test-command", "log": "observations/checks/test.log"}}}}
+        (observations / "check.json").write_text(json.dumps(value))
+        branches = [{"name": "main", "commit": value["commit"]}]
+        result = bunkerruntime.check_results(root, branches, {"test": "test-command"})
+        self.assertFalse(result["stale"])
+        self.assertFalse(result["results"][0]["passed"])
+        self.assertEqual(len(result["results"][0]["log_text"]), 24000)
+        self.assertTrue(bunkerruntime.check_results(root, [{"name": "main", "commit": "new"}], {"test": "test-command"})["stale"])
+        self.assertTrue(bunkerruntime.check_results(root, branches, {"test": "changed"})["stale"])
+        value["per_branch"]["main"]["test"]["log"] = str(self.repo / "README.md")
+        (observations / "check.json").write_text(json.dumps(value))
+        self.assertEqual(bunkerruntime.check_results(root, branches, {})["results"][0]["log_text"], "")
+
     def test_ticket_checks_override_project_and_discovery_fills_in(self) -> None:
         from ticketbunker import checks
 

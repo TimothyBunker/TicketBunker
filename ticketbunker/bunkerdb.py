@@ -1561,7 +1561,7 @@ def _ticket_reference(row: Mapping[str, Any], project: Mapping[str, Any]) -> dic
         "id": ticket_id,
         "title": str(payload.get("title") or payload.get("summary") or ticket_id),
         "status": str(payload.get("status") or payload.get("state") or "open"),
-        "type": str(payload.get("type") or payload.get("issue_type") or "Task"),
+        "type": str(payload.get("type") or payload.get("issue_type") or "task"),
         "priority": str(payload.get("priority") or ""),
         "assignee": _person(payload.get("assignee")),
         "reporter": _person(payload.get("reporter") or payload.get("author")),

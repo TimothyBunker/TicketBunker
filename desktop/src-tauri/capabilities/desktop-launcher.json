@@ -3,5 +3,5 @@
   "identifier": "desktop-launcher",
   "description": "Only the bundled Bunkers window may choose a local Git directory or receive agent-setup events.",
   "windows": ["launcher"],
-  "permissions": ["dialog:allow-open", "core:event:allow-listen"]
+  "permissions": ["dialog:allow-open", "core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-destroy"]
 }

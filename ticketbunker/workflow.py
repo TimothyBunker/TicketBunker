@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import commands, config, handlers, layout, project
+from . import commands, config, handlers, layout, project, types
 from .adapters.gitrun import GitError, git, repository_lock
 from .api import TicketCatalog
 from .ledger import Ledger
@@ -114,7 +114,7 @@ def state(source_root: Path, ticket_id: str, bunker_id: str = "") -> dict[str, A
         ledger,
         "work_state",
         "TicketBunker could not inspect the working tree. Run 'tb doctor'.",
-    ).strip()
+    )
     related, _rules, _missing = relate_branches([*branches, *remotes], str(ticket.get("key") or ticket_id), [])
     return {
         "ticket": ticket_id,
@@ -138,6 +138,7 @@ def _preflight(
 ) -> tuple[dict[str, Any], Path, Ledger, str, str, list[str], list[str]]:
     ticket, bunker, project_key = _ticket(source_root, ticket_id, bunker_id)
     ledger = Ledger(layout.paths(bunker)["ledger"])
+    _validate_ticket(ticket, ledger)
     top = _run(
         source_root,
         ["rev-parse", "--show-toplevel"],
@@ -153,7 +154,7 @@ def _preflight(
         ledger,
         "branch_preflight",
         "TicketBunker could not inspect the working tree.",
-    ).strip()
+    )
     if dirty:
         paths = ", ".join(line[3:] for line in dirty.splitlines()[:8])
         raise commands.CommandRejected(
@@ -234,6 +235,16 @@ def _preflight(
 @commands.register("workflow.state")
 def command_state(context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
     return state(context.project_root, str(payload.get("ticket") or ""), str(payload.get("bunker_id") or ""))
+
+
+def _validate_ticket(ticket: dict[str, Any], ledger: Ledger) -> None:
+    """Reject incompatible intake before any checkout, fetch or publication."""
+    errors = types.validate("ticket", ticket)
+    if errors:
+        ledger.event("intake_rejected", info_type="ticket", errors=errors, ticket_id=ticket.get("id"))
+        raise commands.CommandRejected("ticket_invalid",
+            "This ticket cannot start branch work: " + "; ".join(errors) +
+            ". Your branch and files were not changed. Correct the ticket's field mapping, sync, and retry.")
 
 
 def _publish_assignment(source_root: Path, bunker: Path, branch: str, ledger: Ledger) -> dict[str, Any]:
@@ -329,6 +340,7 @@ def command_attach(context: commands.CommandContext, payload: dict[str, Any]) ->
     branch = str(payload.get("branch") or "").strip()
     ticket, bunker, _project_key = _ticket(source_root, ticket_id, str(payload.get("bunker_id") or ""))
     ledger = Ledger(layout.paths(bunker)["ledger"])
+    _validate_ticket(ticket, ledger)
     names = [
         line.strip()
         for line in _run(

@@ -1392,6 +1392,22 @@ the pattern is enforced by construction at the same place the branch is born.
 Failure messages name the state that stopped Git and what the user must do next;
 no reset, forced checkout, auto-stash, or non-fast-forward merge occurs.
 
+The ticket is validated against runtime intake **before** changing Git. Missing
+types default to `task`; recognized tracker display labels are normalized only
+in the runtime projection, not rewritten in the source snapshot. A failed
+shared branch-link publication retains the created Git branch. The view reloads
+local refs on both success and failure and offers explicit existing-branch
+attachment after the user reconciles the shared state.
+
+Leaving an edited source file requires **Save / Do not save / Cancel**. Navigation
+continues only after a successful optimistic-digest save or explicit discard;
+a failed save retains the draft. This applies to file replacement, ticket and
+scope navigation, and native window-close requests. Browser tab close/reload
+uses the browser's standard unsaved-work warning instead of a custom dialog.
+Deterministic build/test results are displayed independently of agent reports,
+with their observed branch, commit, completion time, and bounded local log.
+Unknown historical timestamps/commits are never presented as current evidence.
+
 Opening a ticket first renders Branches from local and already-fetched refs plus
 explicit assignments. The viewer then runs `git fetch --prune origin` in the
 background and recomposes the same union. Fetch updates refs only, so it is
@@ -1461,6 +1477,16 @@ optional external command live only in `~/.tbconfig`. Both the browser and `tb
 config --editor` dispatch `local.editor.update`. The CLI, editor HTTP
 transport, and programmatic callers dispatch the same command envelopes;
 transports do not reimplement mutations.
+
+Configuration drafts for ticket fields, integration mappings, repositories and
+Checks survive tab changes and publication of another section. Each dirty
+section retains its original expected revision, including an absent revision;
+receiving a newer snapshot never silently rebases a draft onto someone else's
+changes. Leaving Configuration, opening a ticket behind it, or navigating the
+sidebar requires Save / Do not save / Cancel. Save explicitly publishes the
+changed sections through their existing typed actions. Sections publish
+separately; a partial failure retains unpublished drafts and retry skips already
+successful sections. Controls cannot edit a submitted draft while it saves.
 
 Storage connection is explicit and does not infer authority from source code.
 The Storage page shows the exact local Bunker database and, when configured,

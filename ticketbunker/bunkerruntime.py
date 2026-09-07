@@ -143,6 +143,45 @@ def _seed_reports(root: Path, reports: list[dict[str, Any]], repository_id: str)
     return written
 
 
+def check_results(root: Path, branches: list[dict[str, Any]], checks: dict[str, Any]) -> dict[str, Any]:
+    """Read local deterministic evidence, independently of agent publication."""
+    observations = layout.paths(root)["observations"]
+    empty = {"branch": "", "commit": "", "checked_at": "", "stale": None, "results": []}
+    try:
+        value = json.loads((observations / "check.json").read_text(encoding="utf-8"))
+        branch = str(value.get("branch") or "")
+        outcomes = value.get("per_branch", {}).get(branch, {})
+        if not isinstance(outcomes, dict) or not outcomes:
+            return empty
+    except (OSError, ValueError, AttributeError):
+        return empty
+    rows = []
+    for kind in ("build", "test"):
+        outcome = outcomes.get(kind)
+        if not isinstance(outcome, dict):
+            continue
+        text = ""
+        # Logs are local evidence, never an arbitrary path from the agent.
+        log = (root / str(outcome.get("log") or "")).resolve()
+        if log.is_relative_to((observations / "checks").resolve()):
+            try:
+                with log.open(encoding="utf-8", errors="replace") as stream:
+                    text = stream.read(24000)
+            except OSError:
+                text = "Log is unavailable on this computer."
+        rows.append({**{key: outcome.get(key) for key in ("command", "passed", "exit", "timed_out", "seconds", "first_error")}, "kind": kind, "log_text": text})
+    commit = str(value.get("commit") or "")
+    current = next((item for item in branches if item.get("name") == branch), {})
+    recorded_commands = value.get("commands")
+    if not isinstance(recorded_commands, dict):
+        recorded_commands = {kind: item.get("command") for kind, item in outcomes.items() if isinstance(item, dict)}
+    changed_commands = any(str(checks.get(kind) or "").strip() != str(recorded_commands.get(kind) or "").strip()
+                           for kind in ("build", "test"))
+    return {"branch": branch, "commit": commit, "checked_at": str(value.get("checked_at") or ""),
+            "stale": changed_commands or (commit != current.get("commit") if commit and current.get("commit") else None),
+            "results": rows}
+
+
 def effective_checks(bunker_id: str, project_id: str, ticket_id: str, repo_root: str = "") -> dict[str, Any]:
     """The build/test checks that apply to one ticket, and where they came from.
 
@@ -216,6 +255,17 @@ def materialize(bunker_id: str, ticket_id: str, *, repo: Path | None = None,
         if key not in _PROJECTION_EXCLUDED
     }
     payload["id"] = ticket_id
+    # Presentation labels from trackers are not legacy runtime enum values.
+    # Keep the database snapshot unchanged; normalize only recognized spellings
+    # at this compatibility boundary. Unknown values still fail typed intake.
+    from . import types
+    kind = str(payload.get("type") or "task").strip().casefold()
+    if kind in types.TICKET_TYPES:
+        payload["type"] = kind
+    status = str(payload.get("status") or "todo").strip().casefold().replace(" ", "-")
+    status = {"open": "todo", "to-do": "todo"}.get(status, status)
+    if status in types.TICKET_STATUSES:
+        payload["status"] = status
     key = str(payload.get("key") or "")
     if not key or not config.validate_ticket_id(key):
         payload["key"] = ticket_id

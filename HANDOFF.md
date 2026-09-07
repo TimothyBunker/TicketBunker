@@ -4,6 +4,60 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Interface hardening (2026-09-07)
+
+Follow-up: configuration now uses the unsaved guard for fields, mappings,
+repositories and Checks, including sidebar navigation and opening a ticket
+behind the drawer. Publishing one section no longer clears other drafts or
+replaces their original expected revisions. Save publishes dirty sections
+separately, retains failures and skips successful sections on retry. Inputs
+are disabled during publication. This does not claim draft persistence across
+app crashes or protection for credential/onboarding forms.
+Follow-up validation: 50 UI tests and the expanded real-browser regression
+passed with a production UI rebuild. The browser checks real local configuration
+publication, draft retention, cancel/discard/save and the prior file/Git flows.
+Python behavior was unchanged in this follow-up; the full 354-test result below
+is from the preceding fix pass. No installer release or push has been made.
+
+Implemented the audit's five primary fixes plus recovery/accessibility polish:
+source editor Save / Do not save / Cancel guard (ticket/file/scope navigation,
+native close hook, browser unload warning); default `task` and canonical runtime
+labels with validation before Git mutation; failed branch-link reread and
+existing-branch attach; independent check outcomes with commit/time/log and
+staleness; browser repository-path connection. Error toasts are dismissible and
+do not expire; failed Bunker sync stays visible across ticket navigation, with
+explicit retry and unchanged last-success time. Added clear filters, full dirty
+filenames, editor/chat labels, valid inline source-action markup. Ticket open
+now queues a safe ref fetch; Branches exposes retry, never an implicit pull or
+synthesis. UI rebuilt into tracked application assets.
+
+Regression: `npm run test:hardening --prefix desktop` starts its own disposable
+worker/database/Git fixture and exercises real browser navigation, default-type
+branch creation, clear filters, cancel/discard/save, and an external-editor
+conflict. It checks bytes on disk and cleans up the fixture. Added to browser CI.
+The old default-type expected failure is now an ordinary passing regression.
+Native close is covered with an API-boundary test and Cargo checking, not a
+Windows/macOS installed-app run. No release or push performed by this change.
+Final validation: 354 Python tests and 43 UI tests passed; production UI build,
+real-browser hardening flow (including a conflicting external edit), offline
+Cargo check, and `git diff --check` passed. The hardening flow's popup capture
+is `/tmp/ticketbunker-unsaved-changes.png`; the fixture itself is removed.
+
+## Prior interface exercise (2026-09-06)
+
+Two isolated users role-played 22 scenarios against real app workers, sharing
+service and dummy Git clones through Chrome. See
+`docs/roleplay-audit-2026-09-06.md` and its 26-image evidence gallery. Production
+code was not changed during the audit. Highest-priority reproductions: unsaved
+source edits silently disappear on returning to the ticket; a missing ticket
+type becomes `Task` and fails legacy intake after Git branch creation; failed
+branch publication leaves stale UI with an unusable retry instruction. The
+save/commit/resynthesize loop, sharing/read-only member configuration and
+offline/reconnect path were exercised successfully, with recovery caveats in
+the report. Agent prose uses the deterministic stub; native picker result is an
+explicit shim, not a native OS test. All lab listeners were stopped. Interactive
+helpers: `tools/roleplay_lab.py`, `desktop/tests/roleplay-driver.mjs`.
+
 ## Product in one paragraph
 
 TicketBunker is a Bunker-owned context layer between agile trackers and source
@@ -55,6 +109,15 @@ exercise unless a live boundary is explicitly called out.
   verification.
 
 ### Bunker database and application onboarding
+
+- **Isolated-participant validation:** `tools/two_participant_loop.py` exercises
+  Alice and Bob in separate worker processes, data/settings/credential stores,
+  and Git clones against the real local service. See
+  `docs/two-participant-exercise.md` for the 17 checks and limitations. The
+  default `Task` versus runtime `task` mismatch was fixed on September 7;
+  its regression now passes without an expected-failure annotation. The
+  collaboration fixture still uses an explicit lowercase type. Real-device/installed-app
+  participant testing and shared file conversations remain unverified.
 
 - **6 September cutover slice:** imported tickets are one-time copies, never
   reread from companion storage. Native workflow state/start/attach use Bunker

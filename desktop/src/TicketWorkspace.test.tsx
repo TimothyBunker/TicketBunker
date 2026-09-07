@@ -23,10 +23,14 @@ describe("Bunker-native ticket work", () => {
   beforeEach(() => {
     transport.command.mockReset();
     transport.command.mockImplementation((action: string, payload: Record<string, string>) => {
-      if (action === "application.ticket.get") return Promise.resolve({ ...detail, selected_repository_id: payload.repository_id || "coal" });
+      if (action === "application.ticket.get") return Promise.resolve({ ...detail, check_results: {}, ticket: { ...ticket, description: "See `README.md:1`." }, selected_repository_id: payload.repository_id || "coal" });
+      if (action === "editor.read") return Promise.resolve({ path: "README.md", content: "original\n", digest: "old", branch: "ada/ECS-4-work", line: 1, settings: { tab_size: 4, line_wrap: false } });
+      if (action === "editor.save") return Promise.resolve({ content: payload.content, digest: "new", saved: true });
+      if (action === "workflow.attach") return Promise.resolve({ branch: payload.branch });
       if (action === "workflow.state") return Promise.resolve({ base_branches: ["main", "release"], related_branches: ["ada/ECS-4-work"] });
       if (action === "workflow.start") return Promise.resolve({ branch: "ada/ECS-4-new-work" });
       if (action === "truth.synthesize") return Promise.resolve({ queued: true });
+      if (action === "truth.queue") return Promise.resolve({ queued: true });
       throw new Error(`Unexpected action ${action}`);
     });
   });
@@ -56,5 +60,61 @@ describe("Bunker-native ticket work", () => {
     fireEvent.click(buttons[buttons.length - 1]);
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("workflow.start",
       { bunker_id: "engineering", ticket: "ECS-4", name: "new-work", base: "release" }, "/work/coal"));
+  });
+
+  it("protects an actual ticket editor draft when returning to the ticket", async () => {
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "README.md line 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
+    const input = await screen.findByLabelText("Edit README.md");
+    fireEvent.change(input, { target: { value: "edited\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "← Ticket" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(input).toHaveValue("edited\n");
+    fireEvent.click(screen.getByRole("button", { name: "← Ticket" }));
+    const { within } = await import("@testing-library/react");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("editor.save", { path: "README.md", content: "edited\n", expected_digest: "old" }, "/work/coal"));
+    await waitFor(() => expect(screen.queryByLabelText("Edit README.md")).not.toBeInTheDocument());
+  });
+
+  it("reloads after a failed creation and offers an existing branch attachment", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((action, ...args) => action === "workflow.start"
+      ? Promise.reject(new Error("Branch exists locally. Sync and attach it.")) : original(action, ...args));
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create branch" }));
+    await screen.findByRole("option", { name: "release" });
+    fireEvent.change(screen.getByLabelText("Short description"), { target: { value: "work" } });
+    fireEvent.click(screen.getByText("Review branch"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Create branch" }).at(-1)!);
+    await screen.findByRole("alert");
+    expect(transport.command.mock.calls.filter(([name]) => name === "application.ticket.get").length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole("button", { name: "Create branch" }));
+    fireEvent.change(await screen.findByLabelText("Existing branch"), { target: { value: "ada/ECS-4-work" } });
+    fireEvent.click(screen.getByText("Attach branch"));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("workflow.attach", { bunker_id: bunker.id, ticket: ticket.id, branch: "ada/ECS-4-work" }, "/work/coal"));
+  });
+
+  it("fetches refs on open and supports an explicit retry without creating work", async () => {
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("truth.queue", { bunker_id: bunker.id, project: "ECS", ticket: ticket.id }, "/work/coal"));
+    fireEvent.click(screen.getByRole("button", { name: "Fetch branches" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("truth.queue", { bunker_id: bunker.id, project: "ECS", ticket: ticket.id, force: true }, "/work/coal"));
+    expect(transport.command.mock.calls.some(([name]) => ["truth.synthesize", "workflow.start"].includes(name))).toBe(false);
+  });
+
+  it("shows deterministic failures without an agent report", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((action, ...args) => action === "application.ticket.get" ? Promise.resolve({ ...detail,
+      checks: { source: "project", build: "", test: "check", timeout_seconds: 60 },
+      check_results: { branch: "ada/ECS-4-work", commit: "abcdef12", checked_at: "", stale: true,
+        results: [{ kind: "test", command: "check", passed: false, exit: 1, seconds: 0.1, log_text: "Assertion failed" }] },
+    }) : original(action, ...args));
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    expect(await screen.findByText("Test: Failed")).toBeInTheDocument();
+    expect(screen.getByText("Last checks · Out of date")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Test: Failed"));
+    expect(screen.getByText("Assertion failed")).toBeVisible();
   });
 });

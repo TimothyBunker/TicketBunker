@@ -12,6 +12,7 @@ import re
 import time
 import subprocess
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..contracts import StageContract, run_stage
@@ -570,6 +571,7 @@ def run_bootstrap(
         git(repo, ["worktree", "add", "--detach", str(worktree), check_branch], ledger, "check")
         outcomes: dict[str, dict] = {}
         try:
+            checked_commit = git(worktree, ["rev-parse", "HEAD"], ledger, "check").strip()
             for name, command_line in configured.items():
                 started = time.monotonic()
                 timed_out = False
@@ -613,7 +615,9 @@ def run_bootstrap(
             git_status(repo, ["worktree", "prune"], ledger, "check")
         result[check_branch] = outcomes
         _write_observation(
-            obs_dir, "check", {"configured": True, "branch": check_branch, "timeout_seconds": timeout, "per_branch": result}
+            obs_dir, "check", {"configured": True, "branch": check_branch, "commit": checked_commit,
+                               "checked_at": datetime.now(timezone.utc).isoformat(),
+                               "commands": configured, "timeout_seconds": timeout, "per_branch": result}
         )
         return result
 

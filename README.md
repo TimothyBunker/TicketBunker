@@ -433,6 +433,25 @@ Select source text and use **Ask about selection** to attach its guarded path,
 line range, and bounded text to the same coworker; unsaved selections are
 labeled as drafts.
 
+Leaving an edited source file asks **Save**, **Do not save**, or **Cancel**.
+Failed saves—including a file changed by another editor—keep your draft open.
+Browser tab close/reload uses the browser's own unsaved-changes warning.
+
+Configuration uses the same prompt for ticket fields, mappings, repositories
+and Checks. Drafts survive switching tabs and publishing another section.
+**Save** publishes changed settings to the Bunker; sections save separately.
+If one fails, its draft stays open and retry does not republish successful
+sections. Concurrent changes still require reconciliation, never an automatic
+overwrite of a teammate's settings.
+
+The ticket's Branches panel fetches remote refs on open and offers **Fetch
+branches** to retry; this never pulls or changes your checkout. If creating a
+branch succeeds locally but linking it to a shared ticket fails, the branch
+remains visible: sync the Bunker, then use **+ → Existing branch → Attach
+branch**. The Checks area shows actual results and logs separately from the
+agent's report. In browser mode, repository **Connect** accepts a path on the
+computer running TicketBunker when no native folder picker is available.
+
 `tb view` prefers the installed TicketBunker desktop app and releases the
 terminal immediately. The app loads the bundled interface and owns one private
 typed core session for its lifetime; no local web server sits between the native

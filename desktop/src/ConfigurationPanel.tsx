@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import TrackerConnections, { type Connection } from "./TrackerConnections";
 import { chooseGitDirectory, command } from "./transport";
 import { linkedBoards, trackerSummary, type Board, type Bunker, type ConfigurationState, type Integration, type Project, type Repository, type TicketField, type TrackerSource } from "./types";
@@ -19,6 +20,13 @@ function sameBoard(left: TrackerSource | Board, right: TrackerSource | Board) {
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
+
+type DraftKind = "ticket-fields" | "integrations" | "repositories" | "checks";
+function normalizedChecks(content: Partial<ChecksContent> = {}): ChecksContent {
+  return { build: String(content.build || ""), test: String(content.test || ""), timeout_seconds: Number(content.timeout_seconds) || 600, discover: Boolean(content.discover), tickets: clone(content.tickets || {}) };
+}
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const repositoryFields = (items: Repository[]) => items.map(({ id, name, canonical_remote, default_branch }) => ({ id, name, canonical_remote, default_branch }));
 
 export default function ConfigurationPanel({
   bunker,
@@ -41,6 +49,7 @@ export default function ConfigurationPanel({
   onConnected?: (trackers: Record<string, boolean>, connection: Connection, bunker?: Bunker) => void;
   onSync?: () => Promise<void>;
 }) {
+  const protect = useGuardedAction();
   const [state, setState] = useState<ConfigurationState | null>(null);
   const [fields, setFields] = useState<TicketField[]>([]);
   const [providers, setProviders] = useState<Record<string, Integration>>({});
@@ -49,7 +58,12 @@ export default function ConfigurationPanel({
   const [tab, setTab] = useState<ConfigurationTab>(initialTab || (project ? "board" : "trackers"));
   const [provider, setProvider] = useState("github");
   const [busy, setBusy] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const [checks, setChecks] = useState<ChecksContent>(EMPTY_CHECKS);
+  const baseline = useRef({ fields: [] as TicketField[], providers: {} as Record<string, Integration>, repositories: [] as Repository[], checks: EMPTY_CHECKS });
   const [connecting, setConnecting] = useState("");
+  const [pathRepository, setPathRepository] = useState<Repository | null>(null);
+  const [localPath, setLocalPath] = useState("");
   const [error, setError] = useState("");
   const [boards, setBoards] = useState<Board[] | null>(null);
   const [boardNotes, setBoardNotes] = useState<string[]>([]);
@@ -58,15 +72,40 @@ export default function ConfigurationPanel({
   const [choice, setChoice] = useState<Board | null>(null);
   const [linkSummary, setLinkSummary] = useState<string[]>([]);
   const githubConnected = Boolean(trackers?.github);
+  const drafts = useRef({ fields, providers, repositories, checks });
+  drafts.current = { fields, providers, repositories, checks };
 
-  function applyConfiguration(value: ConfigurationState) {
-    setState(value);
-    setFields(clone(value.documents["ticket-fields"]?.content.fields || []));
-    const next = clone(value.documents.integrations?.content.providers || {});
-    setProviders(next);
-    setRepositories(clone(value.repositories.items || []));
+  function applyConfiguration(value: ConfigurationState, saved?: DraftKind) {
+    const previous = baseline.current;
+    const keep = {
+      fields: saved !== "ticket-fields" && !same(drafts.current.fields, previous.fields),
+      providers: saved !== "integrations" && !same(drafts.current.providers, previous.providers),
+      repositories: saved !== "repositories" && !same(repositoryFields(drafts.current.repositories), repositoryFields(previous.repositories)),
+      checks: saved !== "checks" && !same(drafts.current.checks, previous.checks),
+    };
+    const next = {
+      fields: clone(value.documents["ticket-fields"]?.content.fields || []),
+      providers: clone(value.documents.integrations?.content.providers || {}),
+      repositories: clone(value.repositories.items || []),
+      checks: normalizedChecks(value.documents.checks?.content),
+    };
+    baseline.current = { fields: keep.fields ? previous.fields : next.fields, providers: keep.providers ? previous.providers : next.providers,
+      repositories: keep.repositories ? previous.repositories : next.repositories, checks: keep.checks ? previous.checks : next.checks };
+    // Preserve each dirty section's original expected revision too. Receiving a
+    // newer snapshot is not permission to overwrite someone else's changes.
+    setState((current) => {
+      const documents = { ...value.documents };
+      for (const [kind, retained] of [["ticket-fields", keep.fields], ["integrations", keep.providers], ["checks", keep.checks]] as const) {
+        if (retained) Object.assign(documents, { [kind]: current?.documents[kind] });
+      }
+      return { ...value, documents, repositories: keep.repositories && current ? current.repositories : value.repositories };
+    });
+    setFields((current) => keep.fields ? current : next.fields);
+    setProviders((current) => keep.providers ? current : next.providers);
+    setRepositories((current) => keep.repositories ? current : next.repositories);
+    setChecks((current) => keep.checks ? current : next.checks);
     setTracker(clone(value.documents["tracker-source"]?.content || EMPTY_TRACKER));
-    setProvider((current) => current in next ? current : Object.keys(next)[0] || "");
+    setProvider((current) => current in next.providers || keep.providers ? current : Object.keys(next.providers)[0] || "");
   }
 
   useEffect(() => {
@@ -100,14 +139,33 @@ export default function ConfigurationPanel({
   const canWrite = Boolean(state?.permission.can_write);
   const linked = state ? linkedBoards(state.documents) : [];
   const checksDocument = state?.documents.checks as { revision: string; content: Partial<ChecksContent> } | undefined;
-  const [checks, setChecks] = useState<ChecksContent>(EMPTY_CHECKS);
   const [suggestions, setSuggestions] = useState<CheckSuggestion[] | null>(null);
   const [agentSuggestion, setAgentSuggestion] = useState<{ build: string; test: string; reason: string } | null>(null);
   const [asking, setAsking] = useState(false);
-  useEffect(() => {
-    const content = checksDocument?.content || {};
-    setChecks({ build: String(content.build || ""), test: String(content.test || ""), timeout_seconds: Number(content.timeout_seconds) || 600, discover: Boolean(content.discover), tickets: { ...(content.tickets || {}) } });
-  }, [checksDocument?.revision, project?.id]);
+  const dirty = {
+    "ticket-fields": !same(fields, baseline.current.fields),
+    integrations: !same(providers, baseline.current.providers),
+    repositories: !same(repositoryFields(repositories), repositoryFields(baseline.current.repositories)),
+    checks: !same(checks, baseline.current.checks),
+  };
+  const hasDraft = Boolean(state && Object.values(dirty).some(Boolean));
+  function discardDrafts() {
+    setFields(clone(baseline.current.fields)); setProviders(clone(baseline.current.providers));
+    setRepositories(clone(baseline.current.repositories)); setChecks(clone(baseline.current.checks));
+  }
+  async function saveDrafts(): Promise<boolean | string> {
+    setSavingAll(true);
+    try {
+      for (const kind of ["ticket-fields", "integrations", "repositories", "checks"] as DraftKind[]) {
+        if (!dirty[kind]) continue;
+        const result = kind === "checks" ? await publishChecks() : kind === "repositories" ? await publishRepositories() : await publish(kind);
+        if (result !== true) return result || "Configuration was not published.";
+      }
+      return true;
+    } finally { setSavingAll(false); }
+  }
+  useUnsavedEditor({ dirty: hasDraft, busy: busy || savingAll || Boolean(connecting) || asking, save: saveDrafts, discard: discardDrafts,
+    description: `Save publishes these settings to ${bunker.remote ? "the shared" : "this local"} Bunker.${Object.values(dirty).filter(Boolean).length > 1 ? " Sections save separately; a later failure does not undo earlier saves." : ""}` });
 
   async function askAgentForChecks() {
     setAsking(true);
@@ -147,10 +205,12 @@ export default function ConfigurationPanel({
         expected_revision: checksDocument?.revision || "",
         content: checks,
       });
-      applyConfiguration(value);
+      applyConfiguration(value, "checks");
       notify("Checks published");
+      return true;
     } catch (reason) {
       setError(String(reason));
+      return String(reason);
     } finally {
       setBusy(false);
     }
@@ -160,7 +220,11 @@ export default function ConfigurationPanel({
 
   async function publish(kind: "ticket-fields" | "integrations") {
     const document = state?.documents[kind];
-    if (!document) return setError("This configuration is not available in the current snapshot.");
+    if (!document) {
+      const message = "This configuration is not available in the current snapshot. Reopen Configuration and retry.";
+      setError(message);
+      return message;
+    }
     setBusy(true);
     setError("");
     try {
@@ -171,10 +235,12 @@ export default function ConfigurationPanel({
         expected_revision: document.revision,
         content: kind === "ticket-fields" ? { fields } : { providers },
       });
-      applyConfiguration(value);
+      applyConfiguration(value, kind);
       notify(kind === "ticket-fields" ? "Ticket fields published" : "Integration mappings published");
+      return true;
     } catch (reason) {
       setError(String(reason));
+      return String(reason);
     } finally {
       setBusy(false);
     }
@@ -242,11 +308,13 @@ export default function ConfigurationPanel({
           default_branch,
         })),
       });
-      applyConfiguration(value.configuration);
+      applyConfiguration(value.configuration, "repositories");
       onBunker(value.bunker);
       notify("Project repositories published");
+      return true;
     } catch (reason) {
       setError(String(reason));
+      return String(reason);
     } finally {
       setBusy(false);
     }
@@ -256,12 +324,18 @@ export default function ConfigurationPanel({
     setRepositories((values) => values.map((value, item) => item === index ? { ...value, ...patch } : value));
   }
 
-  async function connectRepository(repository: Repository) {
+  async function connectRepository(repository: Repository, suppliedPath?: string) {
     if (!project || !repository.id) return;
     setError("");
     try {
-      const path = await chooseGitDirectory();
-      if (!path) return;
+      const path = suppliedPath ?? await chooseGitDirectory();
+      if (!path) {
+        if (!window.__TAURI__?.dialog) {
+          setPathRepository(repository);
+          setLocalPath(repository.local_path || "");
+        }
+        return;
+      }
       setConnecting(repository.id);
       const value = await command<{ bunker: Bunker }>("application.bunker.repository.attach", {
         bunker_id: bunker.id,
@@ -276,6 +350,7 @@ export default function ConfigurationPanel({
       applyConfiguration(configuration);
       onBunker(value.bunker);
       notify("Repository connected and fetched");
+      setPathRepository(null);
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -342,8 +417,9 @@ export default function ConfigurationPanel({
     <aside className="configuration-drawer" aria-label="Configuration">
       <header>
         <div><p className="eyebrow">{project ? `${project.key} · pinned project setup` : "Bunker defaults · new projects"}</p><h2>Configuration</h2></div>
-        <button className="icon-control" onClick={onClose} aria-label="Back">←</button>
+        <button className="icon-control" onClick={() => protect(onClose)} aria-label="Back">←</button>
       </header>
+      <fieldset className="configuration-fields" disabled={busy || savingAll || Boolean(connecting)}>
       <nav>
         {project && <button className={tab === "board" ? "selected" : ""} onClick={() => setTab("board")}>Boards</button>}
         {project && <button className={tab === "repositories" ? "selected" : ""} onClick={() => setTab("repositories")}>Repositories</button>}
@@ -455,6 +531,11 @@ export default function ConfigurationPanel({
           </div>)}
           {repositories.length === 0 && <div className="repository-empty">No repositories allowed</div>}
         </div>
+        {pathRepository && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); void connectRepository(pathRepository, localPath.trim()); }}>
+          <label>Local repository path<input autoFocus value={localPath} onChange={(event) => setLocalPath(event.target.value)} required /></label>
+          <p>Path to {pathRepository.name} on the computer running TicketBunker.</p>
+          <div><button type="button" disabled={Boolean(connecting)} onClick={() => setPathRepository(null)}>Cancel</button><button className="primary" disabled={Boolean(connecting) || !localPath.trim()}>Connect repository</button></div>
+        </form>}
         <button disabled={!canWrite} onClick={() => setRepositories((values) => [...values, { id: "", project_id: project.id, name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>
       </section>}
 
@@ -506,6 +587,7 @@ export default function ConfigurationPanel({
           <div className="integration-actions"><button disabled={!canWrite} onClick={() => updateProvider({ fields: { ...selected.fields, [fields.find((field) => !selected.fields[field.key])?.key || ""]: "" } })}>+ Add mapping</button>{selected.template === "custom" && <button className="danger-control" disabled={!canWrite} onClick={() => { const values = { ...providers }; delete values[provider]; setProviders(values); setProvider(Object.keys(values)[0] || ""); }}>Remove integration</button>}</div>
         </>}
       </section>}
+      </fieldset>
     </aside>
   );
 }

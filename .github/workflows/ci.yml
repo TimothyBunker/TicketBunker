@@ -98,3 +98,5 @@ jobs:
             sleep 1
           done
           npm run test:e2e --prefix desktop
+      - name: Verify unsaved drafts and default-ticket workflow in a disposable project
+        run: npm run test:hardening --prefix desktop

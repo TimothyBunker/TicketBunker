@@ -56,6 +56,7 @@ describe("Bunker and Project boundaries", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    transport.chooseGitDirectory.mockReset();
     transport.command.mockReset();
     transport.command.mockImplementation((action: string) => {
       if (action === "application.ticket.list") {
@@ -67,6 +68,56 @@ describe("Bunker and Project boundaries", () => {
       if (action === "application.bunker.configuration.get") return Promise.resolve(configuration);
       throw new Error(`Unexpected command ${action}`);
     });
+  });
+
+  it("offers a manual local path when no native picker exists", async () => {
+    transport.chooseGitDirectory.mockResolvedValue(null);
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, ...args) => name === "application.bunker.repository.attach" ? Promise.resolve({ bunker }) : original(name, ...args));
+    render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    fireEvent.change(await screen.findByLabelText("Local repository path"), { target: { value: "/work/coal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", { bunker_id: bunker.id, project_id: project.id, binding_id: "coal", path: "/work/coal" }));
+  });
+
+  it("clears search and filters in one click", async () => {
+    render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Search tickets"), { target: { value: "absent" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "all" } });
+    fireEvent.click(screen.getByText("Clear filters"));
+    expect(screen.getByLabelText("Search tickets")).toHaveValue("");
+    expect(screen.getByLabelText("Status")).toHaveValue("active");
+    await waitFor(() => expect(transport.command).toHaveBeenLastCalledWith("application.ticket.list", expect.objectContaining({ search: "", status: "active", page: 1 })));
+  });
+
+  it("guards sidebar navigation while configuration contains a draft", async () => {
+    const select = vi.fn();
+    render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={select} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Checks" }));
+    fireEvent.change(screen.getByLabelText("Build command"), { target: { value: "make navigation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Bunkers" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Do not save"));
+    expect(select).toHaveBeenCalledWith(null);
+    expect(screen.queryByRole("heading", { name: "Configuration" })).not.toBeInTheDocument();
+  });
+
+  it("keeps failed sync visible until an explicit retry succeeds", async () => {
+    const shared = { ...bunker, id: "offline-qa", mode: "remote" as const,
+      remote: { server_url: "https://tickets.example.test", remote_bunker_id: "offline-qa", state: "ready", last_synced_at: "2026-09-01T00:00:00Z" } };
+    transport.command.mockRejectedValue(new Error("Service unavailable. Retry sync."));
+    const { container } = render(<BunkerHub state={{ ...state, bunkers: [shared] }} selection={{ bunkerId: shared.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sync failed");
+    expect(container.querySelector(".bunker-meta .failed")).toBeInTheDocument();
+    transport.command.mockResolvedValue({ sync: { tickets: 3, reports: 0 }, bunkers: [shared] });
+    fireEvent.click(screen.getByRole("button", { name: "Retry sync" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(container.querySelector(".bunker-meta .ready")).toBeInTheDocument();
   });
 
   it("keeps sharing controls at Bunker level", () => {

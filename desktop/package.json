@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:e2e": "node tests/standalone.e2e.mjs",
+    "test:hardening": "node tests/hardening.e2e.mjs",
     "tauri": "tauri",
     "check": "npm run build && npm run test && cargo check --manifest-path src-tauri/Cargo.toml",
     "build:debug": "cargo build --manifest-path src-tauri/Cargo.toml"

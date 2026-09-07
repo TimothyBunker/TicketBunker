@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import BunkerHub from "./BunkerHub";
 import TicketWorkspace from "./TicketWorkspace";
 import TrackerConnections from "./TrackerConnections";
+import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal, OFFLINE_MESSAGE } from "./transport";
 import type { AppState, SourceDraft, TicketReference } from "./types";
 
@@ -69,6 +70,8 @@ function DirectEditor({
   const [digest, setDigest] = useState(draft.digest);
   const [saved, setSaved] = useState(draft.content);
   const [busy, setBusy] = useState(false);
+  const protect = useGuardedAction();
+  useUnsavedEditor({ dirty: content !== saved, busy, save, discard: () => setContent(saved) });
   async function save() {
     setBusy(true);
     try {
@@ -77,16 +80,18 @@ function DirectEditor({
       setSaved(result.content);
       setDigest(result.digest);
       notify(result.saved ? `Saved ${draft.path}` : `${draft.path} is unchanged`);
+      return true;
     } catch (reason) {
       notify(String(reason), true);
+      return String(reason);
     } finally {
       setBusy(false);
     }
   }
   return (
     <main className="direct-editor">
-      <header><div className="brand"><span className="brand-mark">TB</span><span>TicketBunker</span></div><button className="back-control" onClick={onBack}>← Bunkers</button><div><strong>{draft.path}</strong><small>{draft.branch || projectRoot}</small></div><button className="primary" disabled={busy || content === saved} onClick={save}>Save</button></header>
-      <textarea value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} wrap={draft.settings.line_wrap ? "soft" : "off"} style={{ tabSize: draft.settings.tab_size || 4 }} autoFocus />
+      <header><div className="brand"><span className="brand-mark">TB</span><span>TicketBunker</span></div><button className="back-control" onClick={() => protect(onBack)}>← Bunkers</button><div><strong>{draft.path}</strong><small>{draft.branch || projectRoot}{content !== saved ? " · Unsaved changes" : ""}</small></div><button className="primary" disabled={busy || content === saved} onClick={save}>Save</button></header>
+      <textarea aria-label={`Edit ${draft.path}`} disabled={busy} value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} wrap={draft.settings.line_wrap ? "soft" : "off"} style={{ tabSize: draft.settings.tab_size || 4 }} autoFocus />
     </main>
   );
 }
@@ -323,6 +328,11 @@ function Settings({
 }
 
 export default function App() {
+  return <UnsavedChangesBoundary><AppContent /></UnsavedChangesBoundary>;
+}
+
+function AppContent() {
+  const protect = useGuardedAction();
   const [state, setState] = useState<AppState | null>(null);
   const [failure, setFailure] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
@@ -332,11 +342,14 @@ export default function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [offline, setOffline] = useState(false);
   const handledLaunch = useRef("");
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const notify = useCallback((message: string, error = false) => {
+    window.clearTimeout(noticeTimer.current);
     setNotice({ message, error });
-    window.setTimeout(() => setNotice(null), 5000);
+    if (!error) noticeTimer.current = window.setTimeout(() => setNotice(null), 5000);
   }, []);
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
 
   useEffect(() => {
     const listener = (event: Event) => setOffline(Boolean((event as CustomEvent<{ offline: boolean }>).detail?.offline));
@@ -386,9 +399,9 @@ export default function App() {
   }, [state?.launch?.repository, state?.launch?.route, openLaunch]);
   useEffect(() => {
     let stop: () => void = () => undefined;
-    listenNative<{ path: string; route?: string }>("open-project", (value) => openLaunch(value.path, value.route)).then((value) => { stop = value; });
+    listenNative<{ path: string; route?: string }>("open-project", (value) => protect(() => { void openLaunch(value.path, value.route); })).then((value) => { stop = value; });
     return () => stop();
-  }, [openLaunch]);
+  }, [openLaunch, protect]);
   useEffect(() => {
     if (state?.profile.complete && !state.agent.decided) setSettings(true);
   }, [state?.profile.complete, state?.agent.decided]);
@@ -411,11 +424,11 @@ export default function App() {
   if (!state.profile.complete) return <ProfileSetup state={state} onState={setState} />;
   return (
     <>
-      {directEditor ? <DirectEditor projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} /> : <BunkerHub state={state} selection={selection} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} />}
+      {directEditor ? <DirectEditor key={`${directEditor.root}:${directEditor.draft.path}:${directEditor.draft.digest}`} projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} /> : <BunkerHub state={state} selection={selection} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} />}
       {settings && <Settings state={state} onState={setState} onClose={() => setSettings(false)} initialTab={!state.agent.decided ? "agent" : "local"} />}
       {offline && <div className="service-banner" role="alert"><span>{OFFLINE_MESSAGE}</span><button onClick={() => window.location.reload()}>Reload</button></div>}
       {!offline && state.release?.current && state.release.current !== __TB_UI_VERSION__ && <div className="service-banner" role="alert"><span>This interface is version {__TB_UI_VERSION__} but the TicketBunker core it is talking to is {state.release.current}. Restart TicketBunker so both match.</span><button onClick={() => window.location.reload()}>Reload</button></div>}
-      {notice && <div className={notice.error ? "toast error" : "toast"} role="status">{notice.message}</div>}
+      {notice && <div className={notice.error ? "toast error" : "toast"} role={notice.error ? "alert" : "status"}><span>{notice.message}</span>{notice.error && <button aria-label="Dismiss message" onClick={() => setNotice(null)}>Dismiss</button>}</div>}
     </>
   );
 }

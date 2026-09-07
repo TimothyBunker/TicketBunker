@@ -1,0 +1,115 @@
+// A real local worker, SQLite database and disposable Git checkout. DOM-only
+// product interactions; no real tracker, model account or user repository.
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { delimiter } from 'node:path';
+import { chromium, expect } from '@playwright/test';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const fixture = spawn(process.env.PYTHON || 'python', ['tests/ui_hardening_fixture.py'], {
+  cwd: root, env: { ...process.env, PYTHONPATH: `${root}${delimiter}${root}/tests`, TB_AGENT_DISABLE: '1' }, stdio: ['pipe', 'pipe', 'inherit'],
+});
+const lines = createInterface({ input: fixture.stdout });
+const lab = await new Promise((resolve, reject) => {
+  lines.once('line', (line) => { try { resolve(JSON.parse(line)); } catch (error) { reject(error); } });
+  fixture.once('exit', (code) => reject(new Error(`Fixture exited ${code}`)));
+});
+const browser = await chromium.launch({ executablePath: process.env.TB_E2E_CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : chromium.executablePath()), headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
+const errors = [];
+page.on('pageerror', (error) => errors.push(error.message));
+try {
+  await page.goto(lab.url);
+  const without = page.getByRole('button', { name: 'Use without agent', exact: true });
+  await without.click();
+  // An undecided agent can appear in settings over the Bunker page.
+  const closeSettings = page.getByRole('button', { name: 'Close settings' });
+  if (await closeSettings.isVisible()) await closeSettings.click();
+  await page.getByRole('button', { name: 'Bunkers', exact: true }).click();
+  await page.locator('.bunker-overview > button').first().click();
+  await page.locator('.project-row').first().click();
+  await page.getByRole('button', { name: 'Configure', exact: true }).click();
+  await page.getByRole('button', { name: 'Checks', exact: true }).click();
+  const buildCommand = page.getByLabel('Build command', { exact: true });
+  await buildCommand.fill('make navigation');
+  await page.getByRole('button', { name: 'Repositories', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish repositories', exact: true }).click();
+  await page.getByRole('button', { name: 'Checks', exact: true }).click();
+  await expect(buildCommand).toHaveValue('make navigation');
+  // The drawer leaves part of the ticket list visible; that route is guarded too.
+  await page.locator('.ticket-row').first().click({ position: { x: 20, y: 15 } });
+  await page.getByRole('dialog', { name: 'You have unsaved changes' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(buildCommand).toHaveValue('make navigation');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  const configDialog = page.getByRole('dialog', { name: 'You have unsaved changes' });
+  await expect(configDialog).toContainText('Save publishes these settings');
+  await page.screenshot({ path: '/tmp/ticketbunker-unsaved-configuration.png' });
+  await configDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(buildCommand).toHaveValue('make navigation');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await configDialog.getByRole('button', { name: 'Do not save', exact: true }).click();
+  await page.getByRole('button', { name: 'Configure', exact: true }).click();
+  await page.getByRole('button', { name: 'Checks', exact: true }).click();
+  await expect(buildCommand).toHaveValue('');
+  await page.getByLabel('Test command', { exact: true }).fill('python -m unittest');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await configDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(configDialog).not.toBeVisible();
+  await page.getByRole('button', { name: 'Configure', exact: true }).click();
+  await page.getByRole('button', { name: 'Checks', exact: true }).click();
+  await expect(page.getByLabel('Test command', { exact: true })).toHaveValue('python -m unittest');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByLabel('Search tickets').fill('absent');
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  await page.locator('.ticket-row').first().click();
+  await page.getByRole('button', { name: 'Create branch', exact: true }).click();
+  await page.getByLabel('Short description').fill('default-type');
+  await page.getByRole('button', { name: 'Review branch' }).click();
+  await page.locator('.confirmation').getByRole('button', { name: 'Create branch', exact: true }).click();
+  await expect(page.locator('.branch-item')).toContainText('qa/ECS-4-default-type');
+  await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
+  const editor = page.getByLabel('Edit README.md');
+  const original = await editor.inputValue();
+  await editor.fill('discard this draft\n');
+  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'You have unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await page.screenshot({ path: '/tmp/ticketbunker-unsaved-changes.png' });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toHaveValue('discard this draft\n');
+  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Do not save' }).click();
+  if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== original) throw new Error('Discard changed the file');
+  await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
+  await editor.fill('retain this conflicting draft\n');
+  // Simulate another editor changing this disposable fixture after it opened.
+  writeFileSync(`${lab.repo}/README.md`, 'changed by another editor\n');
+  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Your draft is still open');
+  await expect(editor).toHaveValue('retain this conflicting draft\n');
+  if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== 'changed by another editor\n') throw new Error('Conflicting save overwrote newer work');
+  await dialog.getByRole('button', { name: 'Do not save' }).click();
+  await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
+  await editor.fill('saved through confirmation\n');
+  await page.getByRole('button', { name: '← Tickets', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByLabel('Search tickets')).toBeVisible();
+  if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== 'saved through confirmation\n') throw new Error('Save did not reach disk');
+  if (errors.length) throw new Error(errors.join('\n'));
+  console.log('PASS real-browser configuration draft preservation and cancel/discard/save, default type, branch creation, clear filters, unsaved file cancel/discard/save, external-edit conflict');
+} catch (error) {
+  await page.screenshot({ path: '/tmp/ticketbunker-hardening-failure.png' });
+  console.error(await page.locator('body').innerText());
+  console.error(errors);
+  throw error;
+} finally {
+  await browser.close();
+  fixture.stdin.end('\n');
+  await new Promise((resolve) => fixture.once('exit', resolve));
+  lines.close();
+}

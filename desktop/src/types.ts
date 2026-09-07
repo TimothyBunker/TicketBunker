@@ -148,6 +148,8 @@ export type TicketDetail = {
   ticket: TicketReference & Record<string, unknown>;
   project: Project;
   checks?: EffectiveChecks;
+  check_results?: { branch: string; commit: string; checked_at: string; stale: boolean | null;
+    results: Array<{ kind: string; command: string; passed: boolean; exit: number | null; timed_out: boolean; seconds: number; first_error: string; log_text: string }> };
   repositories: Repository[];
   branches: Array<{
     name: string;
