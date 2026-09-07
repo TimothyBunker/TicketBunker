@@ -154,4 +154,5 @@ jobs:
           case "${GITHUB_REF_NAME}" in
             *-*) flags+=(--prerelease) ;;
           esac
-          gh release create "${GITHUB_REF_NAME}" release-assets/* "${flags[@]}"
+          # This artifact-only job has no checkout from which gh can infer a repo.
+          gh release create "${GITHUB_REF_NAME}" release-assets/* --repo "${GITHUB_REPOSITORY}" "${flags[@]}"

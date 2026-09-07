@@ -4,14 +4,46 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+@unittest.skipUnless(shutil.which("bash"), "Release publication runs in Bash on Ubuntu")
+class ReleasePublicationTests(unittest.TestCase):
+    def test_artifact_only_publication_names_repository_and_preserves_tag_flags(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        publish = workflow.split("      - name: Publish GitHub release\n", 1)[1]
+        script = textwrap.dedent(publish.split("        run: |\n", 1)[1])
+        # Execute the actual workflow shell in a directory without a checkout.
+        # The fake CLI records arguments only; no release or network request occurs.
+        with tempfile.TemporaryDirectory() as temporary:
+            for tag, prerelease in (("v0.6.0", False), ("v0.6.0-rc1", True)):
+                with self.subTest(tag=tag):
+                    result = subprocess.run(
+                        [shutil.which("bash"), "--noprofile", "--norc", "-e", "-c",
+                         "gh() { printf '%s\\n' \"$@\"; }\n" + script],
+                        cwd=temporary,
+                        env={**os.environ, "GITHUB_REPOSITORY": "example/ticketbunker",
+                             "GITHUB_REF_NAME": tag, "GH_TOKEN": "test-only"},
+                        capture_output=True, text=True, check=True,
+                    )
+                    args = result.stdout.splitlines()
+                    self.assertEqual(args[:3], ["release", "create", tag])
+                    self.assertIn("--repo", args)
+                    self.assertEqual(args[args.index("--repo") + 1], "example/ticketbunker")
+                    self.assertIn("--generate-notes", args)
+                    self.assertIn("--verify-tag", args)
+                    self.assertEqual("--prerelease" in args, prerelease)
 
 
 def load_builder():

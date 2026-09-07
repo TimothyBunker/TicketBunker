@@ -1554,6 +1554,9 @@ also stages `tb` under Tauri's target-triple sidecar name and refuses to proceed
 the frozen core or declared Pi executable is missing. Each native installer is
 copied into the flat release-asset directory with an adjacent SHA-256 file, so
 publishing does not depend on a build runner's nested Tauri directories.
+The artifact-only publication job names `GITHUB_REPOSITORY` explicitly with
+`gh release create --repo`; it does not depend on a Git checkout from another
+job. Publication retains remote tag verification and pre-release classification.
 Updating the Pi pin is an explicit, tested TicketBunker release change, never
 an ambient npm update. Cross-platform release tooling resolves build commands to
 their concrete executable before launching them without a shell; this includes
