@@ -15,6 +15,10 @@ Candidate rc1 caught a first-click branch-panel reset race and a Windows
 fixture cleanup race after successful collaboration checks. The panel now
 resets before paint; the fixture bounds retries for Windows sharing violations
 while its finished worker closes the log. Other cleanup errors still fail.
+The rc1 Windows core run also exceeded a five-second test-only completion
+budget after releasing the repository lock. The branch's follow-up test gives
+real Git work thirty seconds, preserving its exclusion assertion. This changes
+no shipped runtime behavior and is not a reason to rebuild a green rc2 binary.
 
 Changes since the 0.6.1-rc3 installer below:
 

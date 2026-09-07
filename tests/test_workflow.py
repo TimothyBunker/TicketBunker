@@ -260,7 +260,7 @@ class TicketWorkflowTests(unittest.TestCase):
         def held_refresh(root: Path, _ledger: object) -> tuple[bool, str]:
             with repository_lock(root):
                 refresh_entered.set()
-                release_refresh.wait(timeout=5)
+                release_refresh.wait(timeout=30)
                 return True, ""
 
         server = viewer.serve(self.source, 0)
@@ -312,7 +312,9 @@ class TicketWorkflowTests(unittest.TestCase):
                 time.sleep(0.1)
                 self.assertFalse(request_finished.is_set())
                 release_refresh.set()
-                self.assertTrue(request_finished.wait(timeout=5))
+                # The exclusion assertion above is the contract. Once released,
+                # real Git subprocesses can exceed five seconds on Windows CI.
+                self.assertTrue(request_finished.wait(timeout=30))
                 deadline = time.monotonic() + 10
                 while (
                     viewer.truth.state(self.source, "ECS", "ECS-4").get("refresh")
