@@ -1,5 +1,7 @@
 import { chromium } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const url = process.env.TB_E2E_URL || "http://127.0.0.1:18777";
 const systemChrome = "/usr/bin/google-chrome";
@@ -31,7 +33,7 @@ try {
   await page.getByRole("heading", { name: "Bunkers", exact: true }).waitFor();
   await page.locator(".profile-control").click();
   await page.getByRole("button", { name: "System", exact: true }).click();
-  await page.getByText("0.6.0", { exact: true }).waitFor();
+  await page.getByText(version, { exact: true }).waitFor();
   await page.getByRole("button", { name: "Check now", exact: true }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-system.png"), fullPage: true });
   await page.getByRole("button", { name: "Close settings" }).click();
