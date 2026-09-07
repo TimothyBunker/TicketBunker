@@ -31,6 +31,7 @@ def isolated_environment(area: Path) -> dict[str, str]:
     keys = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL")
     env = {key: os.environ[key] for key in keys if key in os.environ}
     env.update(PYTHONPATH=str(ROOT), TB_DATA_HOME=str(area / "data"),
+               USERPROFILE=str(area.resolve()),
                TB_CONFIG=str(area / "settings.json"), GIT_CONFIG_GLOBAL=os.devnull,
                GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
                TB_AGENT_HARNESS="command",

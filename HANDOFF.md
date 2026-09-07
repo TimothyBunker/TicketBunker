@@ -15,6 +15,9 @@ available. The historical validation notes below predate release preparation.
 Candidate rc1 passed Linux CI but its macOS release job found an audit-harness
 path assertion comparing /var with /private/var; directory identity comparison
 now handles canonical paths. No product path/authentication rule was relaxed.
+Windows also exposed the harness's stripped USERPROFILE, which prevented
+Python home-directory resolution; the fixture now supplies a disposable profile
+and has a regression assertion. It does not inherit the developer's profile.
 
 Follow-up: configuration now uses the unsaved guard for fields, mappings,
 repositories and Checks, including sidebar navigation and opening a ticket

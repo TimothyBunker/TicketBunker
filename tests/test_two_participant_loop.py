@@ -8,11 +8,23 @@ import unittest
 import test_bunkerruntime as runtime_tests
 from ticketbunker import bunkerdb, bunkerruntime, layout
 import json
+import importlib.util
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class IsolatedParticipantTests(unittest.TestCase):
+    def test_sanitized_environment_has_a_disposable_windows_profile(self):
+        spec = importlib.util.spec_from_file_location("two_participant_loop", ROOT / "tools/two_participant_loop.py")
+        loop = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loop)
+        with tempfile.TemporaryDirectory() as temporary:
+            area = Path(temporary) / "participant"
+            env = loop.isolated_environment(area)
+            self.assertEqual(env["USERPROFILE"], str(area.resolve()))
+            self.assertEqual(env["TB_CONFIG"], str(area / "settings.json"))
+
     def test_two_participants_share_work_without_sharing_local_state(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools/two_participant_loop.py")],
