@@ -26,6 +26,9 @@ worktrees now use a short owned OS temporary directory through layout.py;
 observations/logs remain in the ticket runtime, with cleanup assertions. A
 path-triggered portability workflow exercises the two-user/locking fixtures on
 Windows and macOS without repeatedly compiling installers.
+The Windows dummy client now decodes the worker's UTF-8 protocol explicitly;
+its former locale-default decoding corrupted punctuation in the comparison,
+while the seeded report retained the correct Unicode text.
 
 Follow-up: configuration now uses the unsaved guard for fields, mappings,
 repositories and Checks, including sidebar navigation and opening a ticket

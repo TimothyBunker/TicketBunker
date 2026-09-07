@@ -31,7 +31,7 @@ def isolated_environment(area: Path) -> dict[str, str]:
     # credentials/config, proxy settings, or Python startup configuration.
     keys = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "LANG", "LC_ALL")
     env = {key: os.environ[key] for key in keys if key in os.environ}
-    env.update(PYTHONPATH=str(ROOT), TB_DATA_HOME=str(area / "data"),
+    env.update(PYTHONPATH=str(ROOT), PYTHONIOENCODING="utf-8", TB_DATA_HOME=str(area / "data"),
                USERPROFILE=str(area.resolve()),
                TB_CONFIG=str(area / "settings.json"), GIT_CONFIG_GLOBAL=os.devnull,
                GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
@@ -62,7 +62,7 @@ class Participant:
 
     def run(self, args, *, source="", cwd=None):
         return subprocess.run(args, cwd=cwd or self.repo, env=self.env,
-                              input=source, capture_output=True, text=True, timeout=60)
+                              input=source, capture_output=True, text=True, encoding="utf-8", timeout=60)
 
     def git(self, *args, cwd=None):
         result = self.run(["git", *args], cwd=cwd)

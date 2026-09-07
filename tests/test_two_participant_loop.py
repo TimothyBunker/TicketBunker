@@ -24,12 +24,13 @@ class IsolatedParticipantTests(unittest.TestCase):
             env = loop.isolated_environment(area)
             self.assertEqual(env["USERPROFILE"], str(area.resolve()))
             self.assertEqual(env["TB_CONFIG"], str(area / "settings.json"))
+            self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
 
     def test_two_participants_share_work_without_sharing_local_state(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools/two_participant_loop.py")],
-            cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT)},
-            capture_output=True, text=True, timeout=180,
+            cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"},
+            capture_output=True, text=True, encoding="utf-8", timeout=180,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS 17 isolated-participant checks", result.stdout)
