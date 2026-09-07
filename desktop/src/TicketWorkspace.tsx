@@ -574,7 +574,9 @@ function TicketRail({
       .catch((reason) => { if (!cancelled) setBaseError(String(reason)); });
     return () => { cancelled = true; };
   }, [creating, repoRoot, bunkerId, detail.ticket.id]);
-  useEffect(() => { setCreating(false); setCandidate(null); setWorkError(""); setAttachment(""); }, [repositoryId]);
+  // Reset before the new repository becomes interactive, not after a user
+  // has already opened its branch form on a fast first click.
+  useLayoutEffect(() => { setCreating(false); setCandidate(null); setWorkError(""); setAttachment(""); }, [repositoryId]);
   const synthesis = (detail.truth?.synthesis || {}) as Record<string, unknown>;
   const gitState = (detail.truth?.git || {}) as Record<string, unknown>;
   const ticket = detail.ticket;

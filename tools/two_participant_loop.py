@@ -268,6 +268,24 @@ def exercise(root: Path) -> list[str]:
         thread.join(timeout=5)
 
 
+def cleanup_temporary(temporary, *, timeout=5.0):
+    """Wait for exiting Windows workers to release this fixture's log handles.
+
+    Only a sharing violation is transient. Do not hide permission failures or
+    leave test directories behind, and never broaden cleanup beyond the owned
+    TemporaryDirectory.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            temporary.cleanup()
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) != 32 or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep", action="store_true", help="retain dummy work areas after stopping the service")
@@ -277,8 +295,11 @@ def main():
         print(f"Dummy work areas: {root}", flush=True)
         passed = exercise(root)
     else:
-        with tempfile.TemporaryDirectory(prefix="ticketbunker-two-users-") as temporary:
-            passed = exercise(Path(temporary))
+        temporary = tempfile.TemporaryDirectory(prefix="ticketbunker-two-users-")
+        try:
+            passed = exercise(Path(temporary.name))
+        finally:
+            cleanup_temporary(temporary)
     print(f"PASS {len(passed)} isolated-participant checks; service stopped; no live providers used.")
 
 

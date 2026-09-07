@@ -7,10 +7,14 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 ## Bunker repository setup and automatic board sync (2026-09-07)
 
 Installer preparation: app/runtime/native versions are now **0.6.2**; the
-candidate tag is **v0.6.2-rc1**. This includes `b8ef3a5`, whose branch CI passed.
+candidate tag is **v0.6.2-rc2**. This includes `b8ef3a5`, whose branch CI passed.
 The release workflow builds Windows x64, Linux x64, and macOS Apple Silicon.
 Windows remains an unsigned prerelease. Verify the new tag's workflow and
 uploaded assets before claiming these installers are published.
+Candidate rc1 caught a first-click branch-panel reset race and a Windows
+fixture cleanup race after successful collaboration checks. The panel now
+resets before paint; the fixture bounds retries for Windows sharing violations
+while its finished worker closes the log. Other cleanup errors still fail.
 
 Changes since the 0.6.1-rc3 installer below:
 

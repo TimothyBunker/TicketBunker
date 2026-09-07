@@ -1413,6 +1413,9 @@ branch assignment. Nobody hand-types the convention, so nobody gets it wrong —
 the pattern is enforced by construction at the same place the branch is born.
 Failure messages name the state that stopped Git and what the user must do next;
 no reset, forced checkout, auto-stash, or non-fast-forward merge occurs.
+The ticket rail resets repository-specific branch drafts before the selected
+repository becomes interactive, so its first click cannot be undone by a
+deferred setup effect.
 
 The ticket is validated against runtime intake **before** changing Git. Missing
 types default to `task`; recognized tracker display labels are normalized only

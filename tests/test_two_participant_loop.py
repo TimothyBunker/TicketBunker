@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 import test_bunkerruntime as runtime_tests
 from ticketbunker import bunkerdb, bunkerruntime, layout
@@ -15,6 +16,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IsolatedParticipantTests(unittest.TestCase):
+    def test_cleanup_retries_only_transient_windows_sharing_violations(self):
+        spec = importlib.util.spec_from_file_location("two_participant_loop", ROOT / "tools/two_participant_loop.py")
+        loop = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loop)
+        held = PermissionError("worker still closing log")
+        held.winerror = 32
+        temporary = mock.Mock()
+        temporary.cleanup.side_effect = [held, None]
+        with mock.patch.object(loop.time, "sleep") as wait:
+            loop.cleanup_temporary(temporary)
+        self.assertEqual(temporary.cleanup.call_count, 2)
+        wait.assert_called_once_with(0.1)
+        temporary.cleanup.side_effect = PermissionError("not a sharing violation")
+        with self.assertRaises(PermissionError):
+            loop.cleanup_temporary(temporary)
+        temporary.cleanup.side_effect = held
+        with self.assertRaises(PermissionError):
+            loop.cleanup_temporary(temporary, timeout=0)
+
     def test_sanitized_environment_has_a_disposable_windows_profile(self):
         spec = importlib.util.spec_from_file_location("two_participant_loop", ROOT / "tools/two_participant_loop.py")
         loop = importlib.util.module_from_spec(spec)
