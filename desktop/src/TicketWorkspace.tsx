@@ -1,6 +1,7 @@
 import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
 import BackButton from "./BackButton";
+import IconButton from "./IconButton";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
 import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
@@ -514,7 +515,7 @@ function ChecksRow({ detail, bunkerId, onReload, notify }: { detail: TicketDetai
         {detail.check_results.results.map((result) => <details key={result.kind}><summary>{result.kind === "build" ? "Build" : "Test"}: {result.timed_out ? "Timed out" : result.passed ? "Passed" : "Failed"}</summary><code>{result.command}</code><p>Exit {result.exit ?? "unavailable"} · {result.seconds}s</p><pre>{result.log_text || result.first_error || "No output recorded."}</pre></details>)}
       </div> : <small>No check results on this computer yet.</small>}
       <div className="checks-summary"><span className={`checks-source ${checks.source}`}>{CHECK_SOURCES[checks.source] || checks.source}</span><small title={summary}>{summary}</small>{checks.detail && <small>{checks.detail}</small>}</div>
-      {!editing && <div className="checks-actions"><button type="button" onClick={() => setEditing(true)}>{checks.source === "ticket" ? "Edit this ticket's checks" : "Set checks for this ticket"}</button></div>}
+      {!editing && <div className="checks-actions"><button type="button" title="Configure build and test commands for this ticket" onClick={() => setEditing(true)}>Edit checks</button></div>}
       {editing && (
         <form className="checks-edit" onSubmit={(event) => { event.preventDefault(); save(); }}>
           <label>Build<input value={build} placeholder="cmake --build build --target position" onChange={(event) => setBuild(event.target.value)} /></label>
@@ -645,8 +646,7 @@ function TicketRail({
         <ChecksRow detail={detail} bunkerId={bunkerId} onReload={onReload} notify={notify} />
       </section>
       <section className="branches-panel">
-        <header><h2>Branches</h2><button className="mini-plus" aria-label="Create branch" disabled={!repoRoot || busy || repositoryLocked} title={repositoryLocked ? "Return to the ticket before creating a branch." : undefined} onClick={() => setCreating(!creating)}>+</button></header>
-        {repoRoot && <div className="checks-actions"><button disabled={gitState.status === "refreshing"} onClick={onFetch} title="Fetch remote-tracking refs without changing your checkout or files.">{gitState.status === "refreshing" ? "Fetching branches…" : "Fetch branches"}</button></div>}
+        <header><h2>Branches</h2><div className="branch-header-actions"><IconButton icon="sync" label="Refresh branches" hint={repoRoot ? "Fetch Git refs. Branches also refresh automatically when you open this ticket; your checkout and files stay unchanged." : "Connect a local repository in Project settings to refresh branches."} disabled={!repoRoot || gitState.status === "refreshing"} loading={gitState.status === "refreshing"} issue={gitState.status === "cached" ? String(gitState.detail || "Could not reach the Git remote. Retry here.") : undefined} onClick={onFetch} /><button className="mini-plus" aria-label="Create branch" disabled={!repoRoot || busy || repositoryLocked} title={repositoryLocked ? "Return to the ticket before creating a branch." : "Create or attach a ticket branch"} onClick={() => setCreating(!creating)}>+</button></div></header>
         {gitState.status === "cached" && <p className="inline-error" role="status">Using cached branches. {String(gitState.detail || "Could not reach the Git remote.")}</p>}
         {workError && <div className="inline-error" role="alert">{workError}{workError.includes("branch_assignment_pending") || workError.includes("Sync") || workError.includes("sync") ? <button disabled={busy} onClick={syncBeforeRetry}>Sync Bunker</button> : null}</div>}
         {detail.branches.length === 0 && <p className="rail-empty">No branch carries {detail.ticket.id} yet. Use + to start one.</p>}
@@ -1155,6 +1155,7 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
   function jumpTo(id: string) {
     protect(() => {
       setEditor(null);
+      setSection(id);
       window.requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     });
   }
@@ -1226,11 +1227,11 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
       <header className="ticket-header">
         <BackButton label="Back to tickets" onClick={() => protect(onBack)} />
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
-        {!editor && <nav className="section-jumps" aria-label="Sections">
-          {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
-        </nav>}
       </header>
       <div className="ticket-layout">
+        <aside className="ticket-chapters"><nav aria-label="Ticket sections">
+          {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={!editor && section === id ? "selected" : ""} aria-current={!editor && section === id ? "location" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
+        </nav></aside>
         <main className="ticket-main">
           {error && <div role="alert" className="inline-error">{error} <button onClick={load}>Retry</button></div>}
           {editor ? <SourceEditor draft={editor} projectRoot={repoRoot} notes={editorNotes} onBack={() => protect(() => setEditor(null))} onDraft={setEditor} onQuote={quoteSource} onReply={replyFromEditor} notify={notify} /> : <SourceActionsContext.Provider value={sourceActions}>

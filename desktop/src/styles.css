@@ -223,11 +223,14 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .repository-empty { padding: 22px 0; border-bottom: 1px solid var(--soft-line); color: var(--muted); font-size: 10px; text-align: center; }
 
 .ticket-shell { min-height: 100vh; background: #fff; }
-.ticket-header { position: sticky; z-index: 10; top: 0; height: 132px; display: grid; grid-template-columns: 105px minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 22px 30px 0; border-bottom: 1px solid var(--line); background: #fff; }
-.section-jumps { display: inline-flex; align-self: start; margin-top: 6px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: #f4f6f9; }
-.section-jumps button { min-height: 28px; padding: 0 12px; border: 0; border-radius: 5px; color: #4d5a6e; background: transparent; font-size: 11px; font-weight: 680; }
-.section-jumps button:hover { background: #e9eef4; }
-.section-jumps button.selected { color: #1c3454; background: #fff; box-shadow: 0 1px 2px rgba(28, 43, 64, .12); }
+.ticket-header { position: sticky; z-index: 10; top: 0; height: 132px; display: grid; grid-template-columns: 105px minmax(0, 1fr); align-items: start; gap: 18px; padding: 22px 30px 0; border-bottom: 1px solid var(--line); background: #fff; }
+.ticket-chapters { padding: 28px 12px; border-right: 1px solid var(--line); background: #fafbfc; }
+.branch-header-actions { display: flex; align-items: center; gap: 3px; }
+.ticket-chapters nav { position: sticky; top: 156px; display: grid; gap: 5px; }
+.ticket-chapters button { min-height: 36px; padding: 8px 10px; border: 0; text-align: left; color: var(--muted); background: transparent; font-size: 11px; }
+.ticket-chapters button:hover { background: #e9eef4; }
+.ticket-chapters button.selected { color: var(--blue); background: #e6eef8; font-weight: 700; }
+.close-control { padding: 0; border-color: transparent; background: transparent; }
 .facts-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 28px; margin: 0; padding: 2px 0 4px; }
 .facts-grid .fact { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; padding: 0; border: 0; background: none; }
 .facts-grid dt { color: #738094; font-size: 9px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
@@ -248,7 +251,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 .ticket-tabs { align-self: end; display: flex; gap: 2px; height: 39px; }
 .ticket-tabs button { height: 39px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; }
 .ticket-tabs button.selected { border-bottom-color: var(--blue); color: var(--blue); }
-.ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; min-height: calc(100vh - 132px); }
+.ticket-layout { display: grid; grid-template-columns: 150px minmax(0, 1fr) 270px; min-height: calc(100vh - 132px); }
 .ticket-main { min-width: 0; padding: 36px clamp(28px, 5vw, 72px) 80px; border-right: 1px solid var(--line); }
 .ticket-rail { padding: 28px 20px 60px; background: #fafbfc; }
 .ticket-rail section + section { margin-top: 30px; }
@@ -560,7 +563,7 @@ details.advanced > *:not(summary) { margin-top: 10px; }
   .workspace { width: calc(100% - 38px); }
   .catalog-toolbar { grid-template-columns: 1fr 1fr; }
   .search-field { grid-column: 1 / -1; }
-  .ticket-layout { grid-template-columns: minmax(0, 1fr) 225px; }
+  .ticket-layout { grid-template-columns: 120px minmax(0, 1fr) 225px; }
   .ticket-main { padding-left: 28px; padding-right: 28px; }
   .ticket-row { grid-template-columns: 62px minmax(150px, 1fr) 90px 60px; }
   .ticket-labels { display: none; }
@@ -589,13 +592,13 @@ details.advanced > *:not(summary) { margin-top: 10px; }
   .project-row { grid-template-columns: 58px minmax(0, 1fr); }
   .project-count { display: none; }
   .ticket-header { position: sticky; height: auto; grid-template-columns: 1fr; padding: 16px 18px 12px; }
-  .section-jumps { width: 100%; justify-content: stretch; }
-  .section-jumps button { flex: 1; }
+  .ticket-chapters { grid-column: 1; grid-row: 1 / 3; padding: 16px 6px; }
+  .ticket-chapters button { padding: 8px 6px; }
   .facts-grid { grid-template-columns: 1fr 1fr; }
   .ticket-tabs { margin-top: 4px; }
-  .ticket-layout { display: flex; flex-direction: column; }
-  .ticket-main { order: 2; border-right: 0; padding: 25px 18px 70px; }
-  .ticket-rail { order: 1; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+  .ticket-layout { grid-template-columns: 100px minmax(0, 1fr); }
+  .ticket-main { grid-column: 2; grid-row: 2; border-right: 0; padding: 25px 12px 70px; }
+  .ticket-rail { grid-column: 2; grid-row: 1; padding: 15px 12px; border-bottom: 1px solid var(--line); }
   .ticket-rail section + section { margin-top: 15px; }
   .branches-panel .branch-item, .branch-form, .confirmation { display: none; }
   .ticket-details dl, .synthesis-grid { grid-template-columns: 1fr; }

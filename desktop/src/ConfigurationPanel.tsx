@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import BackButton from "./BackButton";
+import CloseButton from "./CloseButton";
 import IconButton from "./IconButton";
 import { cachedBoards, listBoards } from "./boardCache";
 import { useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
@@ -467,7 +467,7 @@ export default function ConfigurationPanel({
     <aside className="configuration-drawer" aria-label="Configuration">
       <header>
         <div><p className="eyebrow">{project ? `${project.key} · project setup` : tab === "defaults" ? "Bunker defaults · new projects" : "Bunker setup"}</p><h2>Configuration</h2></div>
-        <BackButton onClick={() => protect(onClose)} />
+        <CloseButton label="Close configuration" onClick={() => protect(onClose)} />
       </header>
       <fieldset className="configuration-fields" disabled={busy || savingAll || Boolean(connecting)}>
       <nav>

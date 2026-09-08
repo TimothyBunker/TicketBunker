@@ -235,6 +235,16 @@ create provider-side tickets. Configuration controls say **Save**, not Publish.
 
 Compact app controls use plus for adding objects, gear for settings, circular
 arrows for sync, and trash for removal, with accessible names and hover titles.
+Closing a drawer uses a cross; arrows are reserved for returning to a previous
+page or step. Project ticket sync remains visible without a linked board and
+opens Boards setup with an explanatory hover title in that state. Ticket
+Branches has a small refresh icon in its heading, alongside automatic fetching
+on ticket open; it does not switch, pull, or edit the user's checkout.
+Ticket Details, Description, and Agent work are chapters in a persistent left
+navigation rail, not header tabs. They scroll the existing single document,
+indicate the current chapter, and remain available while editing a source file.
+Chapter navigation out of an unsaved editor uses the existing save/discard/cancel
+guard. The ticket Checks action is **Edit checks**.
 The sidebar is titled Bunkers with a four-square overview control and a create
 plus; no branding block. Bunker setup destinations share one gear menu.
 Incomplete setup and failed sync use a red dot with a specific hover explanation.

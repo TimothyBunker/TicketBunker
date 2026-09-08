@@ -328,8 +328,8 @@ describe("Bunker and Project boundaries", () => {
     );
 
     expect(screen.getByText("No board linked")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
+    expect(screen.getByRole("button", { name: "Sync tickets" })).toHaveAttribute("title", expect.stringContaining("No board linked"));
+    fireEvent.click(screen.getByRole("button", { name: "Sync tickets" }));
     expect(await screen.findByRole("heading", { name: "Boards" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Connect GitHub to see your boards" })).toBeInTheDocument();
     expect(screen.getByLabelText("GitHub token")).toBeInTheDocument();

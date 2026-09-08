@@ -6,6 +6,16 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Compact controls and guarded Project actions (2026-09-08)
 
+Follow-up: ticket sections now form a sticky vertical left chapter menu,
+remaining available while reading or editing, with unsaved-file protection.
+Close controls use a shared cross button; actual back navigation keeps arrows.
+Project Sync tickets stays visible with no board and opens board setup. The
+ticket Branches heading has a compact refresh icon; automatic opening fetches
+remain unchanged. **Edit checks** replaces the long ticket-scoped action label.
+Verified follow-up: 71 UI tests and production assets; browser coverage exercises
+chapter navigation from an unsaved editor and the compact refresh control.
+No backend behavior or installer version changes in this follow-up.
+
 Source-only changes after rc2; no new installer/tag built. The Bunkers sidebar
 uses a four-square overview button and create plus, without the branding block.
 One Bunker gear groups settings. Project settings/add/sync and configuration

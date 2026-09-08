@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BunkerHub from "./BunkerHub";
 import BackButton from "./BackButton";
+import CloseButton from "./CloseButton";
 import TicketWorkspace from "./TicketWorkspace";
 import TrackerConnections from "./TrackerConnections";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
@@ -229,7 +230,7 @@ function AgentSetup({
   }
   return (
     <section className="agent-setup">
-      <header><div><p className="eyebrow">Local settings</p><h2>Agent</h2></div>{!required && <BackButton label="Close agent settings" onClick={onClose} />}</header>
+      <header><div><p className="eyebrow">Local settings</p><h2>Agent</h2></div>{!required && <CloseButton label="Close agent settings" onClick={onClose} />}</header>
       <p>Choose the model that maintains ticket synthesis. Provider login stays with the provider runtime.</p>
       {catalog.length > 0 && <div className="agent-grid">
         <label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{catalog.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
@@ -303,7 +304,7 @@ function Settings({
   if (tab === "agent") return <aside className="settings-drawer"><AgentSetup state={state} onState={onState} required={!state.agent.decided} onClose={onClose} /></aside>;
   return (
     <aside className="settings-drawer">
-      <header><div><p className="eyebrow">This computer</p><h2>Settings</h2></div><BackButton label="Close settings" onClick={onClose} /></header>
+      <header><div><p className="eyebrow">This computer</p><h2>Settings</h2></div><CloseButton label="Close settings" onClick={onClose} /></header>
       <nav><button className={tab === "local" ? "selected" : ""} onClick={() => setTab("local")}>Local</button><button onClick={() => setTab("agent")}>Agent</button><button className={tab === "trackers" ? "selected" : ""} onClick={() => setTab("trackers")}>Trackers</button><button className={tab === "system" ? "selected" : ""} onClick={() => setTab("system")}>System</button></nav>
       {tab === "local" && <div className="settings-content">
         <form onSubmit={saveProfile}><h3>Identity</h3><label>Name<input name="name" defaultValue={state.profile.name} required /></label><label>Email<input name="email" type="email" defaultValue={state.profile.email} required /></label><label>Branch name<input name="branch_user" defaultValue={state.profile.branch_user} required /></label><button className="primary">Save identity</button></form>

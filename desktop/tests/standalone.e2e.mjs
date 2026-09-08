@@ -64,7 +64,7 @@ try {
   await page.getByRole("button", { name: "Save mappings" }).click();
   await page.getByText("Integration mappings saved").waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-configuration.png"), fullPage: true });
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Close configuration" }).click();
   await page.locator(".ticket-row").first().click();
   await page.locator(".ticket-heading h1").waitFor();
   await page.screenshot({ path: output, fullPage: true });

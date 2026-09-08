@@ -196,6 +196,12 @@ Owners may delete empty Projects after confirmation; Projects containing
 tickets or subprojects cannot be deleted. Local Git folders and tracker
 issues are never removed.
 
+Inside a ticket, the left chapter menu reaches Details, Description, and Agent
+work, including while a file is open. Unsaved edits still prompt before leaving.
+Panels close with **×**; arrows return to the previous page. Branches refresh
+automatically on opening a ticket and can be refreshed using the circular arrow
+beside **Branches**. **Edit checks** sets ticket-specific build/test commands.
+
 ### Bringing tickets in from your agile app
 
 1. On the Bunker page choose **⚙ → Trackers** and paste a GitHub personal access
@@ -208,6 +214,7 @@ issues are never removed.
    stays connected; use the circular-arrow **Sync tickets** icon on the main
    Project page to retry or refresh later. Its hover text shows the last
    successful sync in this app session or the latest failure.
+   With no board linked, the same icon opens board setup instead.
    Issues arrive as tickets keyed by the Project key
    and issue number unless their titles already carry a key. Syncing again
    reports what was new, updated, or unchanged. Field mappings and ticket

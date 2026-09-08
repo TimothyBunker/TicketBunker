@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
-import BackButton from "./BackButton";
+import CloseButton from "./CloseButton";
 import IconButton, { Icon } from "./IconButton";
 import { UnsavedChangesBoundary, useGuardedAction } from "./UnsavedChanges";
 import { command } from "./transport";
@@ -127,7 +127,7 @@ function MembersPanel({
   const pending = invitations.filter((value) => value.state === "pending");
   return (
     <aside className="action-drawer members-drawer" aria-label="Members">
-      <header><h2>Members</h2><BackButton label="Close" onClick={onClose} /></header>
+      <header><h2>Members</h2><CloseButton onClick={onClose} /></header>
       <p className="drawer-copy">{remoteLabel(bunker)}. {canInvite ? "Only Bunker owners can invite members or change shared setup." : "Ask a Bunker owner to invite people or change shared setup."}</p>
       {error && <div className="inline-error">{error}</div>}
       {!members && !error && <div className="ticket-loading">Loading members</div>}
@@ -421,7 +421,7 @@ function ActionForm({
   const submitLabel = { create: "Create Bunker", join: "Join Bunker", project: title, share: "Share Bunker", members: "", config: "", "": "" }[mode];
   return (
     <aside className="action-drawer" aria-label={title}>
-      <header><h2>{title}</h2><BackButton label="Close" onClick={onClose} /></header>
+      <header><h2>{title}</h2><CloseButton onClick={onClose} /></header>
       <form onSubmit={onSubmit}>
         {mode === "create" && <>
           <label>Bunker name<input name="name" autoFocus required /></label>
@@ -707,7 +707,7 @@ function Hub({
             </div>
             <div className="header-actions">
               <IconButton icon="settings" label="Configure" hint="Project settings" issue={projectSetup} onClick={() => openConfiguration()} />
-              {(project.trackers || []).length > 0 && <IconButton icon="sync" label="Sync tickets" hint={syncing ? "Syncing tickets" : `Sync tickets from linked boards. ${syncStatus?.at ? `Last synced ${relativeTime(new Date(syncStatus.at).toISOString())}` : "Not synced in this app session"}`} issue={syncStatus?.error} loading={syncing} disabled={syncing} onClick={syncTickets} />}
+              <IconButton icon="sync" label="Sync tickets" hint={!(project.trackers || []).length ? "No board linked. Open Boards to connect one before syncing tickets." : syncing ? "Syncing tickets" : `Sync tickets from linked boards. ${syncStatus?.at ? `Last synced ${relativeTime(new Date(syncStatus.at).toISOString())}` : "Not synced in this app session"}`} issue={syncStatus?.error} loading={syncing} disabled={syncing} onClick={() => (project.trackers || []).length ? syncTickets() : openConfiguration("board")} />
               {(!bunker.remote || bunker.sharing?.is_owner) && <IconButton icon="plus" label="Add subproject" onClick={() => navigateAction("project")} />}
             </div>
           </header>

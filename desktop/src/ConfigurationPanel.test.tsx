@@ -191,18 +191,18 @@ describe("Configuration draft safety", () => {
   it("cancels without discarding and explicitly discards without publishing", async () => {
     const close = setup();
     const input = await editBuild();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("Save applies these settings");
     fireEvent.click(screen.getByText("Cancel"));
     expect(close).not.toHaveBeenCalled(); expect(input).toHaveValue("make navigation");
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(screen.getByText("Do not save"));
     expect(close).toHaveBeenCalledOnce();
     expect(transport.command.mock.calls.every(([name]) => name.endsWith(".get"))).toBe(true);
   });
   it("publishes with the loaded revision before leaving", async () => {
     const close = setup(); await editBuild();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
     expect(transport.command).toHaveBeenCalledWith("application.bunker.configuration.replace", expect.objectContaining({ expected_revision: "checks:1", content: expect.objectContaining({ build: "make navigation" }) }));
@@ -210,7 +210,7 @@ describe("Configuration draft safety", () => {
   it("retains the draft when publishing fails", async () => {
     const close = setup(); const input = await editBuild();
     transport.command.mockRejectedValue(new Error("Another member changed Checks. Reload before retrying."));
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Another member changed Checks");
     expect(close).not.toHaveBeenCalled(); expect(input).toHaveValue("make navigation");
@@ -241,7 +241,7 @@ describe("Configuration draft safety", () => {
     const original = transport.command.getMockImplementation()!;
     transport.command.mockImplementation((name, payload) => name === "application.bunker.repository.replace"
       ? Promise.reject(new Error("Repository save is offline")) : original(name, payload));
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Repository save is offline");
     expect(close).not.toHaveBeenCalled();

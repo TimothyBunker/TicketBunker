@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TicketWorkspace from "./TicketWorkspace";
 import type { Bunker, TicketDetail, TicketReference } from "./types";
@@ -71,11 +71,11 @@ describe("Bunker-native ticket work", () => {
     const back = screen.getByRole("button", { name: "Back to ticket" });
     expect(back.textContent).toBe("←");
     expect(back).toHaveAttribute("title", "Back to ticket");
-    fireEvent.click(back);
+    const chapters = screen.getByRole("navigation", { name: "Ticket sections" });
+    fireEvent.click(within(chapters).getByRole("button", { name: "Description" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(input).toHaveValue("edited\n");
     fireEvent.click(screen.getByRole("button", { name: "Back to ticket" }));
-    const { within } = await import("@testing-library/react");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("editor.save", { path: "README.md", content: "edited\n", expected_digest: "old" }, "/work/coal"));
     await waitFor(() => expect(screen.queryByLabelText("Edit README.md")).not.toBeInTheDocument());
@@ -102,7 +102,11 @@ describe("Bunker-native ticket work", () => {
   it("fetches refs on open and supports an explicit retry without creating work", async () => {
     render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("truth.queue", { bunker_id: bunker.id, project: "ECS", ticket: ticket.id }, "/work/coal"));
-    fireEvent.click(screen.getByRole("button", { name: "Fetch branches" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh branches" }));
+    expect(screen.queryByRole("button", { name: "Fetch branches" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh branches" }).textContent).toBe("");
+    const chapters = screen.getByRole("navigation", { name: "Ticket sections" });
+    expect(within(chapters).getAllByRole("button").map((button) => button.textContent)).toEqual(["Details", "Description", "Agent work"]);
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("truth.queue", { bunker_id: bunker.id, project: "ECS", ticket: ticket.id, force: true }, "/work/coal"));
     expect(transport.command.mock.calls.some(([name]) => ["truth.synthesize", "workflow.start"].includes(name))).toBe(false);
   });
