@@ -149,7 +149,6 @@ function TicketTab({
   copySource: (path: string, line: number) => void;
 }) {
   const ticket = detail.ticket;
-  const link = sourceLink(detail);
   const known = new Set([
     "id", "key", "title", "summary", "description", "status", "state", "type", "issue_type",
     "priority", "assignee", "reporter", "author", "labels", "tags", "created", "created_at",
@@ -158,23 +157,36 @@ function TicketTab({
   ]);
   const acceptance = stringField(ticket, ["acceptance_criteria", "acceptance"]);
   const notes = stringField(ticket, ["notes", "note"]);
-  const metadata = Object.entries(ticket).filter(([key, value]) => !known.has(key) && value !== "" && value !== null && value !== undefined);
+  const metadata = Object.entries(ticket).filter(([key]) => !known.has(key));
+  const created = ticket.created || ticket.created_at;
+  const more: [string, ReactNode][] = [
+    ["Source", SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)],
+    ...(!ticket.reporter ? [["Reporter", "Unknown"] as [string, ReactNode]] : []),
+    ...(!ticket.type ? [["Type", "Not set"] as [string, ReactNode]] : []),
+    ...(!ticket.priority ? [["Priority", "Not set"] as [string, ReactNode]] : []),
+    ...(!created ? [["Created", "Unknown"] as [string, ReactNode]] : []),
+    ...(!detail.repositories.length ? [["Repositories", "None attached"] as [string, ReactNode]] : []),
+    ...(!(trackers || []).length ? [["Boards", "None linked"] as [string, ReactNode]] : []),
+    ...metadata.map(([key, value]): [string, ReactNode] => [capitalize(key.replaceAll("_", " ")), text(value)]),
+  ];
   return (
     <article className="ticket-body">
       <section id="details" className="ticket-details">
         <h2>Details</h2>
-        <dl className="facts-grid">
+        <div className="facts-grid">
+          <dl className="facts-column">
           <div className="fact"><dt>Assignee</dt><dd>{ticket.assignee ? String(ticket.assignee) : <span className="fact-empty">Unassigned</span>}</dd></div>
-          <div className="fact"><dt>Reporter</dt><dd>{ticket.reporter ? String(ticket.reporter) : <span className="fact-empty">Unknown</span>}</dd></div>
-          <div className="fact"><dt>Type</dt><dd>{capitalize(ticket.type)}</dd></div>
-          <div className="fact"><dt>Priority</dt><dd>{ticket.priority ? capitalize(ticket.priority) : <span className="fact-empty">Not set</span>}</dd></div>
-          <div className="fact"><dt>Created</dt><dd>{shortTime(ticket.created || ticket.created_at)}</dd></div>
-          <div className="fact"><dt>Updated</dt><dd>{shortTime(ticket.updated || ticket.updated_at)}</dd></div>
-          <div className="fact"><dt>Labels</dt><dd>{ticket.labels.length ? <span className="ticket-labels inline">{ticket.labels.map((value) => <span key={value}>{value}</span>)}</span> : <span className="fact-empty">None</span>}</dd></div>
-          <div className="fact"><dt>Source</dt><dd>{SOURCE_LABELS[String(ticket.source_kind)] || text(ticket.source_kind)}{link && <> · <a href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a></>}</dd></div>
-          <div className="fact"><dt>{detail.repositories.length === 1 ? "Repository" : "Repositories"}</dt><dd>{detail.repositories.length ? detail.repositories.map((value) => value.name).join(", ") : <span className="fact-empty">None attached</span>}</dd></div>
-          <div className="fact"><dt>{(trackers || []).length === 1 ? "Board" : "Boards"}</dt><dd>{(trackers || []).length ? trackersSummary(trackers) : <span className="fact-empty">None linked</span>}</dd></div>
-        </dl>
+          {ticket.reporter && <div className="fact"><dt>Reporter</dt><dd>{String(ticket.reporter)}</dd></div>}
+          {detail.repositories.length > 0 && <div className="fact fact-context"><dt>{detail.repositories.length === 1 ? "Repository" : "Repositories"}</dt><dd>{detail.repositories.map((value) => value.name).join(", ")}</dd></div>}
+          {(trackers || []).length > 0 && <div className="fact"><dt>{trackers!.length === 1 ? "Board" : "Boards"}</dt><dd>{trackersSummary(trackers)}</dd></div>}
+          </dl>
+          <dl className="facts-column">
+          {ticket.type && <div className="fact"><dt>Type</dt><dd>{capitalize(ticket.type)}</dd></div>}
+          {ticket.priority && <div className="fact"><dt>Priority</dt><dd>{capitalize(ticket.priority)}</dd></div>}
+          {Boolean(created) && <div className="fact fact-context"><dt>Created</dt><dd>{shortTime(created)}</dd></div>}
+          </dl>
+        </div>
+        <details className="metadata more-details"><summary>More details</summary><dl>{more.map(([label, value], index) => <div key={`${label}:${index}`}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></details>
       </section>
       <section id="description" className="description">
         <h2>Description</h2>
@@ -189,9 +201,6 @@ function TicketTab({
       )}
       {detail.activity.length > 0 && (
         <section id="activity" className="ticket-stream"><h2>Activity <small>{detail.activity.length}</small></h2>{detail.activity.map((event, index) => <StreamEntry key={index} entry={event} fallbackKind="update" />)}</section>
-      )}
-      {metadata.length > 0 && (
-        <details className="metadata"><summary>Metadata</summary><dl>{metadata.map(([key, value]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{text(value)}</dd></div>)}</dl></details>
       )}
     </article>
   );

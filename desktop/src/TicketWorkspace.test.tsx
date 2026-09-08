@@ -47,6 +47,40 @@ describe("Bunker-native ticket work", () => {
       { bunker_id: "engineering", project: "ECS", ticket: "ECS-4" }, "/work/renderer"));
   });
 
+  it("groups readable details and keeps optional empty fields in More details", async () => {
+    const { container } = render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    await screen.findByRole("heading", { name: "Details" });
+    const facts = container.querySelector(".facts-grid")!;
+    expect(facts.querySelectorAll(".facts-column")).toHaveLength(2);
+    expect(within(facts as HTMLElement).getByText("Unassigned")).toBeVisible();
+    expect(within(facts as HTMLElement).getByText("Type")).toBeVisible();
+    expect(within(facts as HTMLElement).queryByText("Priority")).not.toBeInTheDocument();
+    expect(within(facts as HTMLElement).queryByText("Updated")).not.toBeInTheDocument();
+    expect(within(facts as HTMLElement).queryByText("Labels")).not.toBeInTheDocument();
+    const more = container.querySelector("details.more-details")!;
+    expect(more).not.toHaveAttribute("open");
+    expect(within(more as HTMLElement).getByText("Priority")).toBeInTheDocument();
+    expect(within(more as HTMLElement).getByText("Boards")).toBeInTheDocument();
+  });
+
+  it("preserves technical metadata including false and zero without repeating header fields", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((action, ...args) => action === "application.ticket.get" ? Promise.resolve({ ...detail,
+      ticket: { ...ticket, reporter: "Ada", priority: "high", labels: ["ecs"], locked: false, estimate: 0, custom_empty: "", issue_node_id: "fixture-node" },
+    }) : original(action, ...args));
+    const { container } = render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    await screen.findByRole("heading", { name: "Details" });
+    const columns = container.querySelectorAll(".facts-column");
+    expect(columns[0]).toHaveTextContent("ReporterAda");
+    expect(columns[1]).toHaveTextContent("PriorityHigh");
+    const more = container.querySelector("details.more-details")!;
+    expect(more).toHaveTextContent("LockedNo");
+    expect(more).toHaveTextContent("Estimate0");
+    expect(more).toHaveTextContent("Custom empty—");
+    expect(more).toHaveTextContent("Issue node idfixture-node");
+    expect(container.querySelectorAll(".label-chip")).toHaveLength(1);
+  });
+
   it("reads actual base branches and confirms before creating through the Bunker action", async () => {
     render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
     await screen.findByLabelText("Working repository");

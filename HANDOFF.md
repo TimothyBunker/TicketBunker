@@ -6,6 +6,15 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Compact controls and guarded Project actions (2026-09-08)
 
+Details follow-up: replaced the wide fact grid with two columns of aligned
+label/value rows, grouped people and classification fields, readable sentence-case
+labels, and one-column narrow layout. Removed duplicate header labels/updated
+time from Details. Unassigned stays visible; empty optional fields, source, and
+technical metadata remain accessible under More details within Details.
+No ticket data or backend contracts changed.
+Verified Details follow-up: 73 UI tests, production build, and the real-browser
+flow, including More details disclosure and desktop/narrow chapter layouts.
+
 Follow-up: ticket sections now form a sticky vertical left chapter menu,
 remaining available while reading or editing, with unsaved-file protection.
 Close controls use a shared cross button; actual back navigation keeps arrows.

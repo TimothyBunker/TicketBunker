@@ -198,6 +198,9 @@ issues are never removed.
 
 Inside a ticket, the left chapter menu reaches Details, Description, and Agent
 work, including while a file is open. Unsaved edits still prompt before leaving.
+Details groups people, classification and repository information into compact
+label/value rows. **More details** reveals source metadata and unused optional
+fields; status, labels and updated time stay in the ticket header.
 Panels close with **×**; arrows return to the previous page. Branches refresh
 automatically on opening a ticket and can be refreshed using the circular arrow
 beside **Branches**. **Edit checks** sets ticket-specific build/test commands.

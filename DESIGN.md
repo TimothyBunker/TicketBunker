@@ -245,6 +245,14 @@ navigation rail, not header tabs. They scroll the existing single document,
 indicate the current chapter, and remain available while editing a source file.
 Chapter navigation out of an unsaved editor uses the existing save/discard/cancel
 guard. The ticket Checks action is **Edit checks**.
+Ticket Details uses two compact columns of aligned label/value rows, grouping
+Assignee/Reporter and Type/Priority. Labels are sentence case, values readable,
+and related repository/board/date context is separated by spacing, not cards.
+Unassigned stays visible; empty optional fields and source metadata live in a
+collapsed **More details** disclosure within Details. False/zero/custom values
+remain intact. Status, labels and updated time appear in the header only.
+Narrow windows collapse the facts to one column without stacking each label
+above its value.
 The sidebar is titled Bunkers with a four-square overview control and a create
 plus; no branding block. Bunker setup destinations share one gear menu.
 Incomplete setup and failed sync use a red dot with a specific hover explanation.

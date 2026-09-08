@@ -162,6 +162,15 @@ try {
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await page.locator('.ticket-row').first().click();
   const chapters = page.getByRole('navigation', { name: 'Ticket sections' });
+  const moreDetails = page.locator('#details details.more-details');
+  await expect(moreDetails).not.toHaveAttribute('open');
+  await expect(page.locator('.facts-grid')).toContainText('Unassigned');
+  await expect(page.locator('.facts-grid dt').filter({ hasText: /^Updated$|^Labels$|^Priority$/ })).toHaveCount(0);
+  await moreDetails.getByText('More details', { exact: true }).click();
+  await expect(moreDetails.getByText('Priority', { exact: true })).toBeVisible();
+  await expect(moreDetails.getByText('Boards', { exact: true })).toBeVisible();
+  await moreDetails.getByText('More details', { exact: true }).click();
+  await page.screenshot({ path: '/tmp/ticketbunker-compact-details.png' });
   await expect(chapters).toBeVisible();
   await expect(page.getByRole('button', { name: 'Fetch branches', exact: true })).toHaveCount(0);
   await expect(page.locator('.branches-panel > header').getByRole('button', { name: 'Refresh branches' })).toBeVisible();
