@@ -164,17 +164,20 @@ targets.
 The desktop launcher is the primary onboarding path:
 
 1. **Create Bunker** makes a local Bunker and its first Project. Add allowed Git
-   remotes here and select the first Project's repository, or do that later.
+   remotes here or later in Bunker **Repositories**.
 2. **Join Bunker** first shows the service and Bunker identity from the
    invitation, then authenticates and enrolls the user before creating a local
    replica.
 3. A Bunker page lists its Projects with their allowed repositories and ticket
    counts; **Add project** builds the recursive work hierarchy. Tickets are
    listed only inside a selected Project.
-4. Bunker owners manage allowed Git remotes in **Repositories**. In each
-   Project, **Configure → Repositories** selects from that list. Members use
-   **Connect folder** to choose a matching checkout; TicketBunker fetches
-   `origin` and saves the path only on this computer. Source remotes never
+4. Bunker owners manage allowed Git remotes in **Repositories**. Expand a
+   remote's **Projects** dropdown and toggle the Projects that may use it;
+   each toggle saves immediately. One remote can serve multiple Projects.
+   In a Project's **Configure → Repositories**, use **Add local repository**
+   to choose a folder. TicketBunker matches its `origin` to an enabled remote,
+   fetches it, and saves the path only on this computer. Members do not enter
+   remote addresses or change shared availability here. Source remotes never
    store the Bunker database or grant team membership.
 5. At Bunker level, **Share Bunker** connects it to your TicketBunker service.
    Creating a shared Bunker requires the service administrator's credentials,

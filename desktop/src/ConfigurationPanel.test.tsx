@@ -28,15 +28,22 @@ async function editBuild(value = "make navigation") {
 }
 beforeEach(() => {
   snapshot = structuredClone(initial);
+  transport.chooseGitDirectory.mockReset();
+  transport.chooseGitDirectory.mockResolvedValue("/work/navigation");
   transport.command.mockReset();
   transport.command.mockImplementation(async (name, payload) => {
     if (name === "application.bunker.configuration.get") return structuredClone(snapshot);
     if (name === "application.bunker.configuration.replace") {
-      snapshot.documents.checks = { ...snapshot.documents.checks!, content: payload.content, revision: "checks:2" };
+      snapshot.documents[payload.kind as "checks"] = { kind: payload.kind, updated_at: "", content: payload.content, revision: `${payload.kind}:2` };
       return structuredClone(snapshot);
     }
     if (name === "application.project.repositories.select") {
       snapshot.repositories = { revision: "repos:2", items: payload.repositories };
+      return { configuration: structuredClone(snapshot), bunker };
+    }
+    if (name === "application.bunker.repository.attach") return { bunker };
+    if (name === "application.bunker.repository.replace") {
+      snapshot.repositories = { revision: "registry:2", items: payload.repositories };
       return { configuration: structuredClone(snapshot), bunker };
     }
     throw new Error(`Unexpected command ${name}`);
@@ -60,31 +67,95 @@ describe("Repository setup scopes", () => {
       expect.objectContaining({ project_id: "", expected_revision: "registry:1", repositories: [expect.objectContaining({ name: "Navigator" })] })));
   });
 
-  it("selects a Project repository from the Bunker instead of entering another remote", async () => {
+  it("matches a selected local folder without asking for a remote or binding", async () => {
+    snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id }];
     setup();
     await screen.findByLabelText("Build command");
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
-    fireEvent.click(screen.getByText("+ Add repository"));
-    const select = screen.getByRole("combobox", { name: "Repository 1 allowed remote" });
-    fireEvent.change(select, { target: { value: "github.com/example/navigation" } });
-    expect(screen.getByLabelText("Repository 1 name")).toHaveValue("Navigation");
-    expect(screen.getByLabelText("Repository 1 name")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Connect folder" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Save repositories" }));
-    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.repositories.select",
-      expect.objectContaining({ project_id: "nav", repositories: [expect.objectContaining({ canonical_remote: "github.com/example/navigation", id: "" })] })));
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save repositories" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach",
+      { bunker_id: "lab", project_id: "nav", path: "/work/navigation" }));
+    expect(transport.command.mock.calls.some(([name]) => name === "application.project.repositories.select")).toBe(false);
   });
 
   it("lets members connect local folders but not change the shared selection", async () => {
     snapshot.permission = { can_write: false, reason: "Ask an owner", capabilities: [] };
     snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id }];
     render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} project={project} initialTab="repositories" onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
-    expect(await screen.findByRole("button", { name: "Connect folder" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Save repositories" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "+ Add repository" })).toBeDisabled();
-    expect(screen.getByLabelText("Repository 1 allowed remote")).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Add local repository" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save repositories" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Add repository" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Repository 1 allowed remote")).not.toBeInTheDocument();
   });
 });
+describe("Bunker repository availability", () => {
+  const child = { id: "tools", key: "TOOLS", name: "Tools", children: [] };
+  const tree = [{ ...project, children: [child] }];
+  function registrySetup(canWrite = true) {
+    snapshot.scope_type = "bunker"; snapshot.scope_id = bunker.id;
+    snapshot.repositories = structuredClone(snapshot.repository_registry!);
+    snapshot.permission.can_write = canWrite;
+    const other = { ...snapshot.repositories.items[0], id: "existing", project_id: project.id, canonical_remote: "github.com/example/other" };
+    let bindings = [other];
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation(async (name, payload) => {
+      if (name === "application.bunker.configuration.get" && payload.project_id) return {
+        ...structuredClone(snapshot), scope_type: "project", scope_id: payload.project_id,
+        repositories: { revision: `revision-${payload.project_id}`, items: bindings.filter((row) => row.project_id === payload.project_id) },
+      };
+      if (name === "application.project.repositories.select") {
+        bindings = [...bindings.filter((row) => row.project_id !== payload.project_id), ...payload.repositories.map((row: { id: string }) => ({ ...row, id: row.id || `binding-${payload.project_id}`, project_id: payload.project_id }))];
+        return { bunker: { ...bunker, projects: tree, repositories: bindings } };
+      }
+      return original(name, payload);
+    });
+    render(<UnsavedChangesBoundary><ConfigurationPanel bunker={{ ...bunker, projects: tree, repositories: bindings }} initialTab="repositories" onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+  }
+  it("toggles the same remote for multiple Projects, including subprojects, preserving other bindings", async () => {
+    registrySetup();
+    fireEvent.click(await screen.findByText("Projects · 0"));
+    const parent = screen.getByRole("checkbox", { name: "NAV · Navigation availability for Navigation" });
+    const nested = screen.getByRole("checkbox", { name: "NAV · Navigation / TOOLS · Tools availability for Navigation" });
+    fireEvent.click(parent);
+    await waitFor(() => expect(parent).toBeChecked());
+    expect(transport.command).toHaveBeenCalledWith("application.project.repositories.select", expect.objectContaining({
+      expected_revision: "revision-nav", repositories: [expect.objectContaining({ id: "existing" }), expect.objectContaining({ id: "", canonical_remote: "github.com/example/navigation" })],
+    }));
+    fireEvent.click(nested);
+    await waitFor(() => expect(nested).toBeChecked());
+    expect(parent).toBeChecked();
+    fireEvent.click(parent);
+    await waitFor(() => expect(parent).not.toBeChecked());
+    expect(nested).toBeChecked();
+    expect(transport.command).toHaveBeenLastCalledWith("application.project.repositories.select", expect.objectContaining({ project_id: "nav", repositories: [expect.objectContaining({ id: "existing" })] }));
+  });
+  it("does not show an unaccepted toggle as saved", async () => {
+    registrySetup();
+    fireEvent.click(await screen.findByText("Projects · 0"));
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, payload) => name === "application.project.repositories.select" ? Promise.reject(new Error("Repositories changed. Reopen and retry.")) : original(name, payload));
+    const parent = screen.getByRole("checkbox", { name: "NAV · Navigation availability for Navigation" });
+    fireEvent.click(parent);
+    expect(await screen.findByText(/Repositories changed/)).toBeInTheDocument();
+    expect(parent).not.toBeChecked();
+    expect(parent).toBeEnabled();
+  });
+  it("prevents availability writes while remotes are unsaved", async () => {
+    registrySetup();
+    fireEvent.change(await screen.findByLabelText("Repository 1 name"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByText("Projects · 0"));
+    expect(screen.getByText("Save repositories before changing availability.")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "NAV · Navigation availability for Renamed" })).toBeDisabled();
+  });
+  it("shows members the assignments without allowing policy changes", async () => {
+    registrySetup(false);
+    fireEvent.click(await screen.findByText("Projects · 0"));
+    expect(screen.getByRole("checkbox", { name: "NAV · Navigation availability for Navigation" })).toBeDisabled();
+  });
+});
+
 describe("Configuration draft safety", () => {
   it("cancels without discarding and explicitly discards without publishing", async () => {
     const close = setup();
@@ -114,11 +185,12 @@ describe("Configuration draft safety", () => {
     expect(close).not.toHaveBeenCalled(); expect(input).toHaveValue("make navigation");
   });
   it("preserves a checks draft and its revision when another section publishes", async () => {
+    snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id }];
     setup(); await editBuild();
     snapshot.documents.checks = { ...snapshot.documents.checks!, revision: "checks:remote", content: { ...snapshot.documents.checks!.content, build: "someone else's command" } };
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save repositories" }));
-    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.repositories.select", expect.anything()));
+    fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", expect.anything()));
     await waitFor(() => expect(screen.getByRole("button", { name: "Checks" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Checks" }));
     expect(screen.getByLabelText("Build command")).toHaveValue("make navigation");
@@ -127,30 +199,35 @@ describe("Configuration draft safety", () => {
   });
 
   it("does not republish successful sections when Save retries a partial failure", async () => {
-    const close = setup(); await editBuild();
+    snapshot.scope_type = "bunker"; snapshot.scope_id = bunker.id;
+    snapshot.documents["ticket-fields"] = { kind: "ticket-fields", updated_at: "", revision: "fields:1", content: { fields: [] } };
+    const close = vi.fn();
+    render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} initialTab="defaults" onClose={close} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add field" }));
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
     fireEvent.click(screen.getByText("+ Add repository"));
     fireEvent.change(screen.getByLabelText("Repository 1 allowed remote"), { target: { value: "github.com/example/navigation" } });
     const original = transport.command.getMockImplementation()!;
-    transport.command.mockImplementation((name, payload) => name === "application.bunker.configuration.replace"
-      ? Promise.reject(new Error("Checks publication is offline")) : original(name, payload));
+    transport.command.mockImplementation((name, payload) => name === "application.bunker.repository.replace"
+      ? Promise.reject(new Error("Repository save is offline")) : original(name, payload));
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Checks publication is offline");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Repository save is offline");
     expect(close).not.toHaveBeenCalled();
     transport.command.mockImplementation(original);
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
-    expect(transport.command.mock.calls.filter(([name]) => name === "application.project.repositories.select")).toHaveLength(1);
+    expect(transport.command.mock.calls.filter(([name]) => name === "application.bunker.configuration.replace")).toHaveLength(1);
   });
 
   it("retains an absent base revision if someone creates Checks during editing", async () => {
+    snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id }];
     delete snapshot.documents.checks;
     setup(); await editBuild();
     snapshot.documents.checks = { ...initial.documents.checks!, revision: "checks:remote" };
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save repositories" }));
-    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.project.repositories.select", expect.anything()));
+    fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", expect.anything()));
     await waitFor(() => expect(screen.getByRole("button", { name: "Checks" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Checks" }));
     fireEvent.click(screen.getByRole("button", { name: "Save checks" }));

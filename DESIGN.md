@@ -1,5 +1,9 @@
 # TicketBunker — Design
 
+Back-navigation controls display only a left arrow. Keep their destination in
+an accessible label and hover title, not redundant visible text. Desktop and
+browser views share this contract; unsaved-change guards remain in force.
+
 ## 1. Problem
 
 Agile tickets are the interface between people, but git is where the truth lives.
@@ -200,16 +204,25 @@ Joining is server-first and authorization-first:
 
 The optional remote relationship is configured only at Bunker scope. Projects
 cannot connect their own databases or services. A Bunker owner saves allowed
-remotes in **Repositories**, then selects those identities in each Project's
-**Configure → Repositories** table (or when creating the Project). The Bunker
+remotes in **Repositories**, then expands each remote's **Projects** dropdown
+to toggle availability to any number of Projects, including subprojects.
+Each toggle saves immediately through the existing revision-checked selection
+command, preserving the other bindings and their IDs. Unsaved registry edits
+must be saved before availability changes. Project creation does not select
+remotes; Project **Configure → Repositories** offers **Add local repository**
+and device-local change/disconnect actions, with shared remote/base data read-only.
+Choosing a local folder automatically matches its `origin` to an enabled binding
+without asking for a remote address or binding ID. A mismatch directs the user
+to the Bunker owner and the Bunker-level availability controls. The Bunker
 registry is a revision-checked `repository-registry` configuration document;
 selection changes and registry removal are revalidated under the database
 transaction. An identity in use by any Project cannot be removed. Existing
 doc-less Bunkers derive their initial registry from their bindings without
 rewriting report IDs or paths; saving it establishes the new policy. The
 legacy binding API remains compatible only while that document is absent.
-Every device then validates the selected
-checkout's credential-free `origin` identity against those rows and completes
+Every device validates the selected checkout's credential-free `origin`
+identity against those rows using configured `remote.origin.url` (transport
+rewrites do not rename the registered repository), then runs
 `git fetch --prune origin` before saving its local path. A failed fetch leaves
 the local mapping unchanged. The same checkout may serve multiple Project
 scopes in a monorepo because permission is evaluated per Project.

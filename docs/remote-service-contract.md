@@ -224,6 +224,11 @@ remote replica stays read-only until the service accepts the typed change and
 returns the new revision.
 
 Repository bindings are a whole-list, revision-checked Project configuration.
+The app edits availability from each remote's Projects dropdown at Bunker scope
+using `application.project.repositories.select`, also explicitly allowed by the
+native/browser worker. Each toggle preserves unrelated bindings. Project UI
+only attaches local folders: `application.bunker.repository.attach` can omit
+`binding_id` to match the folder's `origin` against that Project's bindings.
 Only an authorized service transaction may add, change, or remove the canonical
 remotes allowed for a Project. Device paths never synchronize. A client may map
 an allowed binding to a checkout only after the checkout's canonical `origin`

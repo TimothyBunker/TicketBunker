@@ -6,6 +6,32 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Bunker repository setup and automatic board sync (2026-09-07)
 
+Post-release UI change: back-navigation controls are arrow-only, with accessible
+names and hover titles supplied by the shared `BackButton`. The legacy source
+viewer follows the same contract. Navigation and unsaved-draft guards are
+unchanged. This change is not included in the already-published rc2 installer.
+
+Repository-flow correction: Bunker **Repositories** rows now expand into
+**Projects** availability checkboxes, including nested Projects. Toggles save
+through the existing owner-only, revision-checked selection command; unsaved
+registry rows must first be saved. Project creation no longer selects remotes.
+Project **Configure → Repositories** is device-local: **Add local repository**
+chooses a folder and matches `origin` automatically, while remote/base fields
+are read-only. Matching never creates shared bindings or grants availability.
+The real-browser run caught `application.project.repositories.select` missing
+from the worker action allowlist; it is now explicitly exposed and covered by
+a real worker regression. Legacy typed selection APIs remain compatible.
+These corrections are source changes after rc2, not a new installer release.
+Checkout inspection/matching uses the configured `remote.origin.url`, not
+`remote get-url`'s expanded transport address; fetch still honors Git URL
+rewrites. This is covered with a local `insteadOf` mirror in the browser flow.
+Verified after these corrections: 372 backend tests, 60 UI tests, the production
+asset build, and the real-browser flow. The registry suite includes independent
+owner/member data homes, a member's automatic checkout match, rejected member
+policy changes, and syncing one Project's removal while retaining another's
+binding and device-local path. No real user repositories or tracker tickets
+were changed.
+
 Published: **v0.6.2-rc2** at `1855aaf`, with app/runtime/native version **0.6.2**.
 Release: https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.2-rc2
 All three Release platform jobs and publication passed (run `34171059385`):

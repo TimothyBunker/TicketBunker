@@ -2446,7 +2446,9 @@ def attach_repository(
     bunker_id = _id(bunker_id, "Bunker")
     project_id = _id(project_id, "project")
     root = _git_root(local_path)
-    origin = _git_value(root, "remote", "get-url", "origin")
+    # Match the configured identity, not a transport URL rewritten by insteadOf.
+    # Fetch still uses Git's normal URL rewriting and credentials.
+    origin = _git_value(root, "config", "--get", "remote.origin.url")
     identity = canonical_remote(origin)
     selected_binding = _id(binding_id, "repository") if binding_id else ""
     if not identity:
@@ -2477,7 +2479,7 @@ def attach_repository(
         )
         if existing is None:
             raise BunkerDatabaseError(
-                f"This Project does not allow {identity}. Ask a Bunker configurator to add it under Project > Configure > Repositories."
+                f"This Project does not allow {identity}. Ask a Bunker owner to enable this Project under Bunker > Repositories > Projects for that remote."
             )
         if str(existing["canonical_remote"]) != identity:
             raise BunkerDatabaseError(
@@ -2545,7 +2547,7 @@ def _attach_import_repository(
     default_branch: str,
 ) -> str:
     """Preserve one legacy checkout without network access or shared claims."""
-    origin = _git_value(root, "remote", "get-url", "origin")
+    origin = _git_value(root, "config", "--get", "remote.origin.url")
     identity = canonical_remote(origin)
     now = _now()
     with _database(bunker_id) as connection:

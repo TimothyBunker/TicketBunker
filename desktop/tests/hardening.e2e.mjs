@@ -28,8 +28,7 @@ try {
   if (await closeSettings.isVisible()) await closeSettings.click();
   await page.getByRole('button', { name: 'Bunkers', exact: true }).click();
   await page.locator('.bunker-overview > button').first().click();
-  // Adopt an existing Bunker's registry, then select a registered remote for
-  // a new Project. Local folders remain a separate member action.
+  // Bunker owners toggle availability; Projects only attach local folders.
   await page.getByRole('button', { name: 'Repositories', exact: true }).click();
   await expect(page.getByRole('table', { name: 'Allowed repositories' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect folder' })).toHaveCount(0);
@@ -44,13 +43,37 @@ try {
   const projectDrawer = page.getByRole('complementary', { name: 'Add project', exact: true });
   await projectDrawer.getByLabel('Project key', { exact: true }).fill('TOOLS');
   await projectDrawer.getByLabel('Project name', { exact: true }).fill('Navigation tools');
-  await projectDrawer.getByRole('checkbox', { name: /Navigation · github.com\/example\/navigation/ }).check();
+  await expect(projectDrawer.getByRole('checkbox')).toHaveCount(0);
   await projectDrawer.getByRole('button', { name: 'Add project', exact: true }).click();
+  await page.getByRole('button', { name: 'Repositories', exact: true }).click();
+  await page.getByLabel('Projects for Navigation', { exact: true }).click();
+  const ecsAvailability = page.getByRole('checkbox', { name: 'ECS · Entity Component System availability for Navigation', exact: true });
+  const toolsAvailability = page.getByRole('checkbox', { name: 'TOOLS · Navigation tools availability for Navigation', exact: true });
+  await ecsAvailability.click();
+  await expect(ecsAvailability).toBeChecked();
+  await toolsAvailability.click();
+  await expect(toolsAvailability).toBeChecked();
+  await expect(ecsAvailability).toBeChecked();
+  await ecsAvailability.click();
+  await expect(ecsAvailability).not.toBeChecked();
+  await expect(toolsAvailability).toBeChecked();
+  await page.getByLabel('Projects for Coal', { exact: true }).click();
+  const coalTools = page.getByRole('checkbox', { name: 'TOOLS · Navigation tools availability for Coal', exact: true });
+  await coalTools.click();
+  await expect(coalTools).toBeChecked();
+  await expect(coalTools).toHaveCSS('appearance', 'auto');
+  await page.screenshot({ path: '/tmp/ticketbunker-repository-availability.png' });
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.locator('.project-row').filter({ hasText: 'Navigation tools' }).click();
   await page.getByRole('button', { name: 'Configure', exact: true }).click();
   await page.getByRole('button', { name: 'Repositories', exact: true }).click();
-  await expect(page.getByLabel('Repository 1 allowed remote')).toHaveValue('github.com/example/navigation');
-  await expect(page.getByRole('button', { name: 'Connect folder' })).toBeEnabled();
+  await expect(page.getByRole('table', { name: 'Local repositories' })).toContainText('github.com/example/navigation');
+  await expect(page.getByRole('button', { name: 'Save repositories' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add local repository', exact: true }).click();
+  await page.getByLabel('Local repository path').fill(lab.repo);
+  await page.getByRole('button', { name: 'Connect repository', exact: true }).click();
+  await expect(page.locator('.repository-row').filter({ hasText: 'github.com/example/coal' })).toContainText(lab.repo);
+  await expect(page.locator('.repository-row').filter({ hasText: 'github.com/example/navigation' })).toContainText('Not connected');
   await page.screenshot({ path: '/tmp/ticketbunker-project-repository-selection.png' });
   await page.getByRole('button', { name: 'Boards', exact: true }).click();
   await page.getByRole('list', { name: 'Boards', exact: true }).getByRole('button', { name: /Navigation board/ }).click();
@@ -69,7 +92,10 @@ try {
   const buildCommand = page.getByLabel('Build command', { exact: true });
   await buildCommand.fill('make navigation');
   await page.getByRole('button', { name: 'Repositories', exact: true }).click();
-  await page.getByRole('button', { name: 'Save repositories', exact: true }).click();
+  await page.getByRole('button', { name: 'Add local repository', exact: true }).click();
+  await page.getByLabel('Local repository path').fill(lab.repo);
+  await page.getByRole('button', { name: 'Connect repository', exact: true }).click();
+  await expect(page.getByLabel('Local repository path')).toHaveCount(0);
   await page.getByRole('button', { name: 'Checks', exact: true }).click();
   await expect(buildCommand).toHaveValue('make navigation');
   // The drawer leaves part of the ticket list visible; that route is guarded too.
@@ -108,13 +134,13 @@ try {
   const editor = page.getByLabel('Edit README.md');
   const original = await editor.inputValue();
   await editor.fill('discard this draft\n');
-  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to ticket', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'You have unsaved changes' });
   await expect(dialog).toBeVisible();
   await page.screenshot({ path: '/tmp/ticketbunker-unsaved-changes.png' });
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(editor).toHaveValue('discard this draft\n');
-  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to ticket', exact: true }).click();
   await dialog.getByRole('button', { name: 'Do not save' }).click();
   if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== original) throw new Error('Discard changed the file');
   await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
@@ -122,7 +148,7 @@ try {
   await editor.fill('retain this conflicting draft\n');
   // Simulate another editor changing this disposable fixture after it opened.
   writeFileSync(`${lab.repo}/README.md`, 'changed by another editor\n');
-  await page.getByRole('button', { name: '← Ticket', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to ticket', exact: true }).click();
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Your draft is still open');
   await expect(editor).toHaveValue('retain this conflicting draft\n');
@@ -131,12 +157,12 @@ try {
   await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
   await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
   await editor.fill('saved through confirmation\n');
-  await page.getByRole('button', { name: '← Tickets', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to tickets', exact: true }).click();
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByLabel('Search tickets')).toBeVisible();
   if (readFileSync(`${lab.repo}/README.md`, 'utf8') !== 'saved through confirmation\n') throw new Error('Save did not reach disk');
   if (errors.length) throw new Error(errors.join('\n'));
-  console.log('PASS real-browser Bunker registry, Project repository selection, automatic board sync failure/retry, configuration draft preservation and cancel/discard/save, default type, branch creation, clear filters, unsaved file cancel/discard/save, external-edit conflict');
+  console.log('PASS real-browser Bunker multi-Project availability toggles, automatic local origin matching, automatic board sync failure/retry, configuration draft preservation and cancel/discard/save, default type, branch creation, clear filters, arrow-only navigation, unsaved file cancel/discard/save, external-edit conflict');
 } catch (error) {
   await page.screenshot({ path: '/tmp/ticketbunker-hardening-failure.png' });
   console.error(await page.locator('body').innerText());

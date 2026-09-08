@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import BackButton from "./BackButton";
 import { useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import TrackerConnections, { type Connection } from "./TrackerConnections";
 import { chooseGitDirectory, command } from "./transport";
@@ -28,6 +29,13 @@ function normalizedChecks(content: Partial<ChecksContent> = {}): ChecksContent {
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const repositoryFields = (items: Repository[]) => items.map(({ id, name, canonical_remote, default_branch }) => ({ id, name, canonical_remote, default_branch }));
 
+function projectChoices(projects: Project[], parent = ""): { project: Project; label: string }[] {
+  return projects.flatMap((project) => {
+    const label = `${parent}${project.key} · ${project.name}`;
+    return [{ project, label }, ...projectChoices(project.children || [], `${label} / `)];
+  });
+}
+
 export default function ConfigurationPanel({
   bunker,
   project,
@@ -54,6 +62,7 @@ export default function ConfigurationPanel({
   const [fields, setFields] = useState<TicketField[]>([]);
   const [providers, setProviders] = useState<Record<string, Integration>>({});
   const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [availableBindings, setAvailableBindings] = useState(bunker.repositories);
   const [tracker, setTracker] = useState<TrackerSource>(EMPTY_TRACKER);
   const [tab, setTab] = useState<ConfigurationTab>(initialTab || (project ? "board" : "trackers"));
   const [provider, setProvider] = useState("github");
@@ -62,7 +71,7 @@ export default function ConfigurationPanel({
   const [checks, setChecks] = useState<ChecksContent>(EMPTY_CHECKS);
   const baseline = useRef({ fields: [] as TicketField[], providers: {} as Record<string, Integration>, repositories: [] as Repository[], checks: EMPTY_CHECKS });
   const [connecting, setConnecting] = useState("");
-  const [pathRepository, setPathRepository] = useState<Repository | null>(null);
+  const [pathRepository, setPathRepository] = useState<Repository | "auto" | null>(null);
   const [localPath, setLocalPath] = useState("");
   const [error, setError] = useState("");
   const [boards, setBoards] = useState<Board[] | null>(null);
@@ -72,6 +81,7 @@ export default function ConfigurationPanel({
   const [choice, setChoice] = useState<Board | null>(null);
   const [linkSummary, setLinkSummary] = useState<string[]>([]);
   const githubConnected = Boolean(trackers?.github);
+  useEffect(() => setAvailableBindings(bunker.repositories), [bunker.repositories]);
   const drafts = useRef({ fields, providers, repositories, checks });
   drafts.current = { fields, providers, repositories, checks };
 
@@ -291,16 +301,16 @@ export default function ConfigurationPanel({
   }
 
   async function publishRepositories() {
-    if (!state) return;
+    if (!state || project) return;
     setBusy(true);
     setError("");
     try {
       const value = await command<{
         configuration: ConfigurationState;
         bunker: Bunker;
-      }>(project ? "application.project.repositories.select" : "application.bunker.repository.replace", {
+      }>("application.bunker.repository.replace", {
         bunker_id: bunker.id,
-        project_id: project?.id || "",
+        project_id: "",
         expected_revision: state.repositories.revision,
         repositories: repositories.map(({ id, name, canonical_remote, default_branch }) => ({
           id,
@@ -325,23 +335,48 @@ export default function ConfigurationPanel({
     setRepositories((values) => values.map((value, item) => item === index ? { ...value, ...patch } : value));
   }
 
-  async function connectRepository(repository: Repository, suppliedPath?: string) {
-    if (!project || !repository.id) return;
+  async function toggleAvailability(repository: Repository, target: Project, enabled: boolean) {
+    if (project || !canWrite || busy || dirty.repositories) return;
+    setBusy(true);
+    setError("");
+    try {
+      // Read this Project's revision, then change only this remote. Other
+      // repositories and their stable binding IDs must survive the toggle.
+      const current = await command<ConfigurationState>("application.bunker.configuration.get", { bunker_id: bunker.id, project_id: target.id });
+      const items = current.repositories.items;
+      const exists = items.some((row) => row.canonical_remote === repository.canonical_remote);
+      const selected = enabled
+        ? exists ? items : [...items, { ...repository, id: "", project_id: target.id }]
+        : items.filter((row) => row.canonical_remote !== repository.canonical_remote);
+      const value = await command<{ bunker: Bunker }>("application.project.repositories.select", {
+        bunker_id: bunker.id, project_id: target.id,
+        expected_revision: current.repositories.revision, repositories: repositoryFields(selected),
+      });
+      setAvailableBindings(value.bunker.repositories);
+      onBunker(value.bunker);
+      notify(`${repository.name} ${enabled ? "available to" : "removed from"} ${target.key}`);
+    } catch (reason) {
+      setError(String(reason));
+    } finally { setBusy(false); }
+  }
+
+  async function connectRepository(repository: Repository | "auto" = "auto", suppliedPath?: string) {
+    if (!project) return;
     setError("");
     try {
       const path = suppliedPath ?? await chooseGitDirectory();
       if (!path) {
         if (!window.__TAURI__?.dialog) {
           setPathRepository(repository);
-          setLocalPath(repository.local_path || "");
+          setLocalPath(repository === "auto" ? "" : repository.local_path || "");
         }
         return;
       }
-      setConnecting(repository.id);
+      setConnecting(repository === "auto" ? "auto" : repository.id);
       const value = await command<{ bunker: Bunker }>("application.bunker.repository.attach", {
         bunker_id: bunker.id,
         project_id: project.id,
-        binding_id: repository.id,
+        ...(repository === "auto" ? {} : { binding_id: repository.id }),
         path,
       });
       const configuration = await command<ConfigurationState>("application.bunker.configuration.get", {
@@ -418,7 +453,7 @@ export default function ConfigurationPanel({
     <aside className="configuration-drawer" aria-label="Configuration">
       <header>
         <div><p className="eyebrow">{project ? `${project.key} · project setup` : tab === "defaults" ? "Bunker defaults · new projects" : "Bunker setup"}</p><h2>Configuration</h2></div>
-        <button className="icon-control" onClick={() => protect(onClose)} aria-label="Back">←</button>
+        <BackButton onClick={() => protect(onClose)} />
       </header>
       <fieldset className="configuration-fields" disabled={busy || savingAll || Boolean(connecting)}>
       <nav>
@@ -513,35 +548,49 @@ export default function ConfigurationPanel({
 
       {state && tab === "repositories" && <section className="config-surface">
         <div className="config-heading">
-          <div><h3>{project ? "Project repositories" : "Allowed repositories"}</h3><p>{project ? "Select from the Bunker, then connect your local folder." : "Administrators manage the source repositories Projects can use."}</p></div>
-          <button className="primary" disabled={!canWrite || busy} onClick={publishRepositories}>{busy ? "Saving…" : "Save repositories"}</button>
+          <div><h3>{project ? "Local repositories" : "Allowed repositories"}</h3><p>{project ? "Folders match the remotes enabled for this Project." : "Expand a repository to choose its Projects."}</p></div>
+          {project ? <button className="primary" disabled={Boolean(connecting) || !repositories.length} onClick={() => connectRepository()}>Add local repository</button>
+            : <button className="primary" disabled={!canWrite || busy} onClick={publishRepositories}>{busy ? "Saving…" : "Save repositories"}</button>}
         </div>
-        <div className={`repository-matrix${project ? "" : " repository-registry"}`} role="table" aria-label={project ? "Project repositories" : "Allowed repositories"}>
-          <div className="repository-heading" role="row"><span>#</span><span>Name</span><span>Allowed remote</span><span>Base</span>{project && <span>This computer</span>}<span /></div>
-          {repositories.map((repository, index) => <div className="repository-row" role="row" key={repository.id || `new-${index}`}>
-            <span className="repository-index">{index + 1}</span>
-            <input aria-label={`Repository ${index + 1} name`} value={repository.name} disabled={!canWrite || Boolean(project)} onChange={(event) => updateRepository(index, { name: event.target.value })} />
-            {project ? <select aria-label={`Repository ${index + 1} allowed remote`} value={repository.canonical_remote || ""} disabled={!canWrite || Boolean(repository.id)} onChange={(event) => {
-              const chosen = state.repository_registry?.items.find((row) => row.canonical_remote === event.target.value);
-              if (chosen) updateRepository(index, { ...chosen, id: "", project_id: project.id });
-            }}><option value="">Select repository</option>{(state.repository_registry?.items || repositories).map((row) => <option key={row.canonical_remote} value={row.canonical_remote}>{row.canonical_remote}</option>)}</select>
-              : <input aria-label={`Repository ${index + 1} allowed remote`} value={repository.canonical_remote || ""} disabled={!canWrite} placeholder="github.com/owner/repository" onChange={(event) => updateRepository(index, { canonical_remote: event.target.value })} />}
-            <input aria-label={`Repository ${index + 1} base branch`} value={repository.default_branch || ""} disabled={!canWrite} placeholder="main" onChange={(event) => updateRepository(index, { default_branch: event.target.value })} />
-            {project && <div className="repository-local">
-              {repository.local_path ? <span title={repository.local_path}>{repository.local_path}</span> : <span>Not connected</span>}
-              <button disabled={!repository.id || connecting === repository.id} onClick={() => connectRepository(repository)}>{connecting && connecting === repository.id ? "Working…" : repository.local_path ? "Change folder" : "Connect folder"}</button>
-              {repository.local_path && <button className="danger-control" disabled={connecting === repository.id} onClick={() => disconnectRepository(repository)}>Disconnect</button>}
-            </div>}
-            <button aria-label={`Remove ${repository.name || `repository ${index + 1}`}`} disabled={!canWrite || Boolean(repository.local_path)} onClick={() => setRepositories((values) => values.filter((_, item) => item !== index))}>−</button>
+        <div className={`repository-matrix ${project ? "repository-checkouts" : "repository-registry"}`} role="table" aria-label={project ? "Local repositories" : "Allowed repositories"}>
+          <div className="repository-heading" role="row"><span>#</span><span>Name</span><span>Remote</span><span>Base</span>{project ? <span>This computer</span> : <span />}</div>
+          {repositories.map((repository, index) => <div role="rowgroup" key={repository.id || `new-${index}`}>
+            <div className="repository-row" role="row">
+              <span className="repository-index">{index + 1}</span>
+              {project ? <>
+                <span>{repository.name}</span><span className="repository-identity">{repository.canonical_remote}</span><span>{repository.default_branch}</span>
+                <div className="repository-local">
+                  {repository.local_path ? <>
+                    <span title={repository.local_path}>{repository.local_path}</span>
+                    <button disabled={Boolean(connecting)} onClick={() => connectRepository(repository)}>Change folder</button>
+                    <button className="danger-control" disabled={Boolean(connecting)} onClick={() => disconnectRepository(repository)}>Disconnect</button>
+                  </> : <span>Not connected</span>}
+                </div>
+              </> : <>
+                <input aria-label={`Repository ${index + 1} name`} value={repository.name} disabled={!canWrite || busy} onChange={(event) => updateRepository(index, { name: event.target.value })} />
+                <input aria-label={`Repository ${index + 1} allowed remote`} value={repository.canonical_remote || ""} disabled={!canWrite || busy} placeholder="github.com/owner/repository" onChange={(event) => updateRepository(index, { canonical_remote: event.target.value })} />
+                <input aria-label={`Repository ${index + 1} base branch`} value={repository.default_branch || ""} disabled={!canWrite || busy} placeholder="main" onChange={(event) => updateRepository(index, { default_branch: event.target.value })} />
+                <button aria-label={`Remove ${repository.name || `repository ${index + 1}`}`} disabled={!canWrite || busy} onClick={() => setRepositories((values) => values.filter((_, item) => item !== index))}>−</button>
+              </>}
+            </div>
+            {!project && <div role="row"><div role="cell" className="repository-projects"><details>
+              <summary aria-label={`Projects for ${repository.name}`}>Projects · {availableBindings.filter((row) => row.canonical_remote === repository.canonical_remote).length}</summary>
+              {dirty.repositories && <p>Save repositories before changing availability.</p>}
+              {projectChoices(bunker.projects).map(({ project: target, label }) => <label key={target.id}>
+                <input type="checkbox" aria-label={`${label} availability for ${repository.name}`} checked={availableBindings.some((row) => row.project_id === target.id && row.canonical_remote === repository.canonical_remote)} disabled={!canWrite || busy || dirty.repositories} onChange={(event) => toggleAvailability(repository, target, event.target.checked)} />
+                {label}
+              </label>)}
+              {!bunker.projects.length && <p>Create a Project to make this repository available.</p>}
+            </details></div></div>}
           </div>)}
-          {repositories.length === 0 && <div className="repository-empty">{project ? "No repositories selected. Administrators can add allowed remotes in Bunker settings." : "No allowed repositories yet."}</div>}
+          {repositories.length === 0 && <div className="repository-empty">{project ? "No repositories enabled. Ask a Bunker owner to enable this Project under Bunker → Repositories → Projects." : "No allowed repositories yet."}</div>}
         </div>
         {pathRepository && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); void connectRepository(pathRepository, localPath.trim()); }}>
           <label>Local repository path<input autoFocus value={localPath} onChange={(event) => setLocalPath(event.target.value)} required /></label>
-          <p>Path to {pathRepository.name} on the computer running TicketBunker.</p>
+          <p>{pathRepository === "auto" ? "Choose a Git folder on this computer. Its origin selects the matching repository." : `Path to ${pathRepository.name} on this computer.`}</p>
           <div><button type="button" disabled={Boolean(connecting)} onClick={() => setPathRepository(null)}>Cancel</button><button className="primary" disabled={Boolean(connecting) || !localPath.trim()}>Connect repository</button></div>
         </form>}
-        <button disabled={!canWrite} onClick={() => setRepositories((values) => [...values, { id: "", project_id: project?.id || "", name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>
+        {!project && <button disabled={!canWrite || busy} onClick={() => setRepositories((values) => [...values, { id: "", project_id: "", name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>}
       </section>}
 
       {state && project && tab === "checks" && <section className="config-surface">

@@ -79,7 +79,7 @@ def _source_root(raw: str) -> Path:
 
 def _source_remote(root: Path) -> str:
     process = subprocess.run(
-        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
         capture_output=True,
         text=True,
     )

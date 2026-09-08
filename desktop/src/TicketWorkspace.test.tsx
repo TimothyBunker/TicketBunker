@@ -68,10 +68,13 @@ describe("Bunker-native ticket work", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
     const input = await screen.findByLabelText("Edit README.md");
     fireEvent.change(input, { target: { value: "edited\n" } });
-    fireEvent.click(screen.getByRole("button", { name: "← Ticket" }));
+    const back = screen.getByRole("button", { name: "Back to ticket" });
+    expect(back.textContent).toBe("←");
+    expect(back).toHaveAttribute("title", "Back to ticket");
+    fireEvent.click(back);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(input).toHaveValue("edited\n");
-    fireEvent.click(screen.getByRole("button", { name: "← Ticket" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to ticket" }));
     const { within } = await import("@testing-library/react");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("editor.save", { path: "README.md", content: "edited\n", expected_digest: "old" }, "/work/coal"));

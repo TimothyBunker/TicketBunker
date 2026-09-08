@@ -70,7 +70,7 @@ describe("Bunker and Project boundaries", () => {
     });
   });
 
-  it("creates a local Bunker with its allowed remotes and first Project selection", async () => {
+  it("creates a local Bunker with remotes but configures availability separately", async () => {
     transport.command.mockResolvedValue({ bunkers: [bunker], bunker });
     render(<BunkerHub state={{ ...state, bunkers: [] }} selection={null} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
     fireEvent.click(screen.getAllByRole("button", { name: "Create Bunker" })[0]);
@@ -79,10 +79,9 @@ describe("Bunker and Project boundaries", () => {
     fireEvent.change(drawer.getByLabelText("Allowed Git remotes"), { target: { value: "https://github.com/example/navigation.git\nhttps://github.com/example/tools.git" } });
     fireEvent.change(drawer.getByLabelText("First project key"), { target: { value: "NAV" } });
     fireEvent.change(drawer.getByLabelText("First project name"), { target: { value: "Navigation" } });
-    fireEvent.change(drawer.getByLabelText("First project repository"), { target: { value: "https://github.com/example/navigation.git" } });
+    expect(drawer.queryByLabelText("First project repository")).not.toBeInTheDocument();
     fireEvent.click(drawer.getByRole("button", { name: "Create Bunker" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.create", expect.objectContaining({
-      first_repository: "https://github.com/example/navigation.git",
       repositories: [{ canonical_remote: "https://github.com/example/navigation.git", default_branch: "main" }, { canonical_remote: "https://github.com/example/tools.git", default_branch: "main" }],
     })));
   });
@@ -94,10 +93,10 @@ describe("Bunker and Project boundaries", () => {
     render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add local repository" }));
     fireEvent.change(await screen.findByLabelText("Local repository path"), { target: { value: "/work/coal" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
-    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", { bunker_id: bunker.id, project_id: project.id, binding_id: "coal", path: "/work/coal" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", { bunker_id: bunker.id, project_id: project.id, path: "/work/coal" }));
   });
 
   it("clears search and filters in one click", async () => {
@@ -411,10 +410,10 @@ describe("Bunker and Project boundaries", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
-    expect(await screen.findByRole("table", { name: "Project repositories" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("github.com/Example/coal")).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "Local repositories" })).toBeInTheDocument();
+    expect(screen.getByText("github.com/Example/coal")).toBeInTheDocument();
     expect(screen.getByText("Not connected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect folder" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add local repository" })).toBeInTheDocument();
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith(
       "application.bunker.configuration.get",
       { bunker_id: bunker.id, project_id: project.id },

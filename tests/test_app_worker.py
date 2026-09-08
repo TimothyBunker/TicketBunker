@@ -56,6 +56,7 @@ class ApplicationWorkerTests(unittest.TestCase):
         self.assertIn("application.ticket.get", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.configuration.replace", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.repository.replace", app_worker.DESKTOP_ACTIONS)
+        self.assertIn("application.project.repositories.select", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.release.check", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.share", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.invitation.create", app_worker.DESKTOP_ACTIONS)
@@ -63,6 +64,19 @@ class ApplicationWorkerTests(unittest.TestCase):
         self.assertIn("coworker.chat", app_worker.DESKTOP_ACTIONS)
         self.assertIn("editor.save", app_worker.DESKTOP_ACTIONS)
         self.assertNotIn("ticket.create", app_worker.DESKTOP_ACTIONS)
+
+    def test_repository_availability_uses_the_real_worker_and_backend(self) -> None:
+        def call(action, **payload):
+            value = app_worker.dispatch_request({"id": action, "action": action, "payload": payload}, default_root=self.root)
+            self.assertTrue(value["ok"], value)
+            return value
+        row = {"name": "Dummy", "canonical_remote": "github.com/example/dummy", "default_branch": "main"}
+        bunker = call("application.bunker.create", name="Dummy", project_key="NAV", repositories=[row])["bunker"]
+        bid, pid = bunker["id"], bunker["projects"][0]["id"]
+        cfg = call("application.bunker.configuration.get", bunker_id=bid, project_id=pid)
+        selected = call("application.project.repositories.select", bunker_id=bid, project_id=pid,
+            expected_revision=cfg["repositories"]["revision"], repositories=[row])
+        self.assertEqual(selected["bunker"]["repositories"][0]["canonical_remote"], row["canonical_remote"])
 
     def test_command_rejections_are_machine_readable(self) -> None:
         with mock.patch.object(

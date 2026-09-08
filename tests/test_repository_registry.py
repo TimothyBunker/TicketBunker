@@ -126,6 +126,44 @@ class RegistryTests(unittest.TestCase):
             retried = self.call("application.project.sync", bunker_id=self.bid, project_id=self.pid)
             self.assertEqual(retried["sync"]["unchanged"], 1)
 
+    def test_automatic_local_match_uses_project_availability_without_creating_bindings(self):
+        from test_bunkerruntime import git
+        checkout = Path(self.tmp.name).resolve() / "auto-checkout"
+        checkout.mkdir()
+        git(checkout, "init")
+        git(checkout, "remote", "add", "origin", "git@github.com:example/navigation.git")
+        # A Bunker registry entry alone does not authorize a Project.
+        with mock.patch.object(bunkerdb, "_fetch_repository") as fetch:
+            with self.assertRaisesRegex(commands.CommandRejected, "Bunker > Repositories > Projects"):
+                self.call("application.bunker.repository.attach", bunker_id=self.bid, project_id=self.pid, path=str(checkout))
+            fetch.assert_not_called()
+        first = self.select()["bunker"]["repositories"][0]
+        second = self.call("application.bunker.project.create", bunker_id=self.bid, key="TOOLS", name="Tools")["bunker"]
+        second_pid = next(row["id"] for row in second["projects"] if row["key"] == "TOOLS")
+        cfg = bunkerdb.get_configuration(self.bid, project_id=second_pid)
+        enabled = self.call("application.project.repositories.select", bunker_id=self.bid, project_id=second_pid,
+            expected_revision=cfg["repositories"]["revision"], repositories=self.rows)["bunker"]
+        second_binding = next(row for row in enabled["repositories"] if row["project_id"] == second_pid)
+        # Common Git insteadOf transport rewrites must not change the registry identity.
+        git(checkout, "config", f"url.{checkout.as_posix()}/mirror.git.insteadOf", "git@github.com:example/navigation.git")
+        self.assertNotEqual(git(checkout, "remote", "get-url", "origin"), "git@github.com:example/navigation.git")
+        with mock.patch.object(bunkerdb, "_fetch_repository") as fetch:
+            attached = self.call("application.bunker.repository.attach", bunker_id=self.bid, project_id=second_pid, path=str(checkout))["bunker"]
+            fetch.assert_called_once_with(checkout)
+        by_id = {row["id"]: row for row in attached["repositories"]}
+        self.assertEqual(set(by_id), {first["id"], second_binding["id"]})
+        self.assertEqual(by_id[second_binding["id"]]["local_path"], str(checkout))
+        self.assertIsNone(by_id[first["id"]]["local_path"])
+        self.assertNotIn(str(checkout), str(bunkerdb.local_publication(self.bid)))
+        # Disabling one Project must leave the other's identity and checkout intact.
+        remaining = self.select([])["bunker"]["repositories"]
+        self.assertEqual([row["id"] for row in remaining], [second_binding["id"]])
+        git(checkout, "remote", "set-url", "origin", "https://github.com/example/wrong.git")
+        with mock.patch.object(bunkerdb, "_fetch_repository") as fetch:
+            with self.assertRaisesRegex(commands.CommandRejected, "does not allow"):
+                self.call("application.bunker.repository.attach", bunker_id=self.bid, project_id=second_pid, path=str(checkout))
+            fetch.assert_not_called()
+
 
 class RegistryReplicaTests(unittest.TestCase):
     def test_owner_setup_reaches_a_second_device_without_granting_admin(self):
@@ -153,6 +191,34 @@ class RegistryReplicaTests(unittest.TestCase):
         self.assertFalse(bunkerdb.get_configuration(joined["id"])["permission"]["can_write"])
         with self.assertRaises(commands.CommandRejected):
             fixture.dispatch("application.bunker.project.create", {"bunker_id": joined["id"], "key": "BAD", "name": "Forbidden"})
+        pid = next(row["id"] for row in joined["projects"] if row["key"] == "NAV")
+        member_bid = joined["id"]
+        cfg = bunkerdb.get_configuration(member_bid, project_id=pid)
+        with self.assertRaises(commands.CommandRejected):
+            fixture.dispatch("application.project.repositories.select", {"bunker_id": member_bid, "project_id": pid,
+                "expected_revision": cfg["repositories"]["revision"], "repositories": []})
+        # Members connect only their local folder, without supplying a remote or binding ID.
+        from test_bunkerruntime import git
+        checkout = fixture.root / "member-checkout"
+        checkout.mkdir()
+        git(checkout, "init")
+        git(checkout, "remote", "add", "origin", "git@github.com:example/navigation.git")
+        with mock.patch.object(bunkerdb, "_fetch_repository"):
+            attached = fixture.dispatch("application.bunker.repository.attach", {"bunker_id": member_bid,
+                "project_id": pid, "path": str(checkout)})["bunker"]
+        connected = next(row for row in attached["repositories"] if row["project_id"] == pid)
+        self.assertEqual(connected["local_path"], str(checkout))
+        fixture.as_user("admin")
+        tools_pid = next(row["id"] for row in configured["projects"] if row["key"] == "TOOLS")
+        cfg = bunkerdb.get_configuration(bid, project_id=tools_pid)
+        fixture.dispatch("application.project.repositories.select", {"bunker_id": bid, "project_id": tools_pid,
+            "expected_revision": cfg["repositories"]["revision"], "repositories": []})
+        self.assertTrue(all(row["local_path"] is None for row in bunkerdb.get_bunker(bid)["repositories"]))
+        fixture.as_user("member")
+        fixture.dispatch("application.bunker.sync", {"bunker_id": member_bid})
+        rows = bunkerdb.get_bunker(member_bid)["repositories"]
+        self.assertEqual([row["id"] for row in rows], [connected["id"]])
+        self.assertEqual(rows[0]["local_path"], str(checkout))
 
 
 class ServiceAdministrationTests(unittest.TestCase):

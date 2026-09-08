@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
+import BackButton from "./BackButton";
 import { UnsavedChangesBoundary, useGuardedAction } from "./UnsavedChanges";
 import { command } from "./transport";
 import { trackersSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
@@ -124,7 +125,7 @@ function MembersPanel({
   const pending = invitations.filter((value) => value.state === "pending");
   return (
     <aside className="action-drawer members-drawer" aria-label="Members">
-      <header><h2>Members</h2><button className="icon-control" onClick={onClose} aria-label="Close">←</button></header>
+      <header><h2>Members</h2><BackButton label="Close" onClick={onClose} /></header>
       <p className="drawer-copy">{remoteLabel(bunker)}. {canInvite ? "Only Bunker owners can invite members or change shared setup." : "Ask a Bunker owner to invite people or change shared setup."}</p>
       {error && <div className="inline-error">{error}</div>}
       {!members && !error && <div className="ticket-loading">Loading members</div>}
@@ -361,7 +362,7 @@ function ActionPanel({
     } else if (mode === "project" && bunker) {
       await submit(
         "application.bunker.project.create",
-        { ...values, bunker_id: bunker.id, parent_id: project?.id || values.parent_id || "", repository_remotes: form.getAll("repository_remotes") },
+        { ...values, bunker_id: bunker.id, parent_id: project?.id || values.parent_id || "" },
         `Added ${values.name}`,
       );
     } else if (mode === "share" && bunker) {
@@ -416,7 +417,7 @@ function ActionForm({
   const submitLabel = { create: "Create Bunker", join: "Join Bunker", project: title, share: "Share Bunker", members: "", config: "", "": "" }[mode];
   return (
     <aside className="action-drawer" aria-label={title}>
-      <header><h2>{title}</h2><button className="icon-control" onClick={onClose} aria-label="Close">←</button></header>
+      <header><h2>{title}</h2><BackButton label="Close" onClick={onClose} /></header>
       <form onSubmit={onSubmit}>
         {mode === "create" && <>
           <label>Bunker name<input name="name" autoFocus required /></label>
@@ -424,7 +425,6 @@ function ActionForm({
           <label>Allowed Git remotes<textarea name="allowed_remotes" rows={3} placeholder="One remote per line" value={allowedRemotes} onChange={(event) => setAllowedRemotes(event.target.value)} /></label>
           <label>First project key<input name="project_key" placeholder="ECS" maxLength={32} required /></label>
           <label>First project name<input name="project_name" placeholder="Entity Component System" required /></label>
-          <label>First project repository<select name="first_repository"><option value="">Choose later</option>{allowedRemotes.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).map((value) => <option key={value}>{value}</option>)}</select></label>
         </>}
         {mode === "join" && <>
           <p className="drawer-copy">Paste the link a Bunker owner sent you. TicketBunker signs this computer in to their server and installs a copy of the Bunker with its projects and setup already configured.</p>
@@ -442,7 +442,6 @@ function ActionForm({
             : <label>Parent<select name="parent_id"><option value="">Top level</option>{flatten(bunker?.projects || []).map(({ project: value, depth }) => <option key={value.id} value={value.id}>{"· ".repeat(depth)}{value.key} · {value.name}</option>)}</select></label>}
           <label>Project key<input name="key" placeholder="ECS" maxLength={32} required /></label>
           <label>Project name<input name="name" required /></label>
-          <fieldset><legend>Repositories</legend>{(bunker?.repository_registry?.items || []).map((row) => <label key={row.canonical_remote}><input type="checkbox" name="repository_remotes" value={row.canonical_remote} />{row.name} · {row.canonical_remote}</label>)}{!bunker?.repository_registry?.items.length && <p>Add allowed repositories in Bunker settings, or connect this Project later.</p>}</fieldset>
           <label>Description<textarea name="description" rows={3} /></label>
         </>}
         {error && <div className="inline-error">{error}</div>}

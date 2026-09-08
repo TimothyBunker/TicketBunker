@@ -595,7 +595,7 @@ class ViewerTests(unittest.TestCase):
         self.assertIn('data-line="2"', page)
         self.assertIn('style="tab-size:4"', page)
         self.assertIn('data-ticket-return="/ticket/TB-9"', page)
-        self.assertIn('href="/ticket/TB-9"><span aria-hidden="true">←</span> Back to TB-9</a>', page)
+        self.assertIn('href="/ticket/TB-9" aria-label="Back to TB-9" title="Back to TB-9"><span aria-hidden="true">←</span></a>', page)
         self.assertIn('data-coworker aria-label="Ticket coworker"', page)
         self.assertIn('data-coworker-collapse aria-label="Collapse ticket coworker"', page)
         self.assertIn("data-source-selection-ask", page)

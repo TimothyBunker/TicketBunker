@@ -1,5 +1,6 @@
 import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import FloatingActions from "./FloatingActions";
+import BackButton from "./BackButton";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
 import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
@@ -663,7 +664,7 @@ function TicketRail({
         })}
         {creating && !candidate && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setCandidate({ name: String(data.get("name") || ""), base: String(data.get("base") || "") }); }}><label>Short description<input name="name" placeholder="position-system" required /></label><label>Branch from<select name="base" disabled={!bases.length}>{bases.map((base) => <option key={base} value={base}>{base}</option>)}</select></label>{baseError && <p role="alert">{baseError}</p>}<button className="primary" disabled={!bases.length}>Review branch</button></form>}
         {creating && !candidate && existing.length > 0 && <div className="branch-form"><label>Existing branch<select value={attachment} onChange={(event) => setAttachment(event.target.value)}><option value="">Choose branch</option>{existing.map((name) => <option key={name}>{name}</option>)}</select></label><p>Link this branch to the ticket. Your checkout will not change.</p><button disabled={busy || !attachment} onClick={attachBranch}>Attach branch</button></div>}
-        {candidate && <div className="confirmation"><strong>Create this branch?</strong><p>TicketBunker will require a clean worktree, switch to <code>{candidate.base}</code>, fast-forward it when possible, then create the ticket branch.</p><div><button onClick={() => setCandidate(null)}>Back</button><button className="primary" disabled={busy} onClick={createBranch}>Create branch</button></div></div>}
+        {candidate && <div className="confirmation"><strong>Create this branch?</strong><p>TicketBunker will require a clean worktree, switch to <code>{candidate.base}</code>, fast-forward it when possible, then create the ticket branch.</p><div><BackButton label="Back to branch options" onClick={() => setCandidate(null)} /><button className="primary" disabled={busy} onClick={createBranch}>Create branch</button></div></div>}
       </section>
     </aside>
   );
@@ -1000,7 +1001,7 @@ function SourceEditor({
   const wrap = Boolean(draft.settings.line_wrap);
   return (
     <section className={notes.length ? "source-editor annotated" : "source-editor"}>
-      <header><button className="back-control" onClick={onBack}>← Ticket</button><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}{notes.length > 0 && ` · ${notes.length} note${notes.length === 1 ? "" : "s"} from the report`}</small></div><div><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
+      <header><BackButton label="Back to ticket" onClick={onBack} /><div><strong>{draft.path}</strong><small>{draft.branch || "Detached"}{notes.length > 0 && ` · ${notes.length} note${notes.length === 1 ? "" : "s"} from the report`}</small></div><div><button className="primary" disabled={busy || content === draft.content} onClick={save}>Save</button></div></header>
       {notes.length > 0 && (
         <div className="note-filter" role="toolbar" aria-label="Notes by line" onKeyDown={(event) => { if (event.key === "ArrowRight") { event.preventDefault(); step(1); } else if (event.key === "ArrowLeft") { event.preventDefault(); step(-1); } }}>
           <span className="note-filter-label">Lines</span>
@@ -1215,7 +1216,7 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
     const source = chosen.length ? chosen : branchReports;
     return source.flatMap((report) => sourceNotes(report.content, editor.path));
   }, [editor?.path, detail, scope]);
-  if (error && !detail) return <div className="load-error"><button onClick={onBack}>← Tickets</button><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
+  if (error && !detail) return <div className="load-error"><BackButton label="Back to tickets" onClick={onBack} /><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;
   const link = sourceLink(detail);
@@ -1223,7 +1224,7 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
   return (
     <div className="ticket-shell">
       <header className="ticket-header">
-        <button className="back-control" onClick={() => protect(onBack)}>← Tickets</button>
+        <BackButton label="Back to tickets" onClick={() => protect(onBack)} />
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
         {!editor && <nav className="section-jumps" aria-label="Sections">
           {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={section === id ? "selected" : ""} aria-current={section === id ? "true" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
