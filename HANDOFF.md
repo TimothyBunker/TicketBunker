@@ -6,11 +6,17 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 
 ## Bunker repository setup and automatic board sync (2026-09-07)
 
-Installer preparation: app/runtime/native versions are now **0.6.2**; the
-candidate tag is **v0.6.2-rc2**. This includes `b8ef3a5`, whose branch CI passed.
-The release workflow builds Windows x64, Linux x64, and macOS Apple Silicon.
-Windows remains an unsigned prerelease. Verify the new tag's workflow and
-uploaded assets before claiming these installers are published.
+Published: **v0.6.2-rc2** at `1855aaf`, with app/runtime/native version **0.6.2**.
+Release: https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.2-rc2
+All three Release platform jobs and publication passed (run `34171059385`):
+Windows x64 NSIS, Linux x64 DEB/AppImage, and macOS Apple Silicon DMG, plus
+runtime bundles. All seven binaries have uploaded adjacent SHA-256 files;
+their contents were checked against GitHub's uploaded-asset digests. Branch
+CI/browser and Windows/macOS portability passed for the candidate. Windows
+remains an unsigned prerelease; installed-app interaction still needs Tim's
+smoke test. Close the app, install the new build, and reopen. Separately hosted
+`tb serve` processes also need updating/restarting for the new server-side
+registry and administrator rules; updating a desktop client alone cannot do it.
 Candidate rc1 caught a first-click branch-panel reset race and a Windows
 fixture cleanup race after successful collaboration checks. The panel now
 resets before paint; the fixture bounds retries for Windows sharing violations
@@ -19,6 +25,7 @@ The rc1 Windows core run also exceeded a five-second test-only completion
 budget after releasing the repository lock. The branch's follow-up test gives
 real Git work thirty seconds, preserving its exclusion assertion. This changes
 no shipped runtime behavior and is not a reason to rebuild a green rc2 binary.
+That test-only follow-up is `731c403`, not part of the immutable rc2 tag.
 
 Changes since the 0.6.1-rc3 installer below:
 
