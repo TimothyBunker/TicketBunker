@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { command } from "./transport";
+import { clearBoardCache } from "./boardCache";
 import type { Bunker } from "./types";
 
 export const TRACKER_LABELS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", jira: "Jira" };
@@ -36,6 +37,7 @@ export default function TrackerConnections({
         { provider, token, bunker_id: bunkerId || "" },
       );
       form.reset();
+      clearBoardCache();
       onConnected(result.trackers, result.connection, result.bunker);
       const label = TRACKER_LABELS[provider] || provider;
       onMessage(result.connection.account ? `${label} connected as ${result.connection.account} on this computer` : `${label} token saved on this computer`);

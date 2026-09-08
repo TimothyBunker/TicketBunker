@@ -705,6 +705,32 @@ def command_bunker_repository_attach(
     return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
 
 
+@commands.register("application.bunker.project.inspect")
+def command_bunker_project_inspect(_context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    return _bunker_result(bunkerdb.inspect_project_change, str(payload.get("bunker_id") or ""), str(payload.get("project_id") or ""))
+
+
+@commands.register("application.bunker.project.rename")
+def command_bunker_project_rename(_context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    return _edit_bunker_project(payload, delete=False)
+
+
+@commands.register("application.bunker.project.delete")
+def command_bunker_project_delete(_context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("confirmed") is not True:
+        raise commands.CommandRejected("confirmation_required", "Confirm Project deletion first. Local Git folders and tracker issues are never deleted.")
+    return _edit_bunker_project(payload, delete=True)
+
+
+def _edit_bunker_project(payload: dict[str, Any], *, delete: bool) -> dict[str, Any]:
+    bid = str(payload.get("bunker_id") or "")
+    proposal = _bunker_result(bunkerdb.propose_project_edit, bid, str(payload.get("project_id") or ""),
+        str(payload.get("expected_revision") or ""), name=str(payload.get("name") or ""), delete=delete)
+    accepted = _publish_changes(bid, proposal) if proposal["mode"] == "remote" else None
+    bunker = _bunker_result(bunkerdb.apply_project_edit, bid, proposal, accepted=accepted)
+    return {"bunker": bunker, "bunkers": bunkerdb.list_bunkers()}
+
+
 @commands.register("application.bunker.repository.replace")
 def command_bunker_repository_replace(
     _context: commands.CommandContext, payload: dict[str, Any]

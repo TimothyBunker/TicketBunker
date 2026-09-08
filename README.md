@@ -169,9 +169,9 @@ The desktop launcher is the primary onboarding path:
    invitation, then authenticates and enrolls the user before creating a local
    replica.
 3. A Bunker page lists its Projects with their allowed repositories and ticket
-   counts; **Add project** builds the recursive work hierarchy. Tickets are
+   counts; the **+** builds the recursive work hierarchy. Tickets are
    listed only inside a selected Project.
-4. Bunker owners manage allowed Git remotes in **Repositories**. Expand a
+4. Bunker owners manage allowed Git remotes in **⚙ → Repositories**. Expand a
    remote's **Projects** dropdown and toggle the Projects that may use it;
    each toggle saves immediately. One remote can serve multiple Projects.
    In a Project's **Configure → Repositories**, use **Add local repository**
@@ -187,20 +187,41 @@ The desktop launcher is the primary onboarding path:
    for owners, creates single-use invitation links and revokes pending ones.
    Nothing accepts a database connection string.
 
+The sidebar's four-square button opens all Bunkers; its **+** creates one.
+Bunker settings (Trackers, Defaults, Repositories, and Members/Share Bunker)
+live under the gear. Hover over an icon for its action; a red dot explains
+incomplete setup or a failed sync. Right-click a Project (or press Shift+F10)
+for **Edit**, **Rename**, or **Delete**. Rename preserves the Project key.
+Owners may delete empty Projects after confirmation; Projects containing
+tickets or subprojects cannot be deleted. Local Git folders and tracker
+issues are never removed.
+
 ### Bringing tickets in from your agile app
 
-1. On the Bunker page choose **Trackers** and paste a GitHub personal access
+1. On the Bunker page choose **⚙ → Trackers** and paste a GitHub personal access
    token (repository and Projects read access). TicketBunker verifies it, keeps
    it in a private file on this computer, and remembers the linked account.
-2. Open the Project and choose **Connect a board**. Pick a Project board or
+2. Open the Project and choose **⚙ → Boards**. Pick a Project board or
    repository from the list the token can see and press **Link board**. Link
    as many as the Project mirrors; **Unlink** removes one and keeps its tickets.
 3. Tickets sync automatically when the board is linked. If sync fails, the board
-   stays connected; use **Sync tickets** to retry or refresh later.
+   stays connected; use the circular-arrow **Sync tickets** icon on the main
+   Project page to retry or refresh later. Its hover text shows the last
+   successful sync in this app session or the latest failure.
    Issues arrive as tickets keyed by the Project key
    and issue number unless their titles already carry a key. Syncing again
    reports what was new, updated, or unchanged. Field mappings and ticket
    fields sit under the Board view as advanced disclosures.
+
+Board choices are cached for five minutes while moving between tabs.
+**Refresh boards** reloads that list; it does not sync tickets.
+In **Checks**, **Find commands** suggests commands from repository manifests;
+**Ask the agent** can inspect the build setup more deeply. Both require review
+and saving before a subsequent check runs. The exact build/test commands stay
+visible and editable. For CMake, `.tb-check-build` names the output directory
+in the scratch checkout, not a TicketBunker-only build target: `cmake --build`
+builds the project's default targets there. Adjust targets/options for your
+project before saving.
 
 GitLab and Jira tokens can be connected the same way; syncing those boards is
 the next step.

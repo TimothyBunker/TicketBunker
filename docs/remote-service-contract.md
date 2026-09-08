@@ -195,17 +195,28 @@ roles and capabilities to any member.
 ```
 
 Change kinds are `project` (payload: the project row, `expected_revision`
-empty for creation), `config-document` (payload: scope, kind, content),
+empty for creation), `project-delete` (record id: the Project id),
+`config-document` (payload: scope, kind, content),
 `repository-bindings` (record id: the project id; payload: the complete list;
 revisions are the content-derived digest both sides compute), `ticket`
 (record id: the ticket id; payload: `id`, `project_id`, `payload`,
 `source_kind`, `source_reference`; revisions are content digests), and
 `report` (record id: `ticket|scope|repository`; payload: `ticket_id`,
 `scope`, `repository_id`, `content`; revisions are content digests; the ticket
-and any named repository must exist). The first three require `config:write`;
+and any named repository must exist). Project, deletion, configuration, and
+repository-binding changes require `config:write`;
 `ticket` and `report` require `tickets:write`, so members may sync a Project's
 tracker and publish verified reports while only owners change its setup. A batch that
-mixes kinds needs every capability involved. Each change
+mixes kinds needs every capability involved. Rename/delete accept the
+`project_revision` content digest of identity, parent, key, name, description,
+and position as their expected revision. Rename cannot change key or parent.
+`project-delete` rejects Projects containing tickets, children, or repositories
+referenced by reports. Accepted deletion removes bindings and Project config
+in the same transaction, never local filesystem content. Subsequent snapshots
+omit the Project, allowing replicas to remove that empty Project; locally
+nonempty replicas stop with an error rather than discard data. This is not
+general ticket/report deletion support. Separately hosted services must be
+updated to accept this additional typed change. Each change
 carries an idempotency `key`, a record identity, the expected revision, and the
 revision the client proposes. The service applies the whole set transactionally
 and returns `results` (per key: `ok`, `revision`, and `replayed` when the key

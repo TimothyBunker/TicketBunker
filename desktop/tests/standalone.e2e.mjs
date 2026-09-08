@@ -19,7 +19,7 @@ try {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   const identity = page.getByRole("heading", { name: "Your local identity" });
   const withoutAgent = page.getByRole("button", { name: "Use without agent" });
-  const bunkersNavigation = page.getByRole("button", { name: "Bunkers", exact: true });
+  const bunkersNavigation = page.getByRole("button", { name: "All Bunkers", exact: true });
   await identity.or(withoutAgent).or(bunkersNavigation).first().waitFor({ state: "visible" });
   if (await identity.isVisible()) {
     await page.getByLabel("Name", { exact: true }).fill("TicketBunker QA");
@@ -56,7 +56,7 @@ try {
   await page.getByRole("heading", { name: "Configuration" }).waitFor();
   await page.getByRole("heading", { name: "Boards", exact: true }).waitFor();
   await page.getByRole("button", { name: "Repositories" }).click();
-  await page.getByRole("table", { name: "Project repositories" }).waitFor();
+  await page.getByRole("table", { name: "Local repositories" }).waitFor();
   await page.screenshot({ path: output.replace(/\.png$/, "-repositories.png"), fullPage: true });
   await page.getByRole("button", { name: "Boards", exact: true }).click();
   await page.getByText("Adjust field mapping").click();

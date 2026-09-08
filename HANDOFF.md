@@ -4,6 +4,35 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Compact controls and guarded Project actions (2026-09-08)
+
+Source-only changes after rc2; no new installer/tag built. The Bunkers sidebar
+uses a four-square overview button and create plus, without the branding block.
+One Bunker gear groups settings. Project settings/add/sync and configuration
+add/remove controls use named, hoverable icons; incomplete setup and failed
+sync have red dots. Sync tickets belongs only on the main Project page.
+Boards cache for five minutes across drawer navigation, retain visible results
+during reload, and invalidate after credential changes. Refresh boards only
+reloads choices. Checks removes the automatic-discovery checkbox, retains and
+explains legacy enabled state, and offers Find commands / Ask the agent with
+exact editable commands. `.tb-check-build` is explained as CMake scratch output,
+not a TB target. A disposable CMake test proves the project target is built.
+
+Right-click/Shift+F10 Project actions: Edit, Rename, Delete. Rename preserves
+identity/key/parent/position. Delete is explicitly confirmed and **empty-only**
+pending Tim's decision on populated Projects: tickets, subprojects and report
+dependencies prevent removal. Local Git folders/tracker issues are untouched.
+New inspect/rename/delete worker actions share backend commands; shared writes
+require server config:write and revision checks. `project-delete` is a new
+typed service change; independently hosted servers need updating. Snapshots
+propagate empty removal to members without dropping locally nonempty Projects.
+
+Verified: 70 UI tests, 379 backend tests, production assets, and the real
+browser hardening flow (context menu, rename, cancel/confirm delete, icon
+navigation, board caching, project-page sync). New shared tests use independent
+owner/member data homes and the real HTTP service. All data is disposable.
+No real user repositories or agile services changed.
+
 ## Bunker repository setup and automatic board sync (2026-09-07)
 
 Post-release UI change: back-navigation controls are arrow-only, with accessible

@@ -2586,7 +2586,7 @@ def project_record(bunker_id: str, project_id: str) -> dict[str, Any]:
     with _database(bunker_id) as connection:
         row = connection.execute(
             """
-            SELECT id, parent_id, key, name, description FROM projects
+            SELECT id, parent_id, key, name, description, position FROM projects
             WHERE id = ? AND bunker_id = ?
             """,
             (project_id, bunker_id),
@@ -2594,6 +2594,60 @@ def project_record(bunker_id: str, project_id: str) -> dict[str, Any]:
     if row is None:
         raise BunkerDatabaseError("Choose a project from this Bunker.")
     return dict(row)
+
+
+def inspect_project_change(bunker_id: str, project_id: str) -> dict[str, Any]:
+    project = project_record(bunker_id, project_id)
+    configuration = get_configuration(bunker_id, project_id=project_id)
+    with _database(bunker_id) as connection:
+        tickets = connection.execute("SELECT count(*) FROM tickets WHERE project_id=?", (project_id,)).fetchone()[0]
+        children = connection.execute("SELECT count(*) FROM projects WHERE parent_id=?", (project_id,)).fetchone()[0]
+    return {"project": project, "revision": remote.project_revision(project), "permission": configuration["permission"],
+            "tickets": tickets, "subprojects": children}
+
+
+def propose_project_edit(bunker_id: str, project_id: str, expected_revision: str, *, name: str = "", delete: bool = False) -> dict[str, Any]:
+    current = inspect_project_change(bunker_id, project_id)
+    if not current["permission"]["can_write"]:
+        raise BunkerDatabaseError(current["permission"]["reason"])
+    if current["revision"] != expected_revision:
+        raise BunkerDatabaseError("This Project changed. Close this dialog and reopen it before retrying.")
+    if delete and (current["tickets"] or current["subprojects"]):
+        raise BunkerDatabaseError("This Project contains tickets or subprojects. Only empty Projects can be deleted; its data has not changed.")
+    value = {**current["project"], "name": current["project"]["name"] if delete else _clean_name(name, "project")}
+    revision = "deleted:" + uuid.uuid4().hex if delete else remote.project_revision(value)
+    with _database(bunker_id) as connection:
+        mode = _mode(connection, bunker_id)
+    return {"mode": mode, "project": value, "delete": delete, "expected_revision": expected_revision,
+            "change": remote.change_record(key=uuid.uuid4().hex, kind="project-delete" if delete else "project",
+                record_id=project_id, expected_revision=expected_revision, revision=revision, payload=value)}
+
+
+def _delete_empty_project(connection: sqlite3.Connection, project_id: str) -> None:
+    if connection.execute("SELECT 1 FROM tickets WHERE project_id=?", (project_id,)).fetchone() or connection.execute("SELECT 1 FROM projects WHERE parent_id=?", (project_id,)).fetchone():
+        raise BunkerDatabaseError("This Project contains tickets or subprojects. No data was deleted.")
+    if connection.execute("SELECT 1 FROM reports JOIN repository_bindings ON reports.repository_id=repository_bindings.id WHERE repository_bindings.project_id=?", (project_id,)).fetchone():
+        raise BunkerDatabaseError("A report still references this Project's repositories. No data was deleted.")
+    connection.execute("DELETE FROM repository_bindings WHERE project_id=?", (project_id,))
+    connection.execute("DELETE FROM config_documents WHERE scope_type='project' AND scope_id=?", (project_id,))
+    connection.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+
+def apply_project_edit(bunker_id: str, proposal: Mapping[str, Any], *, accepted: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    value = proposal["project"]
+    with _database(bunker_id) as connection:
+        _require_acceptance(_mode(connection, bunker_id), accepted)
+        connection.execute("BEGIN IMMEDIATE")
+        current = connection.execute("SELECT * FROM projects WHERE id=?", (value["id"],)).fetchone()
+        if current is None or remote.project_revision(dict(current)) != proposal["expected_revision"]:
+            raise BunkerDatabaseError("This Project changed. Reopen it before retrying.")
+        if proposal["delete"]:
+            _delete_empty_project(connection, value["id"])
+        else:
+            connection.execute("UPDATE projects SET name=?, updated_at=? WHERE id=?", (value["name"], _now(), value["id"]))
+        if accepted:
+            _record_acceptance(connection, accepted)
+    return get_bunker(bunker_id)
 
 
 def _ticket_revision(raw: str) -> str:
@@ -3262,6 +3316,17 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot) -> dict[str,
                 ),
             )
             counts["reports"] += 1
+        listed_projects = {str(value["id"]) for value in snapshot.projects}
+        # Only empty-Project deletion is supported. An incomplete snapshot must
+        # not silently discard local tickets or their reports.
+        missing = {str(row["id"]) for row in connection.execute("SELECT id FROM projects")} - listed_projects
+        while missing:
+            leaves = [pid for pid in missing if not connection.execute("SELECT 1 FROM projects WHERE parent_id=?", (pid,)).fetchone()]
+            if not leaves:
+                raise BunkerDatabaseError("The remote Project hierarchy is incomplete. No local Project data was removed.")
+            for pid in leaves:
+                _delete_empty_project(connection, pid)
+                missing.remove(pid)
         _replace_members(connection, snapshot.members)
         connection.execute(
             """

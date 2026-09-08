@@ -816,6 +816,22 @@ class ServiceStore:
         now = _now()
         if kind == "project":
             return self._apply_project(connection, bunker_id, record_id, expected, revision, payload, now)
+        if kind == "project-delete":
+            project = next((row for row in self._records(connection, bunker_id, "project") if row["id"] == record_id), None)
+            if project is None or remote.project_revision(project) != expected:
+                raise ServiceError(409, "revision_conflict", "The Project changed elsewhere.")
+            if any(row.get("parent_id") == record_id for row in self._records(connection, bunker_id, "project")) or any(row.get("project_id") == record_id for row in self._records(connection, bunker_id, "ticket")):
+                raise ServiceError(409, "project_not_empty", "Only empty Projects can be deleted. Tickets and subprojects were not changed.")
+            binding_ids = {row["id"] for row in self._records(connection, bunker_id, "repository-binding") if row.get("project_id") == record_id}
+            if any(row.get("repository_id") in binding_ids for row in self._records(connection, bunker_id, "report")):
+                raise ServiceError(409, "project_not_empty", "A report still references this Project's repositories. No data was deleted.")
+            for record_kind in ("repository-binding", "config-document"):
+                for row in self._records(connection, bunker_id, record_kind):
+                    if (record_kind == "repository-binding" and row.get("project_id") == record_id) or (record_kind == "config-document" and row.get("scope_type") == "project" and row.get("scope_id") == record_id):
+                        identity = row["id"] if record_kind == "repository-binding" else f"project:{record_id}:{row['kind']}"
+                        connection.execute("DELETE FROM records WHERE bunker_id=? AND kind=? AND record_id=?", (bunker_id, record_kind, identity))
+            connection.execute("DELETE FROM records WHERE bunker_id=? AND kind='project' AND record_id=?", (bunker_id, record_id))
+            return revision
         if kind == "config-document":
             return self._apply_config_document(connection, bunker_id, record_id, expected, revision, payload, now)
         if kind == "ticket":
@@ -918,9 +934,12 @@ class ServiceStore:
         if not isinstance(payload, Mapping):
             raise ServiceError(400, "changes_invalid", "A project change needs a project object.")
         current = self._current_revision(connection, bunker_id, "project", record_id)
-        if current != expected:
+        existing_project = next((row for row in self._records(connection, bunker_id, "project") if row["id"] == record_id), None)
+        if current != expected and not (existing_project and remote.project_revision(existing_project) == expected):
             raise ServiceError(409, "revision_conflict", "The project changed elsewhere.")
         value = _validated_project(payload, record_id)
+        if existing_project and (value["key"] != existing_project["key"] or (value.get("parent_id") or "") != (existing_project.get("parent_id") or "")):
+            raise ServiceError(400, "changes_invalid", "Project keys and parent relationships cannot be changed by rename.")
         parent = value.get("parent_id") or ""
         if parent and self._current_revision(connection, bunker_id, "project", parent) == "":
             raise ServiceError(409, "revision_conflict", "The parent project is missing.")

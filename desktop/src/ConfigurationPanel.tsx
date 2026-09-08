@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import BackButton from "./BackButton";
+import IconButton from "./IconButton";
+import { cachedBoards, listBoards } from "./boardCache";
 import { useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import TrackerConnections, { type Connection } from "./TrackerConnections";
 import { chooseGitDirectory, command } from "./transport";
@@ -45,7 +47,7 @@ export default function ConfigurationPanel({
   trackers,
   initialTab,
   onConnected,
-  onSync,
+  onTicketSync,
 }: {
   bunker: Bunker;
   project?: Project;
@@ -55,7 +57,7 @@ export default function ConfigurationPanel({
   trackers?: Record<string, boolean>;
   initialTab?: ConfigurationTab;
   onConnected?: (trackers: Record<string, boolean>, connection: Connection, bunker?: Bunker) => void;
-  onSync?: () => Promise<boolean>;
+  onTicketSync?: (error?: string) => void;
 }) {
   const protect = useGuardedAction();
   const [state, setState] = useState<ConfigurationState | null>(null);
@@ -74,7 +76,8 @@ export default function ConfigurationPanel({
   const [pathRepository, setPathRepository] = useState<Repository | "auto" | null>(null);
   const [localPath, setLocalPath] = useState("");
   const [error, setError] = useState("");
-  const [boards, setBoards] = useState<Board[] | null>(null);
+  const [boards, setBoards] = useState<Board[] | null>(cachedBoards(bunker.id)?.boards || null);
+  const [listingBoards, setListingBoards] = useState(false);
   const [boardNotes, setBoardNotes] = useState<string[]>([]);
   const [boardError, setBoardError] = useState("");
   const [boardFilter, setBoardFilter] = useState("");
@@ -122,15 +125,24 @@ export default function ConfigurationPanel({
     if (!project || tab !== "board" || !githubConnected) return;
     let active = true;
     setBoardError("");
-    command<{ boards: Board[]; notes: string[] }>("application.tracker.boards", { provider: "github" })
+    setListingBoards(true);
+    listBoards(bunker.id)
       .then((value) => {
         if (!active) return;
         setBoards(value.boards);
         setBoardNotes(value.notes || []);
       })
-      .catch((reason) => active && setBoardError(String(reason)));
+      .catch((reason) => active && setBoardError(String(reason)))
+      .finally(() => active && setListingBoards(false));
     return () => { active = false; };
   }, [project?.id, tab, githubConnected]);
+
+  async function refreshBoards() {
+    setListingBoards(true); setBoardError("");
+    try { const value = await listBoards(bunker.id, true); setBoards(value.boards); setBoardNotes(value.notes || []); }
+    catch (reason) { setBoardError(String(reason)); }
+    finally { setListingBoards(false); }
+  }
 
   useEffect(() => {
     let active = true;
@@ -271,8 +283,10 @@ export default function ConfigurationPanel({
       setChoice(null);
       setLinkSummary(value.link.summary);
       onBunker(value.bunker);
-      if (value.sync?.status === "failed") setError(`Board connected. Ticket sync failed: ${value.sync.message} Use Sync tickets to retry.`);
-      else notify(`Connected ${board.title}. Tickets synced.`);
+      if (value.sync?.status === "failed") {
+        setError(`Board connected. Ticket sync failed: ${value.sync.message} Use the sync button on the Project page to retry.`);
+        onTicketSync?.(value.sync.message || "Ticket sync failed");
+      } else { onTicketSync?.(); notify(`Connected ${board.title}. Tickets synced.`); }
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -475,7 +489,7 @@ export default function ConfigurationPanel({
       {state && project && tab === "board" && <section className="config-surface board-surface">
         <div className="config-heading">
           <div><h3>Boards</h3><p>{linked.length ? `${linked.length === 1 ? "One board" : `${linked.length} boards`} linked. Tickets, fields, and mappings follow from them.` : "Pick the boards this Project mirrors. Tickets, fields, and mappings follow from them."}</p></div>
-          {linked.length > 0 && onSync && <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { if (await onSync()) setError(""); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }}>Sync tickets</button>}
+          {githubConnected && <IconButton icon="sync" label="Refresh boards" hint="Reload available boards from GitHub" issue={boardError} loading={listingBoards} disabled={listingBoards} onClick={refreshBoards} />}
         </div>
         {linked.length > 0 && <ul className="linked-boards" aria-label="Linked boards">
           {linked.map((source) => <li key={source.id || trackerSummary(source)}><span><strong>{trackerSummary(source)}</strong>{source.url && <small>{source.url}</small>}</span><button className="danger-control" disabled={!canWrite || busy || !source.id} onClick={() => unlinkBoard(source)}>Unlink</button></li>)}
@@ -523,10 +537,10 @@ export default function ConfigurationPanel({
               {Object.entries(providers.github?.fields || {}).map(([ours, theirs], index) => <div className="mapping-row" key={`${ours}-${index}`}>
                 <select aria-label={`Mapping ${index + 1} TicketBunker field`} value={ours} disabled={!canWrite} onChange={(event) => { setProvider("github"); const rows = Object.entries(providers.github?.fields || {}).map(([left, right], item) => item === index ? [event.target.value, right] : [left, right]); setProviders((values) => ({ ...values, github: { ...values.github, fields: Object.fromEntries(rows.filter(([left]) => left)) } })); }}><option value="">Choose field</option>{fields.map((field) => <option key={field.key} value={field.key} disabled={field.key !== ours && providers.github?.fields[field.key] !== undefined}>{field.label} · {field.key}</option>)}</select>
                 <input aria-label={`Mapping ${index + 1} external field`} value={theirs} disabled={!canWrite} onChange={(event) => setProviders((values) => ({ ...values, github: { ...values.github, fields: { ...values.github.fields, [ours]: event.target.value } } }))} />
-                <button aria-label={`Remove mapping ${index + 1}`} disabled={!canWrite} onClick={() => setProviders((values) => { const next = { ...values.github.fields }; delete next[ours]; return { ...values, github: { ...values.github, fields: next } }; })}>−</button>
+                <IconButton icon="trash" label={`Remove mapping ${index + 1}`} disabled={!canWrite} onClick={() => setProviders((values) => { const next = { ...values.github.fields }; delete next[ours]; return { ...values, github: { ...values.github, fields: next } }; })} />
               </div>)}
             </div>
-            <div className="integration-actions"><button disabled={!canWrite} onClick={() => setProviders((values) => ({ ...values, github: { ...values.github, fields: { ...values.github.fields, [fields.find((field) => !values.github?.fields[field.key])?.key || ""]: "" } } }))}>+ Add mapping</button><button className="primary" disabled={!canWrite || busy} onClick={() => { setProvider("github"); publish("integrations"); }}>Save mappings</button></div>
+            <div className="integration-actions"><IconButton icon="plus" label="Add mapping" disabled={!canWrite} onClick={() => setProviders((values) => ({ ...values, github: { ...values.github, fields: { ...values.github.fields, [fields.find((field) => !values.github?.fields[field.key])?.key || ""]: "" } } }))} /><button className="primary" disabled={!canWrite || busy} onClick={() => { setProvider("github"); publish("integrations"); }}>Save mappings</button></div>
           </details>
           <details className="advanced"><summary>Ticket fields</summary>
             <p className="field-note">This Project keeps this exact composition.</p>
@@ -537,11 +551,11 @@ export default function ConfigurationPanel({
                 <input aria-label={`Field ${index + 1} key`} value={field.key} disabled={!canWrite} onChange={(event) => updateField(index, { key: event.target.value })} />
                 <select aria-label={`Field ${index + 1} type`} value={field.type} disabled={!canWrite} onChange={(event) => updateField(index, { type: event.target.value })}>{FIELD_TYPES.map((value) => <option key={value}>{value}</option>)}</select>
                 <input aria-label={`Field ${index + 1} required`} type="checkbox" checked={field.required} disabled={!canWrite} onChange={(event) => updateField(index, { required: event.target.checked })} />
-                <button aria-label={`Remove ${field.label}`} disabled={!canWrite} onClick={() => setFields((values) => values.filter((_, item) => item !== index))}>−</button>
+                <IconButton icon="trash" label={`Remove ${field.label}`} disabled={!canWrite} onClick={() => setFields((values) => values.filter((_, item) => item !== index))} />
                 {field.type === "enum" && <input className="enum-values" aria-label={`${field.label} values`} value={(field.values || []).join(", ")} disabled={!canWrite} placeholder="Comma-separated values" onChange={(event) => updateField(index, { values: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} />}
               </div>)}
             </div>
-            <div className="integration-actions"><button disabled={!canWrite} onClick={() => setFields((values) => [...values, { key: `field_${values.length + 1}`, label: "New field", type: "string", required: false }])}>+ Add field</button><button className="primary" disabled={!canWrite || busy} onClick={() => publish("ticket-fields")}>Save fields</button></div>
+            <div className="integration-actions"><IconButton icon="plus" label="Add field" disabled={!canWrite} onClick={() => setFields((values) => [...values, { key: `field_${values.length + 1}`, label: "New field", type: "string", required: false }])} /><button className="primary" disabled={!canWrite || busy} onClick={() => publish("ticket-fields")}>Save fields</button></div>
           </details>
         </div>
       </section>}
@@ -549,7 +563,7 @@ export default function ConfigurationPanel({
       {state && tab === "repositories" && <section className="config-surface">
         <div className="config-heading">
           <div><h3>{project ? "Local repositories" : "Allowed repositories"}</h3><p>{project ? "Folders match the remotes enabled for this Project." : "Expand a repository to choose its Projects."}</p></div>
-          {project ? <button className="primary" disabled={Boolean(connecting) || !repositories.length} onClick={() => connectRepository()}>Add local repository</button>
+          {project ? <IconButton icon="plus" label="Add local repository" hint="Choose a local Git folder; its origin selects the enabled repository" disabled={Boolean(connecting) || !repositories.length} onClick={() => connectRepository()} />
             : <button className="primary" disabled={!canWrite || busy} onClick={publishRepositories}>{busy ? "Saving…" : "Save repositories"}</button>}
         </div>
         <div className={`repository-matrix ${project ? "repository-checkouts" : "repository-registry"}`} role="table" aria-label={project ? "Local repositories" : "Allowed repositories"}>
@@ -570,7 +584,7 @@ export default function ConfigurationPanel({
                 <input aria-label={`Repository ${index + 1} name`} value={repository.name} disabled={!canWrite || busy} onChange={(event) => updateRepository(index, { name: event.target.value })} />
                 <input aria-label={`Repository ${index + 1} allowed remote`} value={repository.canonical_remote || ""} disabled={!canWrite || busy} placeholder="github.com/owner/repository" onChange={(event) => updateRepository(index, { canonical_remote: event.target.value })} />
                 <input aria-label={`Repository ${index + 1} base branch`} value={repository.default_branch || ""} disabled={!canWrite || busy} placeholder="main" onChange={(event) => updateRepository(index, { default_branch: event.target.value })} />
-                <button aria-label={`Remove ${repository.name || `repository ${index + 1}`}`} disabled={!canWrite || busy} onClick={() => setRepositories((values) => values.filter((_, item) => item !== index))}>−</button>
+                <IconButton icon="trash" label={`Remove ${repository.name || `repository ${index + 1}`}`} disabled={!canWrite || busy} onClick={() => setRepositories((values) => values.filter((_, item) => item !== index))} />
               </>}
             </div>
             {!project && <div role="row"><div role="cell" className="repository-projects"><details>
@@ -590,7 +604,7 @@ export default function ConfigurationPanel({
           <p>{pathRepository === "auto" ? "Choose a Git folder on this computer. Its origin selects the matching repository." : `Path to ${pathRepository.name} on this computer.`}</p>
           <div><button type="button" disabled={Boolean(connecting)} onClick={() => setPathRepository(null)}>Cancel</button><button className="primary" disabled={Boolean(connecting) || !localPath.trim()}>Connect repository</button></div>
         </form>}
-        {!project && <button disabled={!canWrite || busy} onClick={() => setRepositories((values) => [...values, { id: "", project_id: "", name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])}>+ Add repository</button>}
+        {!project && <IconButton icon="plus" label="Add repository" hint="Add an allowed Git remote" disabled={!canWrite || busy} onClick={() => setRepositories((values) => [...values, { id: "", project_id: "", name: "New repository", canonical_remote: "", default_branch: "main", local_path: null }])} />}
       </section>}
 
       {state && project && tab === "checks" && <section className="config-surface">
@@ -600,12 +614,13 @@ export default function ConfigurationPanel({
           <label>Test command<input value={checks.test} disabled={!canWrite} placeholder="python3 -m pytest -x -q" onChange={(event) => setChecks({ ...checks, test: event.target.value })} /></label>
           <label>Timeout (seconds)<input type="number" min={30} max={3600} value={checks.timeout_seconds} disabled={!canWrite} onChange={(event) => setChecks({ ...checks, timeout_seconds: Number(event.target.value) || 600 })} /></label>
         </div>
-        <label className="check-toggle"><input type="checkbox" checked={checks.discover} disabled={!canWrite} onChange={(event) => setChecks({ ...checks, discover: event.target.checked })} /><span><strong>Discover automatically</strong><small>When no commands are set, use the ones detected from the repository's manifests at synthesis time.</small></span></label>
-        <div className="integration-actions"><button disabled={busy} onClick={detectChecks}>Detect from repository</button><button disabled={busy || asking} onClick={askAgentForChecks}>{asking ? "Asking the agent…" : "Ask the agent"}</button>{(checks.build || checks.test) && <button className="danger-control" disabled={!canWrite} onClick={() => setChecks({ ...checks, build: "", test: "" })}>Clear</button>}</div>
+        {checks.discover && <p className="quiet-note">Automatic fallback is enabled: when commands are empty, synthesis detects them from manifests. <button disabled={!canWrite} onClick={() => setChecks({ ...checks, discover: false })}>Use saved commands only</button></p>}
+        <div className="integration-actions"><button disabled={busy} title="Read this repository's manifests and suggest build/test commands. Nothing runs until synthesis." onClick={detectChecks}>Find commands</button><button disabled={busy || asking} title="Ask the agent to read build scripts, documentation and CI for project-specific commands" onClick={askAgentForChecks}>{asking ? "Asking the agent…" : "Ask the agent"}</button>{(checks.build || checks.test) && <button className="danger-control" disabled={!canWrite} onClick={() => setChecks({ ...checks, build: "", test: "", discover: false })}>Clear</button>}</div>
+        {(checks.build.includes(".tb-check-build") || suggestions?.some((item) => item.build.includes(".tb-check-build"))) && <p className="quiet-note"><code>.tb-check-build</code> is the CMake output folder in the scratch checkout. <code>cmake --build</code> compiles the project there. Review targets and options before saving.</p>}
         {suggestions && suggestions.length === 0 && <p className="quiet-note">No build system was recognized at the repository root. Enter the commands your team runs, or ask the agent.</p>}
-        {suggestions && suggestions.length > 0 && <ul className="check-suggestions">{suggestions.map((item) => <li key={`${item.repository}-${item.tool}`}><div><strong>{item.tool}</strong><small>{item.reason}</small>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: item.build, test: item.test })}>Use</button></li>)}</ul>}
+        {suggestions && suggestions.length > 0 && <ul className="check-suggestions">{suggestions.map((item) => <li key={`${item.repository}-${item.tool}`}><div><strong>{item.repository} · {item.tool}</strong><small>{item.reason}</small>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: item.build, test: item.test, discover: false })}>Use</button></li>)}</ul>}
         {agentSuggestion && <ul className="check-suggestions"><li><div><strong>Agent</strong><small>{agentSuggestion.reason}</small>{agentSuggestion.build && <code>{agentSuggestion.build}</code>}{agentSuggestion.test && <code>{agentSuggestion.test}</code>}</div><button disabled={!canWrite} onClick={() => setChecks({ ...checks, build: agentSuggestion.build, test: agentSuggestion.test })}>Use</button></li></ul>}
-        {Object.keys(checks.tickets).length > 0 && <div className="ticket-checks"><h4>Per-ticket commands</h4><p className="quiet-note">These override the project's commands for one ticket. Set them from the ticket page.</p><ul>{Object.entries(checks.tickets).map(([id, item]) => <li key={id}><div><strong>{id}</strong>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><button aria-label={`Remove ${id} checks`} disabled={!canWrite} onClick={() => { const tickets = { ...checks.tickets }; delete tickets[id]; setChecks({ ...checks, tickets }); }}>−</button></li>)}</ul></div>}
+        {Object.keys(checks.tickets).length > 0 && <div className="ticket-checks"><h4>Per-ticket commands</h4><p className="quiet-note">These override the project's commands for one ticket. Set them from the ticket page.</p><ul>{Object.entries(checks.tickets).map(([id, item]) => <li key={id}><div><strong>{id}</strong>{item.build && <code>{item.build}</code>}{item.test && <code>{item.test}</code>}</div><IconButton icon="trash" label={`Remove ${id} checks`} disabled={!canWrite} onClick={() => { const tickets = { ...checks.tickets }; delete tickets[id]; setChecks({ ...checks, tickets }); }} /></li>)}</ul></div>}
         <details className="advanced"><summary>What runs, and where</summary><p>Commands run with your shell in a detached worktree at the head of the branch being synthesized, under TicketBunker's data folder, never in your checkout, with the timeout above. The build runs first; the test command is skipped when the build fails. The first error line and a bounded log land in the report's evidence, and a failure sets the Standing verdict to blocked. A ticket's own commands win over the project's, which win over discovered ones.</p></details>
       </section>}
 
@@ -618,16 +633,16 @@ export default function ConfigurationPanel({
             <input aria-label={`Field ${index + 1} key`} value={field.key} disabled={!canWrite} onChange={(event) => updateField(index, { key: event.target.value })} />
             <select aria-label={`Field ${index + 1} type`} value={field.type} disabled={!canWrite} onChange={(event) => updateField(index, { type: event.target.value })}>{FIELD_TYPES.map((value) => <option key={value}>{value}</option>)}</select>
             <input aria-label={`Field ${index + 1} required`} type="checkbox" checked={field.required} disabled={!canWrite} onChange={(event) => updateField(index, { required: event.target.checked })} />
-            <button aria-label={`Remove ${field.label}`} disabled={!canWrite} onClick={() => setFields((values) => values.filter((_, item) => item !== index))}>−</button>
+            <IconButton icon="trash" label={`Remove ${field.label}`} disabled={!canWrite} onClick={() => setFields((values) => values.filter((_, item) => item !== index))} />
             {field.type === "enum" && <input className="enum-values" aria-label={`${field.label} values`} value={(field.values || []).join(", ")} disabled={!canWrite} placeholder="Comma-separated values" onChange={(event) => updateField(index, { values: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} />}
           </div>)}
         </div>
-        <button disabled={!canWrite} onClick={() => setFields((values) => [...values, { key: `field_${values.length + 1}`, label: "New field", type: "string", required: false }])}>+ Add field</button>
+        <IconButton icon="plus" label="Add field" disabled={!canWrite} onClick={() => setFields((values) => [...values, { key: `field_${values.length + 1}`, label: "New field", type: "string", required: false }])} />
       </section>}
 
       {state && !project && tab === "defaults" && <section className="config-surface">
         <div className="config-heading"><div><h3>Field mappings</h3><p>Default matrices new Projects start from. Each row pairs one TicketBunker field with one external payload path.</p></div><button className="primary" disabled={!canWrite || busy || !selected} onClick={() => publish("integrations")}>Save mappings</button></div>
-        <div className="integration-selector"><select aria-label="Integration" value={provider} onChange={(event) => setProvider(event.target.value)}>{Object.entries(providers).map(([id, value]) => <option key={id} value={id}>{value.label}</option>)}</select><button disabled={!canWrite} onClick={addProvider}>+ Integration</button></div>
+        <div className="integration-selector"><select aria-label="Integration" value={provider} onChange={(event) => setProvider(event.target.value)}>{Object.entries(providers).map(([id, value]) => <option key={id} value={id}>{value.label}</option>)}</select><IconButton icon="plus" label="Add integration" disabled={!canWrite} onClick={addProvider} /></div>
         {selected && <>
           <div className="integration-identity"><label>Name<input value={selected.label} disabled={!canWrite} onChange={(event) => updateProvider({ label: event.target.value })} /></label><label>Identifier<input key={provider} defaultValue={provider} disabled={!canWrite || selected.template !== "custom"} onBlur={(event) => renameProvider(event.target.value)} /></label></div>
           <div className="mapping-matrix">
@@ -635,10 +650,10 @@ export default function ConfigurationPanel({
             {mappingRows.map(([ours, theirs], index) => <div className="mapping-row" key={`${ours}-${index}`}>
               <select aria-label={`Mapping ${index + 1} TicketBunker field`} value={ours} disabled={!canWrite} onChange={(event) => updateMapping(index, event.target.value, theirs)}><option value="">Choose field</option>{fields.map((field) => <option key={field.key} value={field.key} disabled={field.key !== ours && selected.fields[field.key] !== undefined}>{field.label} · {field.key}</option>)}</select>
               <input aria-label={`Mapping ${index + 1} external field`} value={theirs} disabled={!canWrite} onChange={(event) => updateMapping(index, ours, event.target.value)} />
-              <button aria-label={`Remove mapping ${index + 1}`} disabled={!canWrite} onClick={() => updateProvider({ fields: Object.fromEntries(mappingRows.filter((_, item) => item !== index)) })}>−</button>
+              <IconButton icon="trash" label={`Remove mapping ${index + 1}`} disabled={!canWrite} onClick={() => updateProvider({ fields: Object.fromEntries(mappingRows.filter((_, item) => item !== index)) })} />
             </div>)}
           </div>
-          <div className="integration-actions"><button disabled={!canWrite} onClick={() => updateProvider({ fields: { ...selected.fields, [fields.find((field) => !selected.fields[field.key])?.key || ""]: "" } })}>+ Add mapping</button>{selected.template === "custom" && <button className="danger-control" disabled={!canWrite} onClick={() => { const values = { ...providers }; delete values[provider]; setProviders(values); setProvider(Object.keys(values)[0] || ""); }}>Remove integration</button>}</div>
+          <div className="integration-actions"><IconButton icon="plus" label="Add mapping" disabled={!canWrite} onClick={() => updateProvider({ fields: { ...selected.fields, [fields.find((field) => !selected.fields[field.key])?.key || ""]: "" } })} />{selected.template === "custom" && <button className="danger-control" disabled={!canWrite} onClick={() => { const values = { ...providers }; delete values[provider]; setProviders(values); setProvider(Object.keys(values)[0] || ""); }}>Remove integration</button>}</div>
         </>}
       </section>}
       </fieldset>

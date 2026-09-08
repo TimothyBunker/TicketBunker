@@ -233,6 +233,26 @@ leaves the board connected and existing tickets intact, returning a failure
 message with the manual retry action. Linking does not schedule agent work or
 create provider-side tickets. Configuration controls say **Save**, not Publish.
 
+Compact app controls use plus for adding objects, gear for settings, circular
+arrows for sync, and trash for removal, with accessible names and hover titles.
+The sidebar is titled Bunkers with a four-square overview control and a create
+plus; no branding block. Bunker setup destinations share one gear menu.
+Incomplete setup and failed sync use a red dot with a specific hover explanation.
+Project ticket sync lives on the Project page, not in the configuration drawer;
+its state retains the last successful session timestamp across navigation.
+Board discovery is cached per Bunker for five minutes, deduplicates in-flight
+requests, preserves visible entries while refreshing, and invalidates after
+credential changes. Refresh boards is distinct from syncing tickets.
+
+Project context menus support right-click and Shift+F10: Edit, Rename, Delete.
+Rename/delete use the same revision-checked backend actions in every transport,
+require config:write, and are independently gated by the service. Rename keeps
+identity, key, parent and position. Delete requires explicit confirmation and
+is empty-only: no tickets, subprojects, or report dependencies on its bindings.
+It removes Project configuration and local path mappings, never source folders
+or tracker issues. Authoritative snapshots propagate empty-Project removal;
+replicas reject deletion of locally nonempty Projects instead of losing data.
+
 A ticket belongs to one Project rather than one repository. Each branch report
 records the repository binding it observed, so one ticket can retain distinct
 work across several permitted repositories without branch-name collisions.
@@ -569,7 +589,14 @@ prefills the outcome into What and State, and a failure tells the Standing
 area that the verdict is blocked with that first error as the finding. The
 Project configuration's Checks tab offers detection from the repository
 root's manifests (CMake, Cargo, Go, npm, pytest, make) as suggestions the
-owner confirms; nothing runs until the document is published.
+owner confirms. **Find commands** shows the exact suggestion and repository;
+**Use** fills editable commands and disables automatic discovery. **Ask the
+agent** is the deeper inspection route, not a second automatic execution mode.
+The automatic-discovery checkbox is removed; existing enabled configurations
+are explicitly explained and may be switched to saved commands only. CMake's
+`.tb-check-build` is an output directory in the scratch checkout; the suggested
+command compiles the actual project's default targets, not a TB alias. Nothing
+runs merely by finding or saving commands; a subsequent check executes them.
 
 **The follow-through is drafted, never sent on its own.** Agent work offers
 **Draft update**: the Standing verdict and finding, Next, Ask, and the
@@ -1858,10 +1885,10 @@ pending invitations, and revoke them. There is no hand-edited service record.
 A selected Bunker lists its Projects rather than tickets; the ticket catalog
 appears only inside a selected Project, beneath that Project's subprojects.
 Within a Bunker, **Add project** places a new Project under the selected parent.
-The selected Project's **Configure → Repositories** table is the only repository
-surface. A configurator publishes canonical allowed remotes and base branches;
-each user maps a row to a checkout with **Connect**. The picker normalizes the
-working-tree root, validates its `origin` against that row, fetches remote refs,
+The Bunker gear's **Repositories** table owns remote registration and Project
+availability. The selected Project's **Configure → Repositories** table owns
+device-local folders. **Add local repository** normalizes the
+working-tree root, matches its `origin` to an allowed row, fetches remote refs,
 and saves only the device path. Service connectivity lives only at Bunker scope
 through Share Bunker and Members; nothing accepts a database connection string.
 A separate Migration section lists legacy companion-backed projects and offers
@@ -1869,7 +1896,7 @@ A separate Migration section lists legacy companion-backed projects and offers
 companion repositories and records its import digest.
 
 A Project page names its board beneath the title and offers **Sync tickets**
-when one is linked, or **Connect a board**, which opens the Project's Board
+when one is linked. The gear opens Project configuration and its Boards
 view. That view asks for a token only when this computer has none, otherwise
 it lists the boards the token can see; picking one links it, and the field
 matrix and ticket fields sit beneath as advanced disclosures. A Bunker page
@@ -1879,8 +1906,9 @@ Trackers reaches the same token step for this computer. GitHub is the tracker
 this version can list and sync; the others accept a token so that step is
 already familiar.
 
-**Configure** therefore has two Project tabs, Board and Repositories, and two
-Bunker tabs, Trackers and Defaults. Ticket fields, integration matrices, the
+**Configure** has Project tabs Boards, Repositories, and Checks. The Bunker
+gear groups Trackers, Defaults, Repositories, and Members/Share Bunker.
+Ticket fields, integration matrices, the
 Bunker's connections, and the Project's tracker source are whole revisioned
 documents: a publish uses the revision loaded by the editor and replaces the
 complete draft atomically.

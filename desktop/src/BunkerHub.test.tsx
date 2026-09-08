@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BunkerHub from "./BunkerHub";
+import { clearBoardCache } from "./boardCache";
 import type { AppState, ConfigurationState } from "./types";
 
 const transport = vi.hoisted(() => ({
@@ -56,6 +57,7 @@ describe("Bunker and Project boundaries", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    clearBoardCache();
     transport.chooseGitDirectory.mockReset();
     transport.command.mockReset();
     transport.command.mockImplementation((action: string) => {
@@ -68,6 +70,52 @@ describe("Bunker and Project boundaries", () => {
       if (action === "application.bunker.configuration.get") return Promise.resolve(configuration);
       throw new Error(`Unexpected command ${action}`);
     });
+  });
+
+  it("uses compact navigation and names setup issues on the settings gear", () => {
+    const { container } = render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    expect(container.querySelector(".sidebar .brand")).toBeNull();
+    expect(screen.getByRole("button", { name: "All Bunkers" }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Create Bunker" })).toHaveAttribute("title", "Create Bunker");
+    expect(screen.getByRole("button", { name: "Configure" })).toHaveAttribute("title", expect.stringContaining("No board linked"));
+    expect(screen.getByRole("button", { name: "Add subproject" }).textContent).toBe("");
+  });
+
+  it("renames through a revision-checked context action without changing the Project key", async () => {
+    const onState = vi.fn(); const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, payload) => {
+      if (name === "application.bunker.project.inspect") return Promise.resolve({ revision: "project:1", tickets: 3, subprojects: 0, permission: { can_write: true } });
+      if (name === "application.bunker.project.rename") return Promise.resolve({ bunker: { ...bunker, projects: [{ ...project, name: payload.name }] } });
+      return original(name, payload);
+    });
+    render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "ECS Entity Component System" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Edit", "Rename", "Delete"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rename Project" });
+    fireEvent.change(within(dialog).getByLabelText("Project name"), { target: { value: "Engine" } });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Rename" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.project.rename", { bunker_id: bunker.id, project_id: project.id, expected_revision: "project:1", name: "Engine" }));
+    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ bunkers: [expect.objectContaining({ projects: [expect.objectContaining({ key: "ECS", name: "Engine" })] })] }));
+  });
+
+  it("requires explicit confirmation for empty-Project deletion", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, payload) => {
+      if (name === "application.bunker.project.inspect") return Promise.resolve({ revision: "project:1", tickets: 0, subprojects: 0, permission: { can_write: true } });
+      if (name === "application.bunker.project.delete") return Promise.resolve({ bunker: { ...bunker, projects: [] } });
+      return original(name, payload);
+    });
+    render(<BunkerHub state={state} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "ECS Entity Component System" }), { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Project" });
+    expect(dialog).toHaveTextContent("Local Git folders and tracker issues stay untouched");
+    expect(transport.command.mock.calls.some(([name]) => name.endsWith(".delete"))).toBe(false);
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.project.delete", expect.objectContaining({ confirmed: true, expected_revision: "project:1" })));
   });
 
   it("creates a local Bunker with remotes but configures availability separately", async () => {
@@ -115,7 +163,7 @@ describe("Bunker and Project boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     fireEvent.click(await screen.findByRole("button", { name: "Checks" }));
     fireEvent.change(screen.getByLabelText("Build command"), { target: { value: "make navigation" } });
-    fireEvent.click(screen.getByRole("button", { name: "Bunkers" }));
+    fireEvent.click(screen.getByRole("button", { name: "All Bunkers" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(select).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("Do not save"));
@@ -149,6 +197,7 @@ describe("Bunker and Project boundaries", () => {
     rerender(
       <BunkerHub state={state} selection={{ bunkerId: bunker.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
+    fireEvent.click(screen.getByLabelText("Bunker settings"));
     expect(screen.getByRole("button", { name: "Share Bunker" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Members" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Attach repository" })).not.toBeInTheDocument();
@@ -156,7 +205,7 @@ describe("Bunker and Project boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Share Bunker" }));
     expect(screen.getByLabelText("Server address")).toBeInTheDocument();
     expect(screen.getByLabelText("Setup token")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Share Bunker" })).toHaveLength(2);
+    expect(screen.getByRole("complementary", { name: "Share Bunker" })).toBeInTheDocument();
   });
 
   it("gives a shared Bunker's owner Members with invitation links", async () => {
@@ -186,6 +235,7 @@ describe("Bunker and Project boundaries", () => {
 
     expect(screen.queryByRole("button", { name: "Share Bunker" })).not.toBeInTheDocument();
     expect(screen.getByText(/Shared on tickets.example.test/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Bunker settings"));
     fireEvent.click(screen.getByRole("button", { name: "Members" }));
     expect(await screen.findByText("Tim Bunker")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Create invitation" }));
@@ -236,6 +286,7 @@ describe("Bunker and Project boundaries", () => {
     render(
       <BunkerHub state={{ ...state, bunkers: [replica] }} selection={{ bunkerId: replica.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
+    fireEvent.click(screen.getByLabelText("Bunker settings"));
     fireEvent.click(screen.getByRole("button", { name: "Members" }));
     expect(await screen.findByText("Tim Bunker")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create invitation" })).not.toBeInTheDocument();
@@ -278,7 +329,7 @@ describe("Bunker and Project boundaries", () => {
 
     expect(screen.getByText("No board linked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Connect a board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     expect(await screen.findByRole("heading", { name: "Boards" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Connect GitHub to see your boards" })).toBeInTheDocument();
     expect(screen.getByLabelText("GitHub token")).toBeInTheDocument();
@@ -327,7 +378,7 @@ describe("Bunker and Project boundaries", () => {
       <BunkerHub state={{ ...state, trackers: { github: true } }} selection={{ bunkerId: bunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={vi.fn()} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect a board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     const list = await screen.findByRole("list", { name: "Boards" });
     expect(within(list).getByText("Voxel ECS")).toBeInTheDocument();
     expect(within(list).getByText("example/voxel")).toBeInTheDocument();
@@ -342,7 +393,7 @@ describe("Bunker and Project boundaries", () => {
     ));
     expect(await screen.findByText(/One board linked/)).toBeInTheDocument();
     expect(screen.getByText(/Built from the board: Status: Todo, In Progress, Done/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync tickets" })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary", { name: "Configuration" })).queryByRole("button", { name: "Sync tickets" })).not.toBeInTheDocument();
     const linkedList = screen.getByRole("list", { name: "Linked boards" });
     expect(within(linkedList).getByText("GitHub · Voxel ECS")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Link board" })).toBeDisabled();
@@ -356,6 +407,7 @@ describe("Bunker and Project boundaries", () => {
     render(
       <BunkerHub state={{ ...state, trackers: { github: false } }} selection={{ bunkerId: bunker.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />,
     );
+    fireEvent.click(screen.getByLabelText("Bunker settings"));
     fireEvent.click(screen.getByRole("button", { name: "Trackers" }));
     expect(await screen.findByRole("heading", { name: "Trackers" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeInTheDocument();

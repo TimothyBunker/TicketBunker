@@ -37,9 +37,10 @@ ROLE_CAPABILITIES: dict[str, tuple[str, ...]] = {
     ),
     ROLE_MEMBER: ("tickets:read", "tickets:write", "config:read"),
 }
-CHANGE_KINDS = ("project", "repository-bindings", "config-document", "ticket", "report")
+CHANGE_KINDS = ("project", "project-delete", "repository-bindings", "config-document", "ticket", "report")
 CHANGE_CAPABILITIES = {
     "project": "config:write",
+    "project-delete": "config:write",
     "repository-bindings": "config:write",
     "config-document": "config:write",
     "ticket": "tickets:write",
@@ -86,6 +87,13 @@ def repository_list_revision(rows: Any) -> str:
     return "repositories:" + hashlib.sha256(raw).hexdigest()[:24]
 
 
+def project_revision(value: Mapping[str, Any]) -> str:
+    import hashlib
+    content = {key: str(value.get(key) or "") for key in ("id", "parent_id", "key", "name", "description")}
+    content["position"] = int(value.get("position") or 0)
+    return "project:" + hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()[:24]
+
+
 def change_record(
     *,
     key: str,
@@ -111,6 +119,7 @@ def change_record(
 # Stable service failure codes render as TicketBunker's own next actions. Raw
 # server text never reaches a user.
 _CODE_MESSAGES = {
+    "project_not_empty": "This Project still has tickets, subprojects, or report dependencies. Only empty Projects can be deleted; no data was changed.",
     "setup_token_invalid": "That setup token is not valid. Copy the token printed by tb serve, or reset it with tb serve --reset-setup-token.",
     "setup_complete": "This server already has an owner. Ask that owner for an invitation instead of using a setup token.",
     "profile_required": "Enter your name and email in Settings before joining or sharing a Bunker.",

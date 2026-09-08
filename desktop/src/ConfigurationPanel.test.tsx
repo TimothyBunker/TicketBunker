@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ConfigurationPanel from "./ConfigurationPanel";
+import { clearBoardCache } from "./boardCache";
 import { UnsavedChangesBoundary } from "./UnsavedChanges";
 import type { Bunker, ConfigurationState } from "./types";
 
@@ -27,6 +28,7 @@ async function editBuild(value = "make navigation") {
   return input;
 }
 beforeEach(() => {
+  clearBoardCache();
   snapshot = structuredClone(initial);
   transport.chooseGitDirectory.mockReset();
   transport.chooseGitDirectory.mockResolvedValue("/work/navigation");
@@ -51,6 +53,35 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("Repository setup scopes", () => {
+  it("reuses Boards across tabs and reloads them only on explicit refresh", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, payload) => name === "application.tracker.boards" ? Promise.resolve({ boards: [], notes: [] }) : original(name, payload));
+    render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} project={project} trackers={{ github: true }} onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+    await screen.findByRole("list", { name: "Boards" });
+    fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
+    fireEvent.click(screen.getByRole("button", { name: "Boards" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh boards" })).toBeEnabled());
+    expect(transport.command.mock.calls.filter(([name]) => name === "application.tracker.boards")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh boards" }));
+    await waitFor(() => expect(transport.command.mock.calls.filter(([name]) => name === "application.tracker.boards")).toHaveLength(2));
+  });
+
+  it("shows full detected build commands for review without enabling automatic execution", async () => {
+    const original = transport.command.getMockImplementation()!;
+    const build = "cmake -S . -B .tb-check-build && cmake --build .tb-check-build";
+    transport.command.mockImplementation((name, payload) => name === "application.project.checks.detect" ? Promise.resolve({ repositories: ["Navigation"], suggestions: [{ tool: "CMake", repository: "Navigation", reason: "CMakeLists.txt", build, test: "ctest --test-dir .tb-check-build" }] }) : original(name, payload));
+    setup(); await screen.findByLabelText("Build command");
+    expect(screen.queryByText("Discover automatically")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Find commands" }));
+    await screen.findByText(build);
+    expect(screen.getByText(/is the CMake output folder/)).toBeInTheDocument();
+    expect(transport.command.mock.calls.some(([name]) => name.endsWith(".replace"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Use" }));
+    expect(screen.getByLabelText("Build command")).toHaveValue(build);
+    fireEvent.click(screen.getByRole("button", { name: "Save checks" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.configuration.replace", expect.objectContaining({ content: expect.objectContaining({ build, discover: false }) })));
+  });
+
   it("edits allowed remotes at Bunker scope without local folder controls", async () => {
     snapshot.scope_type = "bunker";
     snapshot.scope_id = bunker.id;
@@ -86,7 +117,7 @@ describe("Repository setup scopes", () => {
     render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} project={project} initialTab="repositories" onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
     expect(await screen.findByRole("button", { name: "Add local repository" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Save repositories" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "+ Add repository" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add repository" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Repository 1 allowed remote")).not.toBeInTheDocument();
   });
 });
@@ -203,9 +234,9 @@ describe("Configuration draft safety", () => {
     snapshot.documents["ticket-fields"] = { kind: "ticket-fields", updated_at: "", revision: "fields:1", content: { fields: [] } };
     const close = vi.fn();
     render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} initialTab="defaults" onClose={close} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
-    fireEvent.click(await screen.findByRole("button", { name: "+ Add field" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add field" }));
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
-    fireEvent.click(screen.getByText("+ Add repository"));
+    fireEvent.click(screen.getByRole("button", { name: "Add repository" }));
     fireEvent.change(screen.getByLabelText("Repository 1 allowed remote"), { target: { value: "github.com/example/navigation" } });
     const original = transport.command.getMockImplementation()!;
     transport.command.mockImplementation((name, payload) => name === "application.bunker.repository.replace"
