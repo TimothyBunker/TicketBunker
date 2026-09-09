@@ -4,6 +4,16 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Release candidate preparation: 0.6.3 (2026-09-08)
+
+Next installer candidate is `v0.6.3-rc1`; runtime/UI/native versions are 0.6.3 to
+distinguish it from the installed 0.6.2 rc2. Includes the compact controls,
+ticket chapters/details, durable sync receipts, live component versions, and
+automatic WSL native renderer fallback. Browser CI caught an old ambiguous
+version selector after System gained two version rows; the standalone flow now
+asserts each named component separately. No product assertion was removed.
+Do not claim publication until the tagged three-platform Release run succeeds.
+
 ## WSL native rendering compatibility (2026-09-08)
 
 The Rust launcher now sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically on
