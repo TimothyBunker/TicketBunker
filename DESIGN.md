@@ -1808,6 +1808,15 @@ domain handlers. Linux and Windows are the initial supported desktop
 environments; WSL is simply one Linux execution location and is never inferred
 from a repository path.
 
+Native and Python paths can name the same Windows directory differently (for
+example, with or without a verbatim path prefix). Attachment matching, Git's
+in-process repository lock, and the refresh queue use one machine-local
+filesystem identity from `platform_services.local_path_identity`. This identity
+is never shared or persisted and does not strip prefixes needed for long paths.
+Missing/identity-less paths retain normalized lexical matching. An unrelated
+checkout still cannot satisfy a Project binding, even if its remote is identical;
+the fix neither adds attachments nor changes repository availability.
+
 The application has three layers:
 
 1. A small Tauri shell owns windows, application startup and shutdown, and the

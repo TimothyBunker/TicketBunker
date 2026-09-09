@@ -21,6 +21,7 @@ from typing import Any, Mapping
 from . import autoagent, commands, layout, project
 from .api import TicketCatalog, TicketDatabase, TicketSnapshot
 from .ledger import Ledger
+from .platform_services import local_path_identity
 
 
 STATE_FILE = "ticketbunker/shared-truth.json"
@@ -436,7 +437,7 @@ def state(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> 
         entry = dict(
             (_read_all(root).get("tickets") or {}).get(_key(project_key, ticket_id)) or {}
         )
-        if (entry.get("git") or {}).get("status") == "refreshing" and (str(root), project_key, ticket_id) not in _RUNNING:
+        if (entry.get("git") or {}).get("status") == "refreshing" and (local_path_identity(root), project_key, ticket_id) not in _RUNNING:
             entry["git"] = {"status": "cached", "label": "Git freshness unknown",
                             "detail": "No active Git fetch is tracked in this app. Refresh branches to check the remote.", "action": "Refresh Git refs"}
             entry["refresh"] = "idle"
@@ -654,7 +655,7 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
 
 
 def _background(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> None:
-    target = (str(root), project_key, ticket_id)
+    target = (local_path_identity(root), project_key, ticket_id)
     try:
         commands.dispatch(
             "truth.refresh",
@@ -703,7 +704,7 @@ def queue_refresh(
 ) -> bool:
     """Start one coalesced ticket refresh and return without waiting."""
     root = Path(root).resolve()
-    target = (str(root), project_key, ticket_id)
+    target = (local_path_identity(root), project_key, ticket_id)
     with _LOCK:
         if target in _RUNNING:
             return False

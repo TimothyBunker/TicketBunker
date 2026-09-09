@@ -8,6 +8,11 @@ on:
       - tests/test_two_participant_loop.py
       - tests/test_workflow.py
       - tests/test_bootstrap.py
+      - tests/test_repository_identity.py
+      - ticketbunker/platform_services.py
+      - ticketbunker/bunkerruntime.py
+      - ticketbunker/truth.py
+      - ticketbunker/adapters/gitrun.py
       - ticketbunker/layout.py
       - ticketbunker/processors/stages.py
       - .github/workflows/portability.yml
@@ -36,5 +41,7 @@ jobs:
         run: python -m unittest discover -s tests -p test_two_participant_loop.py -v
       - name: Exercise Git refresh and branch locking
         run: python -m unittest discover -s tests -p test_workflow.py -v
+      - name: Exercise native repository path identity
+        run: python -m unittest discover -s tests -p test_repository_identity.py -v
       - name: Exercise deterministic Checks and scratch cleanup
         run: python -m unittest discover -s tests -p test_bootstrap.py -v

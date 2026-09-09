@@ -35,6 +35,24 @@ _ARCHITECTURES = {
 }
 
 
+def local_path_identity(path: Path) -> str:
+    """Machine-local identity for attachment matching and in-process work locks.
+
+    Windows native canonical paths can retain a verbatim prefix that Python's
+    ordinary paths omit. Compare filesystem identity without rewriting either
+    spelling (long paths must remain usable). Never persist this device key.
+    """
+    resolved = Path(path).resolve()
+    try:
+        info = resolved.stat()
+        if info.st_ino:
+            return f"file:{info.st_dev}:{info.st_ino}"
+    except OSError:
+        pass
+    # Missing or identity-less filesystems retain the previous lexical behavior.
+    return "path:" + os.path.normcase(str(resolved))
+
+
 @dataclass(frozen=True)
 class PlatformServices:
     """Host facts and machine-local operations that are allowed to vary."""

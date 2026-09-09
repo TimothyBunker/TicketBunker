@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterator, Mapping
 
 from ..ledger import Ledger
+from ..platform_services import local_path_identity
 
 
 _LOCKS_GUARD = threading.Lock()
@@ -25,7 +26,7 @@ _REPOSITORY_LOCKS: dict[str, threading.RLock] = {}
 @contextmanager
 def repository_lock(repo: Path) -> Iterator[None]:
     """Keep one process from interleaving Git transactions in a checkout."""
-    key = os.path.normcase(str(Path(repo).resolve()))
+    key = local_path_identity(repo)
     with _LOCKS_GUARD:
         lock = _REPOSITORY_LOCKS.setdefault(key, threading.RLock())
     with lock:

@@ -4,6 +4,26 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Windows native attachment identity fix (after 0.6.3-rc1)
+
+Tim reported a false "repository is not attached" Git-freshness failure in the
+installer. Reproduced with real Windows Python: Rust's `canonicalize()` sends a
+verbatim-prefixed path while the stored attachment can be unprefixed; pathlib
+equality is false though `samefile` is true. Attachment matching now compares
+filesystem identity, shared with Git repository locks and refresh coalescing so
+the same checkout cannot acquire two identities across transports. No attachment,
+registry, source checkout, or Git configuration is changed. This is source-only;
+the published 0.6.3-rc1 installer still needs replacing to deliver the fix.
+
+`tests/test_repository_identity.py` covers wrong bindings, unrelated directories,
+real Windows verbatim paths, shared lock/queue identity, and a real Windows
+worker ticket refresh against a scratch Git origin followed by reopening through
+the ordinary attachment path. Windows/macOS portability CI now includes it.
+Verified locally: 390 Python tests on Linux (two native-Windows cases skipped),
+all four identity tests on native Windows including real worker/Git refresh,
+12 Windows truth tests, 11 Windows platform tests, and the real-browser hardening
+flow. No real user repositories or Bunker configuration were modified.
+
 ## Published release candidate: 0.6.3-rc1 (2026-09-08)
 
 Published installer candidate is `v0.6.3-rc1`; runtime/UI/native versions are 0.6.3 to

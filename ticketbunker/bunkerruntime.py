@@ -16,7 +16,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from . import bunkerdb, config, layout
+from . import bunkerdb, config, layout, platform_services
 
 MARKER = "bunker.json"
 _PROJECTION_EXCLUDED = {"project", "source_kind", "source_reference"}
@@ -50,8 +50,9 @@ def select_repository(detail: dict[str, Any], *, repo: Path | None = None,
     if repository_id:
         candidates = [value for value in candidates if value["id"] == repository_id]
     if repo is not None:
+        identity = platform_services.local_path_identity(repo)
         candidates = [value for value in candidates if value.get("local_path")
-                      and Path(value["local_path"]).resolve() == Path(repo).resolve()]
+                      and platform_services.local_path_identity(Path(value["local_path"])) == identity]
     elif not repository_id:
         candidates = [value for value in candidates if value.get("local_path")]
     if not candidates and (repository_id or repo is not None):
