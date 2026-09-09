@@ -3777,7 +3777,7 @@ dependencies = [
 
 [[package]]
 name = "ticketbunker-desktop"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "serde_json",
  "tauri",

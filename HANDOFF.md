@@ -4,6 +4,14 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Corrected installer preparation: 0.6.4-rc1
+
+Tim requested a replacement installer for the Windows attachment bug below.
+Candidate is `v0.6.4-rc1`, with runtime/UI/native versions 0.6.4 so the fixed
+installation is distinguishable from 0.6.3-rc1 in System. Keep existing data and
+attachments; no reconfiguration or migration is required. Confirm candidate CI,
+the three-platform Release run, and published assets before claiming availability.
+
 ## Windows native attachment identity fix (after 0.6.3-rc1)
 
 Tim reported a false "repository is not attached" Git-freshness failure in the
