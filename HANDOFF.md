@@ -4,15 +4,26 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Release candidate preparation: 0.6.3 (2026-09-08)
+## Published release candidate: 0.6.3-rc1 (2026-09-08)
 
-Next installer candidate is `v0.6.3-rc1`; runtime/UI/native versions are 0.6.3 to
+Published installer candidate is `v0.6.3-rc1`; runtime/UI/native versions are 0.6.3 to
 distinguish it from the installed 0.6.2 rc2. Includes the compact controls,
 ticket chapters/details, durable sync receipts, live component versions, and
 automatic WSL native renderer fallback. Browser CI caught an old ambiguous
 version selector after System gained two version rows; the standalone flow now
 asserts each named component separately. No product assertion was removed.
-Do not claim publication until the tagged three-platform Release run succeeds.
+Published from `5a2ca27`: https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.3-rc1
+Release run `34297157831` passed Linux x64 DEB/AppImage, macOS Apple Silicon DMG,
+Windows x64 NSIS, and publication. Candidate CI `34296673634` and Windows/macOS
+portability `34297157826` passed. All seven binaries have adjacent SHA-256 files;
+their contents match GitHub's uploaded asset digests. The Windows installer was
+also downloaded and independently hashed (44,870,899 bytes;
+`e684ede33460ccc7080472d6d23f7250a42e2e5d09265ef06bebe5834520f46f`).
+The Windows build is explicitly unsigned and the release is a prerelease, so the
+stable-only in-app update check will not offer it. Use the release download link.
+Close TicketBunker, install, reopen, and verify both System versions read 0.6.3.
+Installed-app Windows interaction and completed provider login still require
+Tim's smoke test; build/packaging success is not a claim of that manual coverage.
 
 ## WSL native rendering compatibility (2026-09-08)
 

@@ -1,6 +1,12 @@
 # Pre-release reliability validation
 
-This pass changes source and bundled browser assets, not the released installer.
+The initial pass changed source and bundled browser assets. Those changes and
+the WSL renderer follow-up are now included in the published
+[0.6.3-rc1 installers](https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.3-rc1).
+All three release jobs and publication passed; Windows is an unsigned prerelease.
+The seven binary checksum sidecars match GitHub's uploaded asset digests, and
+the Windows setup download was independently SHA-256 verified. This does not
+replace the installed-app interaction checks below.
 Validation on 2026-09-08: 386 Python tests, 81 UI tests, 9 Rust tests, production
 frontend build, and the real-browser hardening flow passed.
 
