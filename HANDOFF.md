@@ -4,13 +4,30 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Corrected installer preparation: 0.6.4-rc1
+## Corrected installer published: 0.6.4-rc1
 
 Tim requested a replacement installer for the Windows attachment bug below.
-Candidate is `v0.6.4-rc1`, with runtime/UI/native versions 0.6.4 so the fixed
+Published candidate is `v0.6.4-rc1`, with runtime/UI/native versions 0.6.4 so the fixed
 installation is distinguishable from 0.6.3-rc1 in System. Keep existing data and
-attachments; no reconfiguration or migration is required. Confirm candidate CI,
-the three-platform Release run, and published assets before claiming availability.
+attachments; no reconfiguration or migration is required.
+
+Release: https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.4-rc1
+Immutable source: `9958fb6`. Candidate CI `34305464988`, Windows/macOS portability
+`34305894244`, and Release `34305894262` all passed. Windows x64 NSIS, Linux x64
+DEB/AppImage, macOS Apple Silicon DMG, and runtime bundles are published. All seven
+binary checksum sidecars match GitHub's uploaded asset digests. The Windows setup
+and runtime ZIP were also downloaded and independently hashed. Setup is
+44,889,824 bytes, SHA-256
+`dfdac9ff88e4982b6d2d90d821769930a073d1320ea2ef87556309b04332eddf`.
+
+Post-publication test executed the downloaded, frozen Windows 0.6.4 `tb.exe`
+against an isolated Bunker and scratch Git origin: the native verbatim-path
+refresh passed, ordinary-path reopening reported current Git state, and the
+checkout remained clean. This tests the packaged backend, not an interactive
+NSIS installation or a completed provider login. Windows is still an unsigned
+prerelease; use the download link, since stable-only update discovery omits it.
+Close TicketBunker, install in Windows, reopen, and check both System versions
+are 0.6.4. Refresh Branches if a previous failure notice is still cached.
 
 ## Windows native attachment identity fix (after 0.6.3-rc1)
 

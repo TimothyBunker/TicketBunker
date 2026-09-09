@@ -1,5 +1,14 @@
 # Pre-release reliability validation
 
+Current corrected installer: [0.6.4-rc1](https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.4-rc1),
+from `9958fb6`. Candidate CI, portability checks and all release jobs passed.
+The downloaded Windows installer and runtime ZIP were independently SHA-256
+verified, and all seven binary sidecars match the published asset digests.
+The frozen Windows backend was then exercised against an isolated Bunker and
+local Git origin using the verbatim path that caused the false attachment error:
+refresh succeeded, normal-path reopening showed current state, and the checkout
+was unchanged. No repository reconnection or Bunker migration is needed.
+
 The initial pass changed source and bundled browser assets. Those changes and
 the WSL renderer follow-up are now included in the published
 [0.6.3-rc1 installers](https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.3-rc1).
