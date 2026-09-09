@@ -4,6 +4,20 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## WSL native rendering compatibility (2026-09-08)
+
+The Rust launcher now sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically on
+recognized WSL kernels before creating GTK/WebKit or any workers. Existing
+values (including `0`) are preserved. Other Linux kernels, Windows/macOS, the
+Python backend, repository state and explicit browser mode are unchanged. No
+renderer commands or shell-profile edits are required from ordinary users.
+Unit tests cover WSL detection, ordinary/unknown kernels, and explicit overrides.
+This source fix does not update the already-installed rc2 or publish an installer.
+Verified: 12 Rust tests, native debug build, and the real WSL/X11 editor with no
+inherited renderer override. WebKit received the automatically selected setting;
+typing, the native unsaved-close dialog, Save, and reopen rendered cleanly, and
+the saved scratch file persisted. Other Linux desktops still need visual testing.
+
 ## Pre-release reliability pass (2026-09-08)
 
 Source-only; no new installer, tag, or version bump. Project ticket-import

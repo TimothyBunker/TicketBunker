@@ -134,6 +134,11 @@ WSL, it uses the normal Linux platform service. A native shell talking to a
 core in another local environment is a launcher/transport concern; WSL-specific
 paths and repair instructions do not enter shared Bunker state or domain errors.
 
+The Linux desktop app automatically uses a compatibility renderer when running
+under a recognized WSL kernel, avoiding the graphics corruption observed there.
+No terminal setup is needed. Normal Linux and native Windows rendering stay
+unchanged; this does not change the browser selected for explicit browser mode.
+
 The stdlib-only core remains available for constrained or air-gapped setups.
 These forms initially install TicketBunker without the large pi runtime:
 

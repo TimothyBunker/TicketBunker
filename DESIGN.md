@@ -1976,6 +1976,17 @@ some minimal desktop sessions, it uses GTK's in-memory settings backend before c
 window. The native folder picker therefore remains responsive and does not
 flood a launching terminal with unrelated `dconf` warnings.
 
+The Linux native shell also selects WebKit's DMA-BUF-disabled compatibility
+renderer when the host kernel release identifies WSL (`microsoft` or `-wsl`,
+case-insensitive). This happens before GTK/WebKit initialization or worker
+threads. An existing `WEBKIT_DISABLE_DMABUF_RENDERER` setting is always preserved,
+including `0` to opt out. Ordinary Linux and unreadable/unknown kernel releases
+keep their renderer defaults; Windows/macOS do not compile this path. This is
+local graphics compatibility only: it does not force an X11/Wayland backend,
+change browser settings or shell profiles, or add WSL behavior to the Python
+domain. It addresses observed WSL native-window corruption, not a claim that all
+Linux rendering failures have the same cause.
+
 The bundled local window is the sole recipient of native directory-dialog,
 clipboard, local-command, and agent-setup permissions. Its Tauri commands check
 the caller's window label. No remote origin is admitted to that ACL boundary;

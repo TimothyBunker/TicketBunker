@@ -37,6 +37,30 @@ fn configure_settings_backend() {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn needs_wsl_renderer_fallback(kernel_release: Option<&str>, explicitly_configured: bool) -> bool {
+    if explicitly_configured {
+        return false;
+    }
+    let release = kernel_release.unwrap_or_default().to_ascii_lowercase();
+    release.contains("microsoft") || release.contains("-wsl")
+}
+
+#[cfg(target_os = "linux")]
+fn configure_webkit_renderer() {
+    let release = std::fs::read_to_string("/proc/sys/kernel/osrelease").ok();
+    if needs_wsl_renderer_fallback(
+        release.as_deref(),
+        env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some(),
+    ) {
+        // WSL's graphics bridge exhibited corrupted focus controls and editor
+        // surfaces with DMA-BUF. Select WebKit's tested compatibility path only
+        // here, before GTK/WebKit or any worker threads start. Do not force X11,
+        // modify the user's environment files, or change ordinary Linux defaults.
+        env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct LaunchOptions {
     repo: Option<PathBuf>,
@@ -836,7 +860,10 @@ fn single_instance_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
-    configure_settings_backend();
+    {
+        configure_webkit_renderer();
+        configure_settings_backend();
+    }
     let options = parse_options(env::args_os().skip(1)).unwrap_or_else(|message| {
         eprintln!("TicketBunker could not open: {message}");
         std::process::exit(2);
@@ -1015,5 +1042,41 @@ mod tests {
             "unix:path=/ticketbunker/definitely/missing/bus"
         )));
         assert!(!missing_session_bus(Some("unix:abstract=/tmp/dbus-test")));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wsl_native_renderer_uses_compatibility_path() {
+        for release in [
+            "6.18.33.2-microsoft-standard-WSL2\n",
+            "4.4.0-19041-Microsoft",
+            "6.6.0-wsl2-custom",
+        ] {
+            assert!(needs_wsl_renderer_fallback(Some(release), false));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ordinary_linux_and_unknown_kernels_keep_default_renderer() {
+        for release in [
+            None,
+            Some(""),
+            Some("6.8.0-52-generic"),
+            Some("6.11.0-azure"),
+        ] {
+            assert!(!needs_wsl_renderer_fallback(release, false));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn explicit_webkit_renderer_setting_is_never_overridden() {
+        // Presence, not string truthiness: preserve "0", "1", empty, and
+        // non-Unicode inherited values alike via var_os at the startup boundary.
+        assert!(!needs_wsl_renderer_fallback(
+            Some("6.6.0-microsoft-standard-WSL2"),
+            true
+        ));
     }
 }

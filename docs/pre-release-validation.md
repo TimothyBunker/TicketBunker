@@ -60,10 +60,20 @@ Observed on Linux in this pass:
 The default WebKit renderer showed focus artifacts and severe visual corruption
 in this Linux graphical environment. Repeating with
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` cleared the observed artifacts, and the native
-save/close/reopen check passed with that diagnostic override. The override is
-**not** enabled by application code. Resolve or explicitly validate this graphics
-path before declaring Linux release readiness. Do not infer Windows behavior
-from the Linux test.
+save/close/reopen check passed with that diagnostic override. The native launcher
+now selects this fallback automatically when the kernel release identifies WSL,
+unless the user explicitly set that variable already. WebKit checks this setting
+before selecting its buffer transport ([upstream source](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/gtk/AcceleratedBackingStore.cpp)).
+Ordinary Linux defaults and native Windows are unchanged. This fix belongs to
+the app, not the user's WSL browser. Native Linux outside WSL and the actual next
+installer still need their own visual smoke checks.
+
+Follow-up validation: 12 Rust tests and the native debug build passed. Launching
+the scratch fixture with `WEBKIT_DISABLE_DMABUF_RENDERER` absent from the parent
+environment confirmed that the WebKit child received `1` from the app. The
+WSL/X11 editor, focused controls, native unsaved-close dialog, Save and reopen
+rendered cleanly; the saved text was checked on disk and in the reopened window.
+This was a real native-window test, not a browser or mocked transport check.
 
 Still required: successful folder selection through the native picker, completed
 provider authentication using a consenting test account, and the fresh Windows
