@@ -27,7 +27,7 @@ describe("Bunker-native ticket work", () => {
       if (action === "editor.read") return Promise.resolve({ path: "README.md", content: "original\n", digest: "old", branch: "ada/ECS-4-work", line: 1, settings: { tab_size: 4, line_wrap: false } });
       if (action === "editor.save") return Promise.resolve({ content: payload.content, digest: "new", saved: true });
       if (action === "workflow.attach") return Promise.resolve({ branch: payload.branch });
-      if (action === "workflow.state") return Promise.resolve({ base_branches: ["main", "release"], related_branches: ["ada/ECS-4-work"] });
+      if (action === "workflow.state") return Promise.resolve({ base_branches: ["main", "release"], related_branches: ["ada/ECS-4-work"], current_branch: "ada/ECS-4-work" });
       if (action === "workflow.start") return Promise.resolve({ branch: "ada/ECS-4-new-work" });
       if (action === "truth.synthesize") return Promise.resolve({ queued: true });
       if (action === "truth.queue") return Promise.resolve({ queued: true });
@@ -44,7 +44,32 @@ describe("Bunker-native ticket work", () => {
       { bunker_id: "engineering", ticket_id: "ECS-4", repository_id: "renderer" }));
     fireEvent.click(screen.getByRole("button", { name: "Synthesize" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("truth.synthesize",
-      { bunker_id: "engineering", project: "ECS", ticket: "ECS-4" }, "/work/renderer"));
+      { bunker_id: "engineering", project: "ECS", ticket: "ECS-4", branch: "ada/ECS-4-work" }, "/work/renderer"));
+  });
+
+  it("shows the checked-out ticket branch and preselects it for manual linking", async () => {
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    const current = await screen.findByLabelText("Current ticket branch");
+    expect(current).toHaveTextContent("ada/ECS-4-work");
+    expect(current).toHaveTextContent("Matched to ECS-4");
+    expect(within(current).getByRole("button", { name: "Synthesize" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create branch" }));
+    await waitFor(() => expect(screen.getByLabelText("Existing branch")).toHaveValue("ada/ECS-4-work"));
+  });
+
+  it("hides the current-branch action when no ticket branch is checked out and rereads on focus", async () => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((action, ...args) => action === "application.ticket.get" ? Promise.resolve({ ...detail,
+      branches: detail.branches.map((branch) => ({ ...branch, current: false })),
+    }) : original(action, ...args));
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    await screen.findByLabelText("Working repository");
+    expect(screen.queryByLabelText("Current ticket branch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Synthesize" })).not.toBeInTheDocument();
+    const reads = transport.command.mock.calls.filter(([action]) => action === "application.ticket.get").length;
+    fireEvent.focus(window);
+    await waitFor(() => expect(transport.command.mock.calls.filter(([action]) => action === "application.ticket.get").length).toBeGreaterThan(reads));
+    expect(transport.command.mock.calls.some(([action]) => action === "truth.synthesize")).toBe(false);
   });
 
   it("groups readable details and keeps optional empty fields in More details", async () => {

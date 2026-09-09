@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from . import commands, config, handlers, layout, project, types
+from . import commands, config, handlers, layout, platform_services, project, types
 from .adapters.gitrun import GitError, git, repository_lock
 from .api import TicketCatalog
 from .ledger import Ledger
@@ -146,7 +146,7 @@ def _preflight(
         "branch_preflight",
         "The selected work directory is not a Git repository.",
     ).strip()
-    if Path(top).resolve() != source_root:
+    if platform_services.local_path_identity(Path(top)) != platform_services.local_path_identity(source_root):
         raise commands.CommandRejected("repository_mismatch", f"Run the workflow from {top}.")
     dirty = _run(
         source_root,

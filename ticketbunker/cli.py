@@ -758,6 +758,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         proc = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True,
+            **platform_services.current().headless_process_options(),
         )
         if proc.returncode != 0:
             print(f"error: {repo} is not a git repository (or has no HEAD)", file=sys.stderr)
@@ -859,6 +860,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             ["git", "-C", str(repo), "rev-parse", args.branch],
             capture_output=True,
             text=True,
+            **platform_services.current().headless_process_options(),
         )
         actual = current.stdout.strip() if current.returncode == 0 else ""
         if actual != args.expected_head:
@@ -1579,7 +1581,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 
     repo = Path(args.repo).resolve()
     proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True,
+                          **platform_services.current().headless_process_options())
     if proc.returncode != 0:
         return stop(
             "Git could not identify a checked-out branch.",
@@ -1587,10 +1590,40 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             proc.stderr.strip(),
         )
     branch = proc.stdout.strip()
+    expected = getattr(args, "expected_branch", "")
+    if expected and branch != expected:
+        return stop("The checked-out branch changed before synthesis started.",
+                    "Return to the ticket, check its current branch, then retry synthesis.")
     project = layout.find_root(repo)
     bunker = None
+    selected = getattr(args, "bunker_dir", "")
+    if selected:
+        # The user already chose a ticket. Never rediscover a different one in
+        # another Bunker (or through another Windows spelling of this checkout).
+        from . import bunkerruntime
+
+        try:
+            bunker = Path(selected).resolve()
+            info = bunkerruntime.marker(bunker)
+            if info:
+                resolved = bunkerruntime.materialize(info["bunker_id"], info["ticket_id"],
+                    repo=repo, repository_id=info["repository_id"])["bunker"]
+                if not resolved.samefile(bunker):
+                    raise ValueError("The selected ticket runtime does not match its repository.")
+            selected_ticket = _ticket(bunker)
+            if platform_services.local_path_identity(Path(selected_ticket["repo"])) != platform_services.local_path_identity(repo):
+                raise ValueError("The selected ticket belongs to another repository.")
+            # Keep the attachment's spelling in persisted inputs. Windows may
+            # pass a verbatim alias; it is the same checkout, not new context.
+            repo = Path(selected_ticket["repo"])
+            related, _, _ = stages.relate_branches([branch], selected_ticket.get("key") or selected_ticket["id"],
+                                                  selected_ticket.get("assigned_branches") or [])
+            if branch not in related:
+                raise ValueError("The checked-out branch does not belong to the selected ticket.")
+        except (OSError, ValueError, KeyError) as exc:
+            return stop(str(exc), "Open the ticket and check its repository and branch, then retry synthesis.")
     tid = config.extract_ticket_id(branch)
-    if tid and project:
+    if bunker is None and tid and project:
         cand = layout.bunker_path(project, tid)
         bunker = cand if cand.is_dir() else None
     if bunker is None:
@@ -1646,7 +1679,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             checks=runtime_info.get("checks") if isinstance(runtime_info.get("checks"), dict) else None,
             check_branch=branch,
         )
-        _recompose(bunker, ledger)
+        _recompose(bunker, ledger, branch=branch)
         master.regenerate(bunker, ledger)
     except Exception as exc:  # a hook must never block a commit or merge
         from .adapters.gitrun import GitError
@@ -2390,6 +2423,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--repo", default=".", help="the source repo (default: current directory)")
     s.add_argument("--quiet", action="store_true", help="print nothing (hook mode)")
     s.add_argument("--strict", action="store_true", help=argparse.SUPPRESS)
+    s.add_argument("--bunker-dir", default="", help=argparse.SUPPRESS)
+    s.add_argument("--expected-branch", default="", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_refresh)
 
     s = sub.add_parser("synthesize", help="request synthesis for the checked-out ticket branch")

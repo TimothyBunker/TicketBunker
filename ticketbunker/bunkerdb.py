@@ -1753,7 +1753,7 @@ def _repository_branches(
         "refs/heads",
         "refs/remotes",
     )
-    needle = ticket_id.casefold()
+    from .processors.stages import relate_branches
     repository_id = str(repository.get("id") or "")
     repository_name = str(repository.get("name") or root.name)
     groups: dict[str, dict[str, Any]] = {}
@@ -1773,7 +1773,8 @@ def _repository_branches(
             remote_name, _, name = short.partition("/")
             if not name:
                 continue
-        if needle not in name.casefold() and name not in named:
+        related, _, _ = relate_branches([name], ticket_id, list(named))
+        if not related:
             continue
         entry = groups.setdefault(
             name,
@@ -2148,6 +2149,7 @@ def _git_root(raw: str) -> Path:
         ["git", "-C", str(selected), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if process.returncode != 0 or not process.stdout.strip():
         raise BunkerDatabaseError("Choose a folder inside a Git working tree.")
@@ -2156,7 +2158,8 @@ def _git_root(raw: str) -> Path:
 
 def _git_value(root: Path, *args: str) -> str:
     process = subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True
+        ["git", "-C", str(root), *args], capture_output=True, text=True,
+        **platform_services.current().headless_process_options(),
     )
     return process.stdout.strip() if process.returncode == 0 else ""
 
@@ -2437,6 +2440,7 @@ def _fetch_repository(root: Path) -> None:
             text=True,
             timeout=90,
             env=environment,
+            **platform_services.current().headless_process_options(),
         )
     except subprocess.TimeoutExpired as exc:
         raise BunkerDatabaseError(
@@ -2958,7 +2962,7 @@ def find_bunker_ticket(repo_root: Path | str, branch: str) -> dict[str, Any] | N
     if not ticket_id:
         return None
     try:
-        resolved = Path(repo_root).resolve()
+        resolved = platform_services.local_path_identity(Path(repo_root))
     except OSError:
         return None
     matches: list[dict[str, Any]] = []
@@ -2967,7 +2971,7 @@ def find_bunker_ticket(repo_root: Path | str, branch: str) -> dict[str, Any] | N
             continue
         for repository in bunker.get("repositories") or []:
             raw = str(repository.get("local_path") or "")
-            if not raw or Path(raw).resolve() != resolved:
+            if not raw or platform_services.local_path_identity(Path(raw)) != resolved:
                 continue
             with _database(str(bunker["id"])) as connection:
                 row = connection.execute(

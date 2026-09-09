@@ -215,6 +215,7 @@ class BunkerRuntimeTests(unittest.TestCase):
             )
         self.assertTrue(queued["queued"])
         spawned.assert_called_once()
+        self.assertIn(branch, bunkerdb.get_ticket(self.bunker_id, "ECS-4")["ticket"]["branch_assignments"][self.repository_id])
         runtime = bunkerruntime.ticket_dir(self.bunker_id, "ECS-4")
         self.assertTrue((runtime / "ticket.json").is_file())
         self.assertEqual(json.loads((runtime / bunkerruntime.MARKER).read_text())["repository_id"], self.repository_id)
@@ -373,7 +374,8 @@ class BunkerRuntimeTests(unittest.TestCase):
             scopes = {report["scope"] for report in snapshot.reports}
             self.assertEqual(scopes, {"combined", f"branch:{branch}"})
             self.assertIn("<!-- tb:verified", next(r["content"] for r in snapshot.reports if r["scope"] != "combined"))
-            self.assertEqual(bunkerdb.remote_connection(self.bunker_id)["sync_cursor"], "change-2")
+            # The inferred branch link is saved before the two report records.
+            self.assertEqual(bunkerdb.remote_connection(self.bunker_id)["sync_cursor"], "change-3")
         finally:
             server.shutdown()
             server.server_close()

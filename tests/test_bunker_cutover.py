@@ -8,7 +8,7 @@ from unittest import mock
 
 import test_bunkerruntime as runtime_tests
 from test_bunkerruntime import git
-from ticketbunker import bunkerdb, bunkerruntime, commands, layout
+from ticketbunker import autoagent, bunkerdb, bunkerruntime, cli, commands, layout
 from ticketbunker import credentials, remote
 from ticketbunker.service import server as service_server, storage as service_storage
 
@@ -103,6 +103,34 @@ class BunkerCutoverTests(unittest.TestCase):
         self.dispatch("workflow.attach", {"branch": "Ada/ECS-4-existing"})
         with self.assertRaises(commands.CommandRejected):
             self.dispatch("workflow.attach", {"branch": "Ada/ECS-5-wrong"})
+        self.assertEqual(git(self.repo, "branch", "--show-current"), "main")
+
+    def test_branch_inventory_uses_the_same_bounded_key_as_synthesis(self):
+        git(self.repo, "branch", "Ada/ECS-40-other-ticket")
+        git(self.repo, "switch", "-c", "Ada/ECS-4-existing")
+        git(self.repo, "update-ref", "refs/remotes/origin/Ada/ECS-4-existing", "HEAD")
+        detail = bunkerdb.get_ticket(self.bid, "ECS-4")
+        self.assertEqual([row["name"] for row in detail["branches"]], ["Ada/ECS-4-existing"])
+        self.assertTrue(detail["branches"][0]["current"])
+        self.assertTrue(detail["branches"][0]["remote"])
+
+    def test_stale_synthesis_button_never_queues_a_different_checkout(self):
+        git(self.repo, "switch", "-c", "Ada/ECS-4-new")
+        with mock.patch.object(autoagent, "enqueue") as queued:
+            with self.assertRaises(commands.CommandRejected) as caught:
+                self.dispatch("truth.synthesize", {"project": "ECS", "branch": "Ada/ECS-4-old"})
+        self.assertEqual(caught.exception.code, "synthesis_branch_changed")
+        queued.assert_not_called()
+
+    def test_explicit_refresh_does_not_rediscover_ticket_and_rejects_wrong_branch(self):
+        branch = self.fixture.start_work()
+        info = bunkerruntime.materialize(self.bid, "ECS-4", repo=self.repo)
+        args = ["refresh", "--repo", str(self.repo), "--quiet", "--strict",
+                "--bunker-dir", str(info["bunker"]), "--expected-branch", branch]
+        with mock.patch.object(bunkerruntime, "resolve", side_effect=AssertionError("already selected")):
+            self.assertEqual(cli.main(args), 0)
+        git(self.repo, "switch", "main")
+        self.assertEqual(cli.main(args), 1)
         self.assertEqual(git(self.repo, "branch", "--show-current"), "main")
 
     def test_tracker_refresh_keeps_ticketbunker_branch_relationships(self):

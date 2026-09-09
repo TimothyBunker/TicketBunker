@@ -68,6 +68,17 @@ repository never joins a Bunker.
 The harness (Pi) persists its own session data separately; the Bunker holds only
 what TicketBunker owns.
 
+## Working on a ticket
+
+On a ticket, **Current branch** shows the checked-out branch in your selected
+repository. **Matched** means its name carries the ticket key; **Linked** means
+that relationship is saved. Press **Synthesize** there to save a matching link
+and generate its report. The **+** beside Branches also lets you attach an
+existing branch, with your matching current branch preselected. Viewing another
+branch's report does not check it out. Returning to TicketBunker after using Git
+reloads the local branch state; a changed checkout is checked again before any
+synthesis starts.
+
 ## Installing
 
 The normal download is the native TicketBunker app for your platform. It

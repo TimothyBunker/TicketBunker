@@ -4,6 +4,38 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Current-branch synthesis fix (2026-09-09, source only)
+
+Tim's 0.6.4 Windows installer could recognize the repository in the view but
+lose its ticket during deterministic refresh. `find_bunker_ticket` still used
+lexical path equality; it now shares filesystem identity with attachment lookup.
+More importantly, the worker passes the explicitly selected ticket runtime and
+expected branch into refresh, validates its repository, and never globally
+rediscovers another Bunker. Preserve the attachment's path spelling in persisted
+inputs; otherwise Windows verbatim paths made a newly published report look
+outdated on reopening. Refresh composes the selected session before fingerprinting
+so saving the branch link cannot immediately invalidate its own new report.
+
+The rail now has Current branch (only for related local checked-out work),
+Matched/Linked confirmation, and Synthesize. The button carries the displayed
+branch and refuses a changed checkout. A bounded key match saves its explicit
+repository-scoped link via workflow.attach before queueing. Manual attachment
+under + preselects the matching current branch. Local/remote refs stay one row;
+the database branch inventory now uses the same bounded-key rule as synthesis.
+Returning to the app reloads local checkout state, not network refs or synthesis.
+Git helpers used in discovery, observation, and synthesis request headless Windows
+execution. Branch-creation preflight also accepts the native path alias.
+
+Regression coverage includes native Windows worker requests with verbatim paths,
+real refresh/stub-agent/lint/anchor/publication subprocesses and ordinary-path
+reopening, plus real native branch creation against a scratch origin. Six native
+Windows identity tests pass; the Linux Python suite passes 395 tests (three
+native-Windows cases skipped), UI suite has 83 passing tests, and the real-browser
+hardening flow verifies Current branch, its saved link, and Synthesize. Screenshot:
+`/tmp/ticketbunker-current-branch.png` (disposable fixture, not Tim's project).
+No real repository, installed app, credentials, or Bunker data changed. This is
+not in v0.6.4-rc1: the next installer needs a new version/tag; do not move that tag.
+
 ## Corrected installer published: 0.6.4-rc1
 
 Tim requested a replacement installer for the Windows attachment bug below.

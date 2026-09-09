@@ -198,6 +198,11 @@ try {
   await page.getByRole('button', { name: 'Review branch' }).click();
   await page.locator('.confirmation').getByRole('button', { name: 'Create branch', exact: true }).click();
   await expect(page.locator('.branch-item')).toContainText('qa/ECS-4-default-type');
+  const currentBranch = page.getByLabel('Current ticket branch', { exact: true });
+  await expect(currentBranch).toContainText('qa/ECS-4-default-type');
+  await expect(currentBranch).toContainText('Linked to ECS-4');
+  await expect(currentBranch.getByRole('button', { name: 'Synthesize', exact: true })).toBeEnabled();
+  await page.screenshot({ path: '/tmp/ticketbunker-current-branch.png' });
   await page.getByRole('button', { name: 'README.md line 1', exact: true }).click();
   await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
   const editor = page.getByLabel('Edit README.md');

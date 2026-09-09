@@ -4,6 +4,26 @@ Back-navigation controls display only a left arrow. Keep their destination in
 an accessible label and hover title, not redundant visible text. Desktop and
 browser views share this contract; unsaved-change guards remain in force.
 
+### Checked-out ticket work (2026-09-09)
+
+The ticket rail separates **Current branch** from the report being viewed.
+Show this section only for a local, checked-out branch related to this ticket
+in the selected repository. A bounded ticket-key match is labeled **Matched**;
+a saved repository-scoped assignment is labeled **Linked**. Synthesize saves a
+matched branch's link through the normal assignment action before queueing work.
+The manual branch picker preselects the related current branch. Local and remote
+refs for the same branch remain one row; ECS-2 must never match ECS-20.
+
+Synthesis carries the selected Bunker/ticket/repository runtime through its
+deterministic refresh instead of globally rediscovering it. The displayed branch
+is rechecked on request and in the worker; a changed checkout stops with recovery
+guidance. Reading another report never changes checkout or starts an agent.
+Returning to the app reloads local checkout state, without a network fetch or
+source-tree mutation. Windows path aliases share filesystem identity and retain
+the attachment's path spelling in persisted synthesis inputs. Background Git
+helpers must not allocate a console. Lint, anchors and publication gates remain
+unchanged.
+
 ### Pre-release freshness and recovery contract (2026-09-08)
 
 Project **Sync tickets** imports tracker data; Bunker sync reconciles shared

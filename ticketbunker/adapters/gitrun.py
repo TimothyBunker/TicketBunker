@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterator, Mapping
 
 from ..ledger import Ledger
+from .. import platform_services
 from ..platform_services import local_path_identity
 
 
@@ -83,6 +84,7 @@ def git_status(
                 stderr=subprocess.STDOUT,
                 env=process_env,
                 timeout=timeout,
+                **platform_services.current().headless_process_options(),
             )
             output = proc.stdout
             status = proc.returncode

@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import autoagent, commands, layout, project
+from . import autoagent, commands, layout, platform_services, project
 from .api import TicketCatalog, TicketDatabase, TicketSnapshot
 from .ledger import Ledger
 from .platform_services import local_path_identity
@@ -38,6 +38,7 @@ def _git_dir(root: Path) -> Path:
         ["git", "-C", str(Path(root).resolve()), "rev-parse", "--absolute-git-dir"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if proc.returncode == 0 and proc.stdout.strip():
         return Path(proc.stdout.strip()).resolve()
@@ -134,6 +135,7 @@ def _content_revision(root: Path, ticket: TicketSnapshot) -> str:
         ],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if refs.returncode == 0:
         digest.update(refs.stdout.encode())
@@ -145,6 +147,7 @@ def _current_branch(root: Path) -> str:
         ["git", "-C", str(Path(root).resolve()), "branch", "--show-current"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
@@ -185,6 +188,7 @@ def _commit_changes(root: Path, previous: str, branch: str) -> int | None:
         ["git", "-C", str(Path(root).resolve()), "rev-list", "--count", f"{previous}..{branch}"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if proc.returncode != 0:
         return None
@@ -625,6 +629,12 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
         runtime_bunker = info["bunker"]
     ticket = _ticket(root, project_key, ticket_id, live_branches=True, bunker_id=bunker_id)
     branch = _current_branch(root)
+    expected = str(payload.get("branch") or "")
+    if expected and branch != expected:
+        raise commands.CommandRejected(
+            "synthesis_branch_changed",
+            "The checked-out branch changed. Refresh the ticket, check Current branch, then retry synthesis.",
+        )
     branches = [item.name for item in ticket.branches]
     if not branch or not any(_same_branch(name, branch) for name in branches):
         available = ", ".join(branches[:3]) or "a branch assigned to this ticket"
@@ -638,6 +648,10 @@ def command_synthesize(context: commands.CommandContext, payload: dict[str, Any]
         active = automatic.get(key) or {}
         if isinstance(active, dict) and active.get("branch") == branch:
             return {"queued": False, **state(root, project_key, ticket_id, bunker_id)}
+    if bunker_id and branch not in (ticket.data.get("assigned_branches") or []):
+        # A bounded ticket-key match is enough to identify local work. Save the
+        # explicit link through the same gated action as the manual control.
+        commands.dispatch("workflow.attach", {"bunker_id": bunker_id, "ticket": ticket_id, "branch": branch}, context)
     queued = autoagent.enqueue(root, "user-requested-synthesis", bunker=runtime_bunker)
     if not queued.get("queued"):
         if queued.get("reason") == "agent_disabled":

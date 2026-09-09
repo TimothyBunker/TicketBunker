@@ -67,6 +67,7 @@ def _git(repo: Path, *args: str) -> tuple[str, int]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     return proc.stdout.strip(), proc.returncode
 
@@ -620,7 +621,8 @@ def _run_pipeline(repo: Path, payload: dict[str, Any]) -> tuple[bool, str]:
         return False, "HEAD changed before synthesis started; press Update synthesis to use the newer state"
     profile = _profile(repo, bunker, branch)
     base = _launcher()
-    refresh = [*base, "refresh", "--repo", str(repo), "--quiet", "--strict"]
+    refresh = [*base, "refresh", "--repo", str(repo), "--quiet", "--strict",
+               "--bunker-dir", str(bunker), "--expected-branch", branch]
     env = _cli_env()
     refreshed = subprocess.run(
         refresh,

@@ -446,7 +446,7 @@ function AgentTab({
         {hidden.size > 0 && <button type="button" className="filter-reset" onClick={() => setHidden(new Set())}>Show all</button>}
       </div>}
       {reports.length === 0 && scope !== "all" && detail.reports.length > 0 && <div className="quiet-empty"><h2>No report for {scope} yet</h2><p>Check it out and press Synthesize, or pick a branch that has a report.</p></div>}
-      {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>Check out a ticket branch and press Synthesize when you want a report.</p></div>}
+      {detail.reports.length === 0 && <div className="quiet-empty"><h2>No synthesis yet</h2><p>{detail.branches.some((branch) => branch.current && branch.local) ? "Press Synthesize under Current branch when you want a report." : "Check out a ticket branch to synthesize its work."}</p></div>}
       {reports.map((report) => (
         <section className="branch-report" key={report.scope}>
           {scope === "all" && <div className="branch-divider"><span>{report.scope === "combined" ? "Combined report" : report.scope.slice(7)}</span></div>}
@@ -580,8 +580,8 @@ function TicketRail({
     let cancelled = false;
     setBases([]);
     setBaseError("");
-    command<{ base_branches: string[]; related_branches: string[] }>("workflow.state", { ticket: detail.ticket.id, bunker_id: bunkerId }, repoRoot)
-      .then((value) => { if (!cancelled) { setBases(value.base_branches); setExisting(value.related_branches || []); } })
+    command<{ base_branches: string[]; related_branches: string[]; current_branch: string }>("workflow.state", { ticket: detail.ticket.id, bunker_id: bunkerId }, repoRoot)
+      .then((value) => { if (!cancelled) { setBases(value.base_branches); setExisting(value.related_branches || []); setAttachment(value.related_branches?.includes(value.current_branch) ? value.current_branch : ""); } })
       .catch((reason) => { if (!cancelled) setBaseError(String(reason)); });
     return () => { cancelled = true; };
   }, [creating, repoRoot, bunkerId, detail.ticket.id]);
@@ -591,15 +591,20 @@ function TicketRail({
   const synthesis = (detail.truth?.synthesis || {}) as Record<string, unknown>;
   const gitState = (detail.truth?.git || {}) as Record<string, unknown>;
   const ticket = detail.ticket;
+  const currentBranch = detail.branches.find((branch) => branch.current && branch.local);
+  const assignments = ticket.branch_assignments as Record<string, string[]> | undefined;
+  const assignedBranches = assignments?.[repositoryId] || (ticket.assigned_branches as string[] | undefined) || [];
+  const linked = currentBranch && assignedBranches.includes(currentBranch.name);
   async function synthesize() {
-    if (!repoRoot) return notify("Attach a local repository before synthesizing.", true);
+    if (!repoRoot || !currentBranch) return;
     setBusy(true);
     try {
-      await command("truth.synthesize", { project: agentProject(detail), ticket: ticket.id, bunker_id: bunkerId }, repoRoot);
+      await command("truth.synthesize", { project: agentProject(detail), ticket: ticket.id, bunker_id: bunkerId, branch: currentBranch.name }, repoRoot);
       notify("Synthesis started");
       onReload();
     } catch (reason) {
       notify(String(reason), true);
+      onReload();
     } finally {
       setBusy(false);
     }
@@ -648,10 +653,16 @@ function TicketRail({
     <aside className="ticket-rail">
       {detail.repositories.length > 1 && <label>Repository<select aria-label="Working repository" value={repositoryId} disabled={busy || repositoryLocked} title={repositoryLocked ? "Return to the ticket before changing repositories." : undefined} onChange={(event) => onRepository(event.target.value)}>{detail.repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.name}{repo.local_path ? "" : " (not connected)"}</option>)}</select></label>}
       <section className="state-hub">
+        {repoRoot && currentBranch && <div className="current-ticket-branch" aria-label="Current ticket branch">
+          <header><h2>Current branch</h2><i className="state-dot ready" title={`Checked out in ${repoRoot}`} /></header>
+          <button className="current-branch-name" onClick={() => onScope(currentBranch.name)} title="View this branch's report">{currentBranch.name}</button>
+          <small title={linked ? "This branch's ticket link is saved." : "The branch name matches this ticket. Synthesize saves the link automatically; it does not switch branches."}>{linked ? "Linked" : "Matched"} to {ticket.id}</small>
+          <button className="wide-action" disabled={busy || synthesis.status === "updating"} onClick={synthesize} title={`Synthesize ${currentBranch.name}, regardless of the report being viewed`}>{synthesis.status === "updating" ? "Synthesizing…" : "Synthesize"}</button>
+        </div>}
         <header><h2>Synthesis</h2></header>
         <div className="state-line"><i className={`state-dot ${synthesis.status === "current" ? "ready" : synthesis.status === "updating" ? "loading" : ""}`} /><span><strong>{String(synthesis.compact || synthesis.label || "Not synthesized")}{synthesis.status === "updating" && <Elapsed since={String((synthesis.progress as Record<string, unknown> | undefined)?.started_at || "")} />}</strong><small>{String(synthesis.detail || "Use Synthesize from a checked-out ticket branch.")}</small></span></div>
         {Boolean(synthesis.log) && <details className="diagnostic-path"><summary>Diagnostic location</summary><code>{String(synthesis.log)}</code><button onClick={() => navigator.clipboard.writeText(String(synthesis.log)).then(() => notify("Diagnostic path copied")).catch(() => notify("Copy was unavailable; the full path is shown above.", true))}>Copy path</button></details>}
-        {repoRoot && synthesis.status !== "updating" && <button className="wide-action" disabled={busy} onClick={synthesize}>{synthesis.status === "current" ? "Synthesize again" : String(synthesis.action || "Synthesize")}</button>}
+        {repoRoot && !currentBranch && <p className="rail-empty">Check out a {ticket.id} branch to synthesize. Use + to create or link one.</p>}
         <ChecksRow detail={detail} bunkerId={bunkerId} onReload={onReload} notify={notify} />
       </section>
       <section className="branches-panel">
@@ -1119,6 +1130,14 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
       .catch((reason) => { if (readSequence.current === sequence) setError(String(reason)); });
   }
   useEffect(load, [bunker.id, reference.id, repositoryChoice]);
+  // Returning from Git should show the actual checkout, not the last report
+  // scope. This is a local read, not a fetch or an automatic synthesis.
+  useEffect(() => {
+    const refreshLocal = () => { if (!document.hidden) load(); };
+    window.addEventListener("focus", refreshLocal);
+    document.addEventListener("visibilitychange", refreshLocal);
+    return () => { window.removeEventListener("focus", refreshLocal); document.removeEventListener("visibilitychange", refreshLocal); };
+  }, [bunker.id, reference.id, repositoryChoice]);
   useEffect(() => {
     if (!repoRoot) return;
     let active = true;

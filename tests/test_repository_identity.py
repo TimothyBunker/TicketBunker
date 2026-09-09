@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from ticketbunker import bunkerdb, bunkerruntime, platform_services, truth
+from ticketbunker import autoagent, bunkerdb, bunkerruntime, platform_services, truth
 from ticketbunker.adapters import gitrun
 
 
@@ -22,6 +22,23 @@ class RepositoryIdentityTests(unittest.TestCase):
         self.assertNotEqual(identity(self.root), identity(self.other))
         self.assertEqual(identity(self.root), identity(self.other / ".."))
         self.assertNotEqual(identity(self.root / "missing"), identity(self.root / "missing2"))
+
+    def test_ledgered_git_and_synthesis_helpers_request_headless_execution(self):
+        from ticketbunker.ledger import Ledger
+
+        service = mock.Mock()
+        service.headless_process_options.return_value = {"creationflags": 0x08000000}
+        with mock.patch.object(platform_services, "current", return_value=service), \
+             mock.patch("subprocess.run", return_value=mock.Mock(stdout=b"", returncode=0)) as run:
+            gitrun.git(self.root, ["status"], Ledger(self.root / "test.jsonl"), "test")
+            self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
+            run.return_value.stdout = "main\n"
+            autoagent._git(self.root, "branch", "--show-current")
+            self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
+            truth._current_branch(self.root)
+            self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
+            bunkerdb._git_value(self.root, "branch", "--show-current")
+            self.assertEqual(run.call_args.kwargs["creationflags"], 0x08000000)
 
     def test_unattached_repository_and_wrong_binding_stay_rejected(self):
         detail = {"repositories": [{"id": "allowed", "local_path": str(self.root)}]}
@@ -57,6 +74,32 @@ class RepositoryIdentityTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "native Windows worker and Git regression")
 class NativeWindowsTicketRefreshTests(unittest.TestCase):
+    def test_native_verbatim_branch_lookup_and_synthesis_keep_selected_ticket(self):
+        from test_bunker_cutover import BunkerCutoverTests, git
+        from ticketbunker import app_worker
+
+        lab = BunkerCutoverTests()
+        lab.setUp()
+        self.addCleanup(lab.doCleanups)
+        branch = lab.fixture.start_work()
+        normal = str(lab.repo.resolve())
+        extended = "\\\\?\\UNC\\" + normal[2:] if normal.startswith("\\\\") else "\\\\?\\" + normal
+        found = bunkerdb.find_bunker_ticket(extended, branch)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["repository_id"], lab.rid)
+        with mock.patch.object(autoagent, "_spawn_worker"):
+            queued = app_worker.dispatch_request({"id": 1, "action": "truth.synthesize", "project_root": extended,
+                "payload": {"bunker_id": lab.bid, "project": "ECS", "ticket": "ECS-4", "branch": branch}})
+        self.assertTrue(queued["queued"], queued)
+        # Real child processes: deterministic refresh, stub agent, lint, anchor
+        # verification and database publication, with the native path spelling.
+        status = autoagent.run_worker(Path(extended), debounce=0, once=True)
+        self.assertEqual(status, 0, autoagent.read_state(Path(extended)))
+        opened = lab.dispatch("application.ticket.get", {"ticket_id": "ECS-4"})
+        self.assertEqual(opened["truth"]["synthesis"]["status"], "current")
+        self.assertIn(branch, opened["ticket"]["branch_assignments"][lab.rid])
+        self.assertEqual(git(lab.repo, "status", "--porcelain"), "")
+
     def test_native_worker_refresh_uses_existing_project_attachment(self):
         from test_bunker_cutover import BunkerCutoverTests, git
         from ticketbunker import app_worker
@@ -76,4 +119,9 @@ class NativeWindowsTicketRefreshTests(unittest.TestCase):
             "payload": {"bunker_id": lab.bid, "ticket_id": "ECS-4"}})
         self.assertEqual(reopened["truth"]["git"]["status"], "current")
         self.assertEqual(bunkerdb.get_ticket(lab.bid, "ECS-4")["repositories"], before)
+        self.assertEqual(git(lab.repo, "status", "--porcelain"), "")
+        created = app_worker.dispatch_request({"id": 3, "action": "workflow.start", "project_root": extended,
+            "payload": {"bunker_id": lab.bid, "ticket": "ECS-4", "name": "identity", "user": "Ada"}})
+        self.assertEqual(created["branch"], "Ada/ECS-4-identity")
+        self.assertEqual(git(lab.repo, "branch", "--show-current"), created["branch"])
         self.assertEqual(git(lab.repo, "status", "--porcelain"), "")
