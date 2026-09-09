@@ -119,6 +119,14 @@ try {
   await page.getByRole('button', { name: 'Close configuration', exact: true }).click();
   await page.getByRole('button', { name: 'Sync tickets', exact: true }).click();
   await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
+  await expect(page.getByRole('button', { name: 'Sync tickets', exact: true })).toHaveAttribute('title', /Last successful ticket sync on this device/);
+  // Reload drops the in-memory UI cache; the receipt must come from SQLite.
+  await page.reload();
+  await page.getByRole('button', { name: 'All Bunkers', exact: true }).click();
+  await page.locator('.bunker-overview > button').first().click();
+  await page.locator('.project-row').filter({ hasText: 'Navigation tools' }).click();
+  await expect(page.getByRole('button', { name: 'Sync tickets', exact: true })).toHaveAttribute('title', /Last successful ticket sync on this device/);
+  await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
   await page.screenshot({ path: '/tmp/ticketbunker-board-sync-recovered.png' });
   await page.locator('.breadcrumbs .breadcrumb').first().click();
   await page.locator('.project-row').first().click();

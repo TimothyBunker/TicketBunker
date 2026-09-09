@@ -4,6 +4,30 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Pre-release reliability pass (2026-09-08)
+
+Source-only; no new installer, tag, or version bump. Project ticket-import
+receipts now persist locally in SQLite across restart; success is transactional
+with ticket writes, failure preserves last success, pending does not promise a
+live job. Receipts are not shared configuration. Git cached/loading/failed states
+are distinct, abandoned loading becomes unknown, and the receipt is read after
+ticket materialization to avoid a background-completion race. System exposes UI
+and live backend versions (package versions, not commit fingerprints).
+
+New recovery tests cover a fresh worker after failure, actual process exit inside
+a ticket transaction, idempotent retry, and server commit followed by lost reply
+then shared reconciliation. Browser hardening covers the persisted success
+tooltip after reload. Native smoke uses disposable data, local Git origin and
+isolated tracker/Pi credential paths; see `docs/pre-release-validation.md` for
+coverage and limitations, especially the Linux renderer issue and outstanding
+Windows/authenticated-login checks. Do not equate passing source tests with a
+validated installed release.
+
+Verified: 386 Python tests, 81 UI tests, 9 Rust tests, production frontend build,
+and real-browser hardening flow. Native Linux save/close/reopen passed with the
+documented renderer override; no claim of Windows installer or completed provider
+authentication coverage. No skills used in this pass, per Tim's request.
+
 ## Compact controls and guarded Project actions (2026-09-08)
 
 Details follow-up: replaced the wide fact grid with two columns of aligned

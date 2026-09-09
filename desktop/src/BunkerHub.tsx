@@ -619,7 +619,9 @@ function Hub({
     !bunker.repositories.some((row) => row.project_id === project.id) && "No repositories enabled. Enable this Project in Bunker repository settings.",
     bunker.repositories.some((row) => row.project_id === project.id) && !bunker.repositories.some((row) => row.project_id === project.id && row.local_path) && "No local folder connected. Open settings, Repositories, and add one.",
   ].filter(Boolean).join(" ") : "";
-  const syncStatus = bunker && project ? projectSync[`${bunker.id}/${project.id}`] : undefined;
+  const sessionSync = bunker && project ? projectSync[`${bunker.id}/${project.id}`] : undefined;
+  const syncAt = sessionSync?.at || (project?.ticket_sync?.last_success_at ? Date.parse(project.ticket_sync.last_success_at) : 0);
+  const syncIssue = sessionSync?.error ?? (project?.ticket_sync?.error || (project?.ticket_sync?.status === "pending" ? "The last ticket sync has not recorded completion. Existing tickets remain available; retry if the sync was interrupted." : ""));
 
   return (
     <div className="app-frame">
@@ -707,7 +709,7 @@ function Hub({
             </div>
             <div className="header-actions">
               <IconButton icon="settings" label="Configure" hint="Project settings" issue={projectSetup} onClick={() => openConfiguration()} />
-              <IconButton icon="sync" label="Sync tickets" hint={!(project.trackers || []).length ? "No board linked. Open Boards to connect one before syncing tickets." : syncing ? "Syncing tickets" : `Sync tickets from linked boards. ${syncStatus?.at ? `Last synced ${relativeTime(new Date(syncStatus.at).toISOString())}` : "Not synced in this app session"}`} issue={syncStatus?.error} loading={syncing} disabled={syncing} onClick={() => (project.trackers || []).length ? syncTickets() : openConfiguration("board")} />
+              <IconButton icon="sync" label="Sync tickets" hint={!(project.trackers || []).length ? "No board linked. Open Boards to connect one before syncing tickets." : syncing ? "Syncing tickets" : `Sync tickets from linked boards. ${syncAt ? `Last successful ticket sync on this device ${relativeTime(new Date(syncAt).toISOString())}` : "No successful ticket sync recorded on this device"}`} issue={syncing ? undefined : syncIssue} loading={syncing} disabled={syncing} onClick={() => (project.trackers || []).length ? syncTickets() : openConfiguration("board")} />
               {(!bunker.remote || bunker.sharing?.is_owner) && <IconButton icon="plus" label="Add subproject" onClick={() => navigateAction("project")} />}
             </div>
           </header>

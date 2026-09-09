@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from . import (
+    __version__,
     agent_runtime,
     bunkerdb,
     commands,
@@ -227,6 +228,7 @@ def state() -> dict[str, Any]:
     agent = settings.get("agent") if isinstance(settings.get("agent"), dict) else {}
     return {
         "platform": platform_services.current().as_dict(),
+        "runtime": {"version": __version__},
         "diagnostics": {
             "application": str(
                 platform_services.current().data_home()
@@ -1276,6 +1278,18 @@ def command_project_checks_detect(
 def command_project_sync(
     _context: commands.CommandContext, payload: dict[str, Any]
 ) -> dict[str, Any]:
+    bunker_id = str(payload.get("bunker_id") or "")
+    project_id = str(payload.get("project_id") or "")
+    attempt = _bunker_result(bunkerdb.begin_ticket_sync, bunker_id, project_id)
+    try:
+        return _sync_project_tickets(payload, attempt)
+    except Exception as exc:
+        message = exc.message if isinstance(exc, commands.CommandRejected) else "Ticket sync did not finish. Existing tickets remain available. Check your connection and retry."
+        bunkerdb.fail_ticket_sync(bunker_id, project_id, attempt, message)
+        raise
+
+
+def _sync_project_tickets(payload: dict[str, Any], attempt: str) -> dict[str, Any]:
     """Pull one Project's tracker board into its tickets."""
     from .integrations import github
 
@@ -1344,7 +1358,7 @@ def command_project_sync(
     )
     accepted = _publish_changes(bunker_id, proposal) if proposal["mode"] == "remote" else None
     result = _bunker_result(
-        bunkerdb.apply_ticket_sync_change, bunker_id, proposal, accepted=accepted
+        bunkerdb.apply_ticket_sync_change, bunker_id, {**proposal, "sync_attempt": attempt}, accepted=accepted
     )
     return {
         "sync": {**result, "provider": "github", "source": bunkerdb.trackers_summary(sources), "boards": len(sources)},

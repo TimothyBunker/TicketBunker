@@ -655,6 +655,17 @@ tool_call hook, never by the agent's own volition.
 
 ## Status
 
+Project **Sync tickets**, shared **Bunker sync**, and ticket **Refresh branches**
+have separate responsibilities. Hover Project sync to see the last successful
+tracker import on this device, including after restarting. Failed attempts keep
+existing tickets and the previous success time; retry remains available. A
+neutral Git freshness notice is not a failed fetch.
+
+Settings → **System** shows interface and backend versions. If they differ,
+close and reopen the app; if the mismatch remains, reinstall matching components.
+See the [pre-release validation notes](docs/pre-release-validation.md) for test
+coverage and native checks still required before the next installer.
+
 The full loop is implemented and verified with both a deterministic stub and
 a live Codex session: init → tracker JSON intake → branch resolution → Git
 event marks staleness → user-requested bootstrap/run (compose, scaffold, agent

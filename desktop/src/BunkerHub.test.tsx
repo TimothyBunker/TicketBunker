@@ -338,6 +338,16 @@ describe("Bunker and Project boundaries", () => {
     expect(transport.command).not.toHaveBeenCalledWith("application.tracker.boards", expect.anything());
   });
 
+  it("reads last successful ticket sync from the Bunker after reopening", () => {
+    const savedProject = { ...project, trackers: [{ provider: "github", kind: "issues", owner: "example", repository: "dummy", number: 0, include_comments: true }],
+      ticket_sync: { status: "failed" as const, last_success_at: "2026-01-01T12:00:00Z", last_attempt_at: "2026-01-02T12:00:00Z", error: "Dummy tracker disconnected" } };
+    const savedBunker = { ...bunker, id: "reopened-device", projects: [savedProject] };
+    render(<BunkerHub state={{ ...state, bunkers: [savedBunker] }} selection={{ bunkerId: savedBunker.id, projectId: project.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
+    const sync = screen.getByRole("button", { name: "Sync tickets" });
+    expect(sync).toHaveAttribute("title", expect.stringContaining("Last successful ticket sync on this device"));
+    expect(sync).toHaveAttribute("title", expect.stringContaining("Dummy tracker disconnected"));
+  });
+
   it("links a board picked from the list the token can see", async () => {
     const onState = vi.fn();
     transport.command.mockImplementation((action: string, payload?: Record<string, unknown>) => {

@@ -31,6 +31,7 @@ export type Project = {
   ticket_count?: number;
   tracker?: TrackerSource | null;
   trackers?: TrackerSource[];
+  ticket_sync?: { last_success_at: string; last_attempt_at: string; status: "pending" | "failed" | "current"; error: string } | null;
 };
 
 export type Repository = {
@@ -77,6 +78,7 @@ export type Bunker = {
 
 export type AppState = {
   ok?: boolean;
+  runtime?: { version: string };
   profile: {
     name: string;
     email: string;

@@ -250,6 +250,14 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
             source_reference TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS local_project_sync (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            last_success_at TEXT NOT NULL DEFAULT '',
+            last_attempt_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT NOT NULL DEFAULT '',
+            attempt_id TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS reports (
             ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
             scope TEXT NOT NULL,
@@ -646,6 +654,11 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         """
     ).fetchone()
     projects = _project_rows(connection)
+    syncs = {str(item["project_id"]): dict(item) for item in connection.execute(
+        "SELECT project_id, last_success_at, last_attempt_at, status, error FROM local_project_sync"
+    )}
+    for project_row in projects:
+        project_row["ticket_sync"] = syncs.get(str(project_row["id"]))
     repositories = [
         dict(item)
         for item in connection.execute(
@@ -2819,6 +2832,27 @@ def propose_ticket_sync(
     }
 
 
+def begin_ticket_sync(bunker_id: str, project_id: str) -> str:
+    """Device-local execution receipt, never a shared Project configuration."""
+    attempt = uuid.uuid4().hex
+    with _database(bunker_id) as connection:
+        if not connection.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+            raise BunkerDatabaseError("Choose a Project in this Bunker before syncing tickets.")
+        connection.execute(
+            """INSERT INTO local_project_sync(project_id,last_attempt_at,status,attempt_id)
+               VALUES (?,?,'pending',?) ON CONFLICT(project_id) DO UPDATE SET
+               last_attempt_at=excluded.last_attempt_at,status='pending',error='',attempt_id=excluded.attempt_id""",
+            (project_id, _now(), attempt),
+        )
+    return attempt
+
+
+def fail_ticket_sync(bunker_id: str, project_id: str, attempt: str, message: str) -> None:
+    with _database(bunker_id) as connection:
+        connection.execute("UPDATE local_project_sync SET status='failed',error=? WHERE project_id=? AND attempt_id=?",
+                           (message[:1500], project_id, attempt))
+
+
 def apply_ticket_sync_change(
     bunker_id: str,
     proposal: Mapping[str, Any],
@@ -2873,6 +2907,9 @@ def apply_ticket_sync_change(
             )
         if accepted:
             _record_acceptance(connection, accepted)
+        if proposal.get("sync_attempt"):
+            connection.execute("UPDATE local_project_sync SET status='current',error='',last_success_at=? WHERE project_id=? AND attempt_id=?",
+                               (now, proposal["project_id"], proposal["sync_attempt"]))
     results = list(proposal.get("results") or [])
     return {
         "tickets": results,

@@ -57,6 +57,7 @@ class ApplicationStateTests(unittest.TestCase):
             str(self.root / "app-data" / "diagnostics" / "app-worker.jsonl"),
         )
         self.assertEqual(value["release"]["current"], application.release_updates.__version__)
+        self.assertEqual(value["runtime"]["version"], application.__version__)
 
     def test_profile_update_is_machine_local_and_validated(self) -> None:
         result = commands.dispatch(

@@ -426,14 +426,20 @@ BUNKER_COMPANION = {
 
 def state(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> dict[str, Any]:
     root = Path(root).resolve()
-    with _LOCK:
-        entry = dict(
-            (_read_all(root).get("tickets") or {}).get(_key(project_key, ticket_id)) or {}
-        )
     try:
         ticket = _ticket(root, project_key, ticket_id, bunker_id=bunker_id)
     except (FileNotFoundError, KeyError, ValueError, commands.CommandRejected):
         ticket = None
+    # Ticket materialization can take long enough for a background fetch to
+    # complete. Read its receipt afterwards, consistently with the running set.
+    with _LOCK:
+        entry = dict(
+            (_read_all(root).get("tickets") or {}).get(_key(project_key, ticket_id)) or {}
+        )
+        if (entry.get("git") or {}).get("status") == "refreshing" and (str(root), project_key, ticket_id) not in _RUNNING:
+            entry["git"] = {"status": "cached", "label": "Git freshness unknown",
+                            "detail": "No active Git fetch is tracked in this app. Refresh branches to check the remote.", "action": "Refresh Git refs"}
+            entry["refresh"] = "idle"
     if ticket is not None:
         entry["content_revision"] = _content_revision(root, ticket)
         entry["synthesis"] = synthesis_state(root, ticket)
@@ -458,6 +464,10 @@ def state(root: Path, project_key: str, ticket_id: str, bunker_id: str = "") -> 
         },
     )
     entry.setdefault("refresh", "idle")
+    # Older state used "cached" for both initial reads and failed fetches.
+    # A completed attempt identifies legacy failures; initial reads stay neutral.
+    if entry["git"].get("status") == "cached" and entry["git"].get("checked_at"):
+        entry["git"] = {**entry["git"], "status": "failed"}
     entry["ticket"] = ticket_id
     entry["project"] = project_key
     if bunker_id:
@@ -567,8 +577,8 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
             remote, detail, retry="the ticket refresh"
         )
         git_state = {
-            "status": "cached",
-            "label": "Using cached Git refs",
+            "status": "failed",
+            "label": "Git fetch failed",
             "detail": summary,
             "action": action,
             "checked_at": _now(),
@@ -669,6 +679,8 @@ def _background(root: Path, project_key: str, ticket_id: str, bunker_id: str = "
             ticket_id,
             refresh="failed",
             completed_at=_now(),
+            git={"status": "failed", "label": "Git freshness could not be confirmed",
+                 "detail": detail, "action": "Refresh Git refs", "checked_at": _now()},
             companion={
                 "status": "cached",
                 "label": "Using cached companion data",

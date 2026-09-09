@@ -158,4 +158,18 @@ describe("Bunker-native ticket work", () => {
     fireEvent.click(screen.getByText("Test: Failed"));
     expect(screen.getByText("Assertion failed")).toBeVisible();
   });
+
+  it.each(["cached", "failed", "refreshing", "current"])("shows Git state %s without conflating cached data with failure", async (status) => {
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((action, ...args) => action === "application.ticket.get" ? Promise.resolve({ ...detail,
+      truth: { git: { status, detail: "Fixture Git state" } },
+    }) : original(action, ...args));
+    render(<TicketWorkspace bunker={bunker} reference={ticket} onBack={vi.fn()} notify={vi.fn()} />);
+    const refresh = await screen.findByRole("button", { name: "Refresh branches" });
+    expect(Boolean(refresh.querySelector(".action-issue"))).toBe(status === "failed");
+    expect(refresh.classList.contains("is-loading")).toBe(status === "refreshing");
+    if (status === "cached") {
+      expect(screen.getByText(/Git freshness unknown/)).not.toHaveClass("inline-error");
+    }
+  });
 });

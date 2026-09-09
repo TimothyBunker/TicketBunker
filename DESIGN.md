@@ -4,6 +4,36 @@ Back-navigation controls display only a left arrow. Keep their destination in
 an accessible label and hover title, not redundant visible text. Desktop and
 browser views share this contract; unsaved-change guards remain in force.
 
+### Pre-release freshness and recovery contract (2026-09-08)
+
+Project **Sync tickets** imports tracker data; Bunker sync reconciles shared
+database changes; ticket **Refresh branches** fetches Git refs without changing
+the worktree. These are distinct operations, not one global freshness claim.
+Each Project has a device-local SQLite sync receipt: attempt time, pending/failed/
+current status, last successful import time, and a bounded failure explanation.
+Starting or failing an attempt preserves the last success. Success is written in
+the same transaction as imported tickets. Attempt IDs prevent older concurrent
+attempts from overwriting a newer receipt. These receipts are not shared Project
+configuration and are excluded from publication/export.
+
+A pending receipt after restart means completion was not recorded, not that a
+live background task is guaranteed. Existing tickets remain readable and the
+Project sync control offers retry. A lost shared-service acceptance response may
+require Bunker sync before retrying the tracker import; do not overwrite shared
+truth or claim a cross-service transaction. Recovery tests exercise process exit
+during SQLite writes and server acceptance followed by response loss.
+
+Cached/unknown Git freshness is neutral; an active fetch shows loading; only an
+unsuccessful attempt shows a failure indicator and retry guidance. Read the
+receipt after ticket materialization so a completed background fetch is not
+misclassified using an earlier snapshot. Untracked persisted loading state is
+unknown, not an endless spinner or proof of a failed fetch.
+
+Settings → System displays the bundled interface version and running backend
+version, with mismatch guidance independent of release-network availability.
+These are package versions, not source-build fingerprints: different builds
+with the same version still require disciplined release versioning.
+
 ## 1. Problem
 
 Agile tickets are the interface between people, but git is where the truth lives.

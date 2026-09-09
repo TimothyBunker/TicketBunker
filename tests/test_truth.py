@@ -75,6 +75,34 @@ class SharedTruthTests(unittest.TestCase):
         self.assertFalse((self.root / ".tb" / "ticket-open.jsonl").exists())
         self.assertTrue((self.root / ".git" / "ticketbunker" / "ticket-open.jsonl").is_file())
 
+    def test_initial_cached_git_is_not_a_failed_fetch(self) -> None:
+        value = truth.state(self.root, "", "TB-9")
+        self.assertEqual(value["git"]["status"], "cached")
+        self.assertNotIn("checked_at", value["git"])
+
+    def test_failed_fetch_and_legacy_failure_are_distinct_from_initial_cache(self) -> None:
+        with mock.patch.object(project, "refresh_source_refs", return_value=(False, "Could not resolve host: example.invalid")):
+            value = truth.command_refresh(commands.CommandContext(self.root), {"ticket": "TB-9"})
+        self.assertEqual(value["git"]["status"], "failed")
+        truth._update(self.root, "", "TB-9", git={"status": "cached", "checked_at": "2026-01-01T00:00:00+00:00"})
+        self.assertEqual(truth.state(self.root, "", "TB-9")["git"]["status"], "failed")
+
+    def test_abandoned_background_fetch_does_not_spin_forever_after_restart(self) -> None:
+        truth._update(self.root, "", "TB-9", refresh="running", git={"status": "refreshing"})
+        value = truth.state(self.root, "", "TB-9")
+        self.assertEqual(value["refresh"], "idle")
+        self.assertEqual(value["git"]["status"], "cached")
+        self.assertIn("No active Git fetch", value["git"]["detail"])
+
+    def test_state_reads_receipt_after_ticket_materialization(self):
+        truth._update(self.root, "", "TB-9", refresh="running", git={"status": "refreshing"})
+        def ticket_read(*args, **kwargs):
+            truth._update(self.root, "", "TB-9", refresh="idle", git={"status": "current", "label": "Git refs fetched"})
+            return None
+        with mock.patch.object(truth, "_ticket", side_effect=ticket_read):
+            value = truth.state(self.root, "", "TB-9")
+        self.assertEqual(value["git"]["status"], "current")
+
     def test_refresh_names_the_companion_git_and_synthesis_state(self) -> None:
         synthesis = {
             "status": "missing",
