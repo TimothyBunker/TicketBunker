@@ -3,14 +3,21 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import RepositoryWorkspace from "./RepositoryWorkspace";
 import { UnsavedChangesBoundary } from "./UnsavedChanges";
 import type { Bunker, Repository, TicketReference } from "./types";
+import { sourceNotes, verifiedStamp } from "./report";
 
 const transport = vi.hoisted(() => ({ command: vi.fn() }));
 vi.mock("./transport", () => transport);
-vi.mock("./WorkspaceEditor", () => ({ default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea aria-label="Test editor" value={value} onChange={(event) => onChange(event.target.value)} /> }));
+vi.mock("./report", async (original) => {
+  const actual = await original<typeof import("./report")>();
+  return { ...actual, sourceNotes: vi.fn(actual.sourceNotes), verifiedStamp: vi.fn(actual.verifiedStamp) };
+});
+vi.mock("./WorkspaceEditor", () => ({ default: ({ value, onChange, onLine }: { value: string; onChange: (value: string) => void; onLine: (line: number) => void }) => <textarea aria-label="Test editor" value={value} onChange={(event) => onChange(event.target.value)} onKeyUp={() => onLine(2)} /> }));
 const repositories: Repository[] = ["one", "two"].map((id) => ({ id, project_id: "project", name: id, local_path: `/work/${id}` }));
 const bunker = { id: "bunker", repositories, projects: [], name: "Demo" } as unknown as Bunker;
 afterEach(cleanup);
 beforeEach(() => {
+  vi.mocked(sourceNotes).mockClear();
+  vi.mocked(verifiedStamp).mockClear();
   transport.command.mockReset();
   transport.command.mockImplementation(async (action, payload) => {
     if (action === "workspace.open") return { root: `/work/${payload.repository_id}`, branch: "main", head: "abc", revision: 0, state: {} };
@@ -21,6 +28,64 @@ beforeEach(() => {
     if (action === "workspace.file.save") return { content: payload.content, digest: "b".repeat(64) };
     throw new Error(`Unexpected ${action}`);
   });
+});
+
+it("puts drawer controls in their panes and preserves expanded files and drafts while collapsed", async () => {
+  const original = transport.command.getMockImplementation()!;
+  transport.command.mockImplementation((action, payload) => action === "workspace.tree" ? Promise.resolve({ entries: payload.path === "src" ? [{ path: "src/file.py", name: "file.py", directory: false }] : [{ path: "src", name: "src", directory: true }] }) : original(action, payload));
+  render(<UnsavedChangesBoundary><RepositoryWorkspace bunker={bunker} repository={repositories[0]} visible onTicket={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+  fireEvent.click(await screen.findByRole("button", { name: /src/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "file.py" }));
+  const editor = await screen.findByLabelText("Test editor");
+  fireEvent.change(editor, { target: { value: "unsaved simulation fix" } });
+  const explorer = screen.getByRole("navigation", { name: "Repository files" });
+  const hide = within(explorer).getByRole("button", { name: "Hide explorer" });
+  expect(hide).toHaveAttribute("aria-controls", explorer.id);
+  expect(hide).toHaveAttribute("aria-expanded", "true");
+  const treeReads = transport.command.mock.calls.filter(([action]) => action === "workspace.tree").length;
+  fireEvent.click(hide);
+  expect(screen.queryByRole("navigation", { name: "Repository files" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Test editor")).toBe(editor);
+  fireEvent.click(screen.getByRole("button", { name: "Show explorer" }));
+  expect(within(explorer).getByRole("button", { name: /src/ })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "file.py" })).toBeInTheDocument();
+  expect(editor).toHaveValue("unsaved simulation fix");
+  expect(transport.command.mock.calls.filter(([action]) => action === "workspace.tree")).toHaveLength(treeReads);
+  const context = screen.getByRole("navigation", { name: "File context" });
+  fireEvent.click(within(context).getByRole("button", { name: "Hide ticket context" }));
+  expect(screen.queryByRole("navigation", { name: "File context" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Show ticket context" })).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(screen.getByRole("button", { name: "Show ticket context" }));
+  expect(screen.getByRole("navigation", { name: "File context" })).toBe(context);
+});
+
+it("does not reparse multi-ticket reports or reread the tree on typing and cursor movement", async () => {
+  const original = transport.command.getMockImplementation()!;
+  const project = { id: "project", key: "DEMO", name: "Demo" };
+  const tickets = ["DEMO-1", "DEMO-2"].map((id) => ({ id, title: id, project })) as TicketReference[];
+  transport.command.mockImplementation((action, payload) => {
+    if (action === "workspace.open") return Promise.resolve({ root: "/work/one", branch: "main", head: "abcdef", revision: 0, state: { bunkerId: "bunker", overlays: tickets.map(({ id }) => id), conversation: "DEMO-1" } });
+    if (action === "application.ticket.get") return Promise.resolve({ project, ticket: tickets.find(({ id }) => id === payload.ticket_id), repositories, reports: [{ repository_id: "one", scope: "branch:main", content: `<!-- tb:verified branch=main commit=abc -->\n## What\n- [real] Defect: ${payload.ticket_id} input validation at \`file.py:1\` needs a guard.\n- [speculation] Risk: missing input may arrive from the queue at \`file.py:2\`.` }] });
+    if (action === "coworker.state") return Promise.resolve({ messages: [], proposals: [], category: payload.category, path: payload.path });
+    return original(action, payload);
+  });
+  render(<UnsavedChangesBoundary><RepositoryWorkspace bunker={bunker} repository={repositories[0]} visible onTicket={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+  fireEvent.click(await screen.findByRole("button", { name: "file.py" }));
+  const editor = await screen.findByLabelText("Test editor");
+  await waitFor(() => expect(screen.getAllByRole("button", { name: "Discuss" })).toHaveLength(4));
+  const parseCount = vi.mocked(sourceNotes).mock.calls.length;
+  const stampCount = vi.mocked(verifiedStamp).mock.calls.length;
+  const treeReads = transport.command.mock.calls.filter(([action]) => action === "workspace.tree").length;
+  expect(parseCount).toBeGreaterThan(0);
+  expect(stampCount).toBeGreaterThan(0);
+  for (let index = 0; index < 8; index++) {
+    fireEvent.change(editor, { target: { value: `simulation draft ${index}` } });
+    fireEvent.keyUp(editor, { key: "ArrowDown" });
+  }
+  expect(sourceNotes).toHaveBeenCalledTimes(parseCount);
+  expect(verifiedStamp).toHaveBeenCalledTimes(stampCount);
+  expect(transport.command.mock.calls.filter(([action]) => action === "workspace.tree")).toHaveLength(treeReads);
+  expect(screen.getAllByText(/Historical report reference/)).toHaveLength(4);
 });
 
 it("retains independent file drafts when switching repository views", async () => {
@@ -75,6 +140,10 @@ it("keeps ticket and file chat drafts separate while overlays share the checkout
   fireEvent.click(await screen.findByRole("button", { name: "DEMO-1 DEMO-1" }));
   fireEvent.click(screen.getByRole("button", { name: "Session" }));
   fireEvent.change(await screen.findByRole("textbox", { name: "Message to ticket coworker" }), { target: { value: "first ticket question" } });
+  const chat = screen.getByRole("textbox", { name: "Message to ticket coworker" });
+  fireEvent.click(screen.getByRole("button", { name: "Hide ticket context" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show ticket context" }));
+  expect(screen.getByRole("textbox", { name: "Message to ticket coworker" })).toHaveValue("first ticket question");
   fireEvent.click(screen.getByRole("button", { name: "Comments" }));
   fireEvent.click(screen.getByRole("button", { name: "Session" }));
   expect(screen.getByRole("textbox", { name: "Message to ticket coworker" })).toHaveValue("first ticket question");

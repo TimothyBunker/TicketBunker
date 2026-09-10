@@ -33,6 +33,7 @@ from . import (
     truth,
 )
 from .api import ReportSnapshot, TicketCatalog, TicketDatabase, TicketSnapshot
+from .adapters.gitrun import git_status
 from .builders import master
 from .handlers import IntakeRejected
 from .ledger import Ledger, digest
@@ -323,13 +324,23 @@ def _replace_brief(text: str, category: str, synthesis: str) -> str:
     return "\n".join([*lines[:start], *replacement, *lines[end:]]).rstrip() + "\n"
 
 
-def _scope_reports(ticket: TicketSnapshot, scope: str) -> tuple[ReportSnapshot, ...]:
+def _scope_reports(
+    ticket: TicketSnapshot, scope: str, *, root: Path | None = None
+) -> tuple[ReportSnapshot, ...]:
     if scope == "combined":
         return ticket.reports
     selected = tuple(
         report for report in ticket.reports if report.slug == scope or report.branch == scope
     )
     if not selected:
+        # A workspace conversation does not require a first synthesis. Only
+        # the exact live checkout branch can supply this report-free context;
+        # arbitrary names, report slugs and detached HEADs are not substitutes.
+        if root is not None:
+            ledger = Ledger(_git_dir(root) / "ticketbunker" / "coworker" / "execution.jsonl")
+            ref, status = git_status(root, ["symbolic-ref", "--quiet", "HEAD"], ledger, "coworker-scope")
+            if status == 0 and ref.strip() == f"refs/heads/{scope}":
+                return ()
         raise commands.CommandRejected(
             "coworker_scope_missing",
             "That branch report is no longer available. Select Combined or another branch.",
@@ -411,8 +422,10 @@ def _file_claims(reports: tuple[ReportSnapshot, ...], path: str) -> list[str]:
     return found
 
 
-def _context(ticket: TicketSnapshot, category: str, scope: str, path: str = "") -> str:
-    reports = _scope_reports(ticket, scope)
+def _context(
+    ticket: TicketSnapshot, category: str, scope: str, path: str = "", *, root: Path | None = None
+) -> str:
+    reports = _scope_reports(ticket, scope, root=root)
     chunks = [
         "[TICKET-COWORKER-CONTEXT]",
         f"ticket: {ticket.id}",
@@ -424,6 +437,12 @@ def _context(ticket: TicketSnapshot, category: str, scope: str, path: str = "") 
         "\n".join(f"- {report.branch}" for report in ticket.reports) or "- none",
         "selected_report_context:",
     ]
+    if scope != "combined" and not reports:
+        chunks.extend([
+            f"checked_out_branch: {scope}",
+            "No published synthesis exists for this checked-out branch. Give advice from the ticket and code, not an invented report.",
+            "Report updates are unavailable until a synthesis is published; do not propose a report change.",
+        ])
     label = category.capitalize()
     if category == "file":
         chunks.extend(
@@ -531,6 +550,8 @@ def _prepare_proposal(
         # A file conversation explains and advises; report changes are
         # proposed from the report topics, where the part is unambiguous.
         return None, "", []
+    if scope != "combined" and not any(report.slug == scope or report.branch == scope for report in ticket.reports):
+        return None, PROPOSAL_CHECK_WARNING, ["Publish a synthesis for this branch before proposing a report update."]
     if str(raw.get("category") or "").casefold() != category:
         return None, PROPOSAL_CHECK_WARNING, [
             "The proposal category did not match the selected category."
@@ -635,7 +656,7 @@ def _run_pi(
             + f"\n[/{marker}]"
         )
     prompt = (
-        _context(ticket, category, scope, path)
+        _context(ticket, category, scope, path, root=root)
         + selected
         + "\n\n[USER-MESSAGE]\n"
         + message
@@ -755,7 +776,7 @@ def state(
     if category not in CATEGORIES:
         category = "what"
     ticket = _ticket(root, project_key, ticket_id, bunker_id)
-    _scope_reports(ticket, scope)
+    scoped_reports = _scope_reports(ticket, scope, root=root)
     every = _messages(root, project_key, ticket_id)
     selected = [
         value
@@ -804,6 +825,7 @@ def state(
         "scopes": [
             {"value": "combined", "label": "Combined"},
             *({"value": report.slug, "label": report.branch} for report in ticket.reports),
+            *([{"value": scope, "label": scope}] if scope != "combined" and not scoped_reports else []),
         ],
         "messages": [
             {
@@ -845,9 +867,11 @@ def command_chat(context: commands.CommandContext, payload: dict[str, Any]) -> d
     bunker_id = str(payload.get("bunker_id") or "").strip()
     path = _thread_path(payload, category)
     ticket = _ticket(root, project_key, ticket_id, bunker_id)
-    scoped_reports = _scope_reports(ticket, scope)
+    scoped_reports = _scope_reports(ticket, scope, root=root)
     if reference and reference["branch"] and not any(
         report.branch == reference["branch"] for report in scoped_reports
+    ) and not (
+        reference.get("kind") == "source" and not scoped_reports and reference["branch"] == scope
     ):
         raise commands.CommandRejected(
             "coworker_reference_branch_changed",

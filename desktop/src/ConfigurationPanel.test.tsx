@@ -28,6 +28,7 @@ async function editBuild(value = "make navigation") {
   return input;
 }
 beforeEach(() => {
+  delete window.__TAURI__;
   clearBoardCache();
   snapshot = structuredClone(initial);
   transport.chooseGitDirectory.mockReset();
@@ -51,7 +52,7 @@ beforeEach(() => {
     throw new Error(`Unexpected command ${name}`);
   });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); delete window.__TAURI__; });
 describe("Repository setup scopes", () => {
   it("reuses Boards across tabs and reloads them only on explicit refresh", async () => {
     const original = transport.command.getMockImplementation()!;
@@ -106,6 +107,11 @@ describe("Repository setup scopes", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save repositories" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    expect(transport.chooseGitDirectory).not.toHaveBeenCalled();
+    expect(transport.command.mock.calls.some(([name]) => name === "application.bunker.repository.attach")).toBe(false);
+    expect(screen.getByRole("button", { name: "Connect repository" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Local repository path"), { target: { value: "  /work/navigation  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach",
       { bunker_id: "lab", project_id: "nav", path: "/work/navigation" }));
     expect(transport.command.mock.calls.some(([name]) => name === "application.project.repositories.select")).toBe(false);
@@ -119,6 +125,42 @@ describe("Repository setup scopes", () => {
     expect(screen.queryByRole("button", { name: "Save repositories" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add repository" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Repository 1 allowed remote")).not.toBeInTheDocument();
+  });
+
+  it("browses a replacement folder without reconnecting until explicitly confirmed", async () => {
+    window.__TAURI__ = { core: { invoke: vi.fn() }, dialog: { open: vi.fn() } };
+    snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id, local_path: "/work/old-navigation" }];
+    render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} project={project} initialTab="repositories" onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+    fireEvent.click(await screen.findByRole("button", { name: "Change folder" }));
+    expect(screen.getByLabelText("Local repository path")).toHaveValue("/work/old-navigation");
+    fireEvent.click(screen.getByRole("button", { name: "Browse folders" }));
+    await waitFor(() => expect(screen.getByLabelText("Local repository path")).toHaveValue("/work/navigation"));
+    expect(transport.command.mock.calls.some(([name]) => name === "application.bunker.repository.attach")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
+    await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", {
+      bunker_id: bunker.id, project_id: project.id, binding_id: "binding", path: "/work/navigation",
+    }));
+    await waitFor(() => expect(screen.queryByLabelText("Local repository path")).not.toBeInTheDocument());
+  });
+
+  it("keeps a rejected repository path editable and allows cancelling without attachment", async () => {
+    snapshot.repositories.items = [{ ...snapshot.repository_registry!.items[0], id: "binding", project_id: project.id }];
+    const original = transport.command.getMockImplementation()!;
+    transport.command.mockImplementation((name, payload) => name === "application.bunker.repository.attach"
+      ? Promise.reject(new Error("This folder's remote is not enabled for this Project.")) : original(name, payload));
+    render(<UnsavedChangesBoundary><ConfigurationPanel bunker={bunker} project={project} initialTab="repositories" onClose={vi.fn()} onBunker={vi.fn()} notify={vi.fn()} /></UnsavedChangesBoundary>);
+    fireEvent.click(await screen.findByRole("button", { name: "Add local repository" }));
+    fireEvent.change(screen.getByLabelText("Local repository path"), { target: { value: "/simulation/wrong-repo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
+    expect(await screen.findByText(/remote is not enabled/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Local repository path")).toHaveValue("/simulation/wrong-repo");
+    expect(screen.getByRole("button", { name: "Browse folders" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Local repository path")).not.toBeInTheDocument();
+    expect(transport.command.mock.calls.filter(([name]) => name === "application.bunker.repository.attach")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(transport.command.mock.calls.filter(([name]) => name === "application.bunker.repository.attach")).toHaveLength(1);
   });
 });
 describe("Bunker repository availability", () => {
@@ -212,7 +254,7 @@ describe("Configuration draft safety", () => {
     transport.command.mockRejectedValue(new Error("Another member changed Checks. Reload before retrying."));
     fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Another member changed Checks");
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("Another member changed Checks");
     expect(close).not.toHaveBeenCalled(); expect(input).toHaveValue("make navigation");
   });
   it("preserves a checks draft and its revision when another section publishes", async () => {
@@ -221,6 +263,8 @@ describe("Configuration draft safety", () => {
     snapshot.documents.checks = { ...snapshot.documents.checks!, revision: "checks:remote", content: { ...snapshot.documents.checks!.content, build: "someone else's command" } };
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
     fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    fireEvent.change(screen.getByLabelText("Local repository path"), { target: { value: "/work/navigation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", expect.anything()));
     await waitFor(() => expect(screen.getByRole("button", { name: "Checks" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Checks" }));
@@ -243,7 +287,7 @@ describe("Configuration draft safety", () => {
       ? Promise.reject(new Error("Repository save is offline")) : original(name, payload));
     fireEvent.click(screen.getByRole("button", { name: "Close configuration" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Repository save is offline");
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("Repository save is offline");
     expect(close).not.toHaveBeenCalled();
     transport.command.mockImplementation(original);
     fireEvent.click(within(screen.getByRole("dialog")).getByText("Save"));
@@ -258,6 +302,8 @@ describe("Configuration draft safety", () => {
     snapshot.documents.checks = { ...initial.documents.checks!, revision: "checks:remote" };
     fireEvent.click(screen.getByRole("button", { name: "Repositories" }));
     fireEvent.click(screen.getByRole("button", { name: "Add local repository" }));
+    fireEvent.change(screen.getByLabelText("Local repository path"), { target: { value: "/work/navigation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect repository" }));
     await waitFor(() => expect(transport.command).toHaveBeenCalledWith("application.bunker.repository.attach", expect.anything()));
     await waitFor(() => expect(screen.getByRole("button", { name: "Checks" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Checks" }));

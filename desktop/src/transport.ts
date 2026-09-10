@@ -129,11 +129,12 @@ export async function command<T>(
   return value;
 }
 
-export async function chooseGitDirectory(): Promise<string | null> {
+export async function chooseGitDirectory(defaultPath?: string): Promise<string | null> {
   const selected = await window.__TAURI__?.dialog?.open({
     directory: true,
     multiple: false,
     title: "Attach Git repository",
+    ...(defaultPath ? { defaultPath } : {}),
   });
   return typeof selected === "string" ? selected : null;
 }

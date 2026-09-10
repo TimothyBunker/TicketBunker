@@ -22,6 +22,11 @@
 .workspace-tree > ul { padding-left: 0; }
 .workspace-tree button { display: block; border: 0; background: transparent; text-align: left; height: auto; padding: 5px; font-size: 12px; white-space: nowrap; }
 .workspace-tree button:hover { background: var(--blue-soft, #e7eef7); }
+.workspace-pane-header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; margin: -6px 0 7px; color: var(--muted); font-size: 11px; }
+.workspace-pane-header .icon-action, .workspace-drawer-rail .icon-action { width: 30px; height: 30px; padding: 6px; display: inline-flex; align-items: center; justify-content: center; }
+.workspace-drawer-rail { flex: 0 0 34px; padding-top: 3px; border-right: 1px solid var(--line); }
+.workspace-drawer-rail.right { border-right: 0; border-left: 1px solid var(--line); padding-left: 3px; }
+.workspace-context > nav > .icon-action { flex: 0 0 34px; padding: 8px; }
 .workspace-file-area { display: flex; flex: 1; flex-direction: column; min-width: 180px; overflow: hidden; }
 .workspace-file-tabs { display: flex; overflow-x: auto; flex-shrink: 0; border-bottom: 1px solid var(--line); }
 .workspace-file-tabs > div { display: flex; white-space: nowrap; border-right: 1px solid var(--line); }
@@ -49,3 +54,14 @@
 .workspace-close-dialog::backdrop { background: #18253966; }
 .workspace-close-dialog button { margin: 12px 8px 0 0; }
 @media (max-width: 1000px) { .workspace-tree { width: 150px; } .workspace-context { width: 270px; min-width: 220px; } }
+.repository-path-row { display: flex; align-items: end; gap: 8px; }
+.repository-path-row > label { flex: 1; min-width: 0; }
+.repository-path-row > .icon-action { flex: 0 0 36px; margin-bottom: 2px; }
+.repository-folder-picker { border: 1px solid var(--line); margin-top: 10px; padding: 10px; }
+.repository-folder-picker > header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.repository-folder-picker > header span { font-size: 12px; overflow-wrap: anywhere; }
+.repository-folder-picker > header select { max-width: 210px; }
+.repository-folder-picker ul { list-style: none; padding: 0; max-height: 240px; overflow: auto; }
+.repository-folder-picker li button { border: 0; background: transparent; width: 100%; text-align: left; }
+.repository-folder-picker li button:hover { background: var(--blue-soft, #e7eef7); }
+.repository-folder-picker footer { display: flex; justify-content: end; gap: 8px; }

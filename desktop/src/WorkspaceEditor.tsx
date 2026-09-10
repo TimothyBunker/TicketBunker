@@ -65,7 +65,9 @@ export default function WorkspaceEditor(props: Props) {
     if (instance.getModel() && instance.getValue() !== props.value) {
       changing.current = true; instance.setValue(props.value); changing.current = false;
     }
-    instance.updateOptions({ tabSize: props.tabSize || 4, insertSpaces: !props.tabs, wordWrap: props.wrap ? "on" : "off" });
-  }, [props.value, props.tabSize, props.wrap, props.tabs]);
+  }, [props.value]);
+  useEffect(() => {
+    editor.current?.updateOptions({ tabSize: props.tabSize || 4, insertSpaces: !props.tabs, wordWrap: props.wrap ? "on" : "off" });
+  }, [props.tabSize, props.wrap, props.tabs]);
   return <div ref={host} className="workspace-code-editor" />;
 }

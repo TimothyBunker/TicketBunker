@@ -189,6 +189,70 @@ class CoworkerTests(unittest.TestCase):
             "ticketbunker",
         )
 
+    def test_unsynthesized_checked_out_branch_has_explicit_advice_and_file_context(self) -> None:
+        branch = "Ada/TB-9-unsynthesized"
+        git(self.root, "switch", "-c", branch)
+        ticket = coworker._ticket(self.root, "", "TB-9")
+        with mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+            for category in ("file", "what"):
+                value = coworker.state(self.root, "", "TB-9", category=category, scope=branch, path="source.py")
+                self.assertEqual(value["scope"], branch)
+                self.assertEqual(value["messages"], [])
+                self.assertIn({"value": branch, "label": branch}, value["scopes"])
+                prompt = coworker._context(ticket, category, branch, "source.py", root=self.root)
+                self.assertIn(f"checked_out_branch: {branch}", prompt)
+                self.assertIn("No published synthesis exists", prompt)
+                self.assertNotIn("The implementation is at", prompt)
+                self.assertNotIn("current_synthesis:", prompt)
+
+    def test_file_chat_before_first_synthesis_accepts_source_quote_but_never_a_report_update(self) -> None:
+        branch = "Ada/TB-9-unsynthesized"
+        git(self.root, "switch", "-c", branch)
+        reference = {"kind": "source", "category": "file", "scope": branch, "branch": branch,
+                     "path": "source.py", "line_start": 1, "line_end": 1, "text": "VALUE = 1"}
+        payload = {"ticket": "TB-9", "category": "file", "scope": branch, "path": "source.py",
+                   "message": "What does this value do?", "reference": reference}
+        report_before = layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8")
+        response = {"reply": "The module defines VALUE at @[source.py]:1.", "proposal": {
+            "category": "what", "changes": [{"branch": self.branch, "proposed_synthesis": "- [real] Do not publish this."}]}}
+        def run_pi(root, project_key, ticket, category, scope, message, selected, path=""):
+            self.assertIn(f"checked_out_branch: {branch}", coworker._context(ticket, category, scope, path, root=root))
+            self.assertEqual(selected["branch"], branch)
+            return response, {"harness": "mock"}
+        with mock.patch.object(coworker, "_run_pi", side_effect=run_pi), mock.patch.object(agent_runtime, "state", return_value=self.readiness()):
+            value = commands.dispatch("coworker.chat", payload, commands.CommandContext(self.root, transport="test"))
+        self.assertEqual(value["scope"], branch)
+        self.assertEqual(value["path"], "source.py")
+        self.assertEqual([message["role"] for message in value["messages"]], ["user", "assistant"])
+        self.assertEqual(value["proposals"], [])
+        self.assertEqual(value["messages"][1]["text"], response["reply"])
+        self.assertEqual(layout.child_report(self.bunker, self.branch).read_text(encoding="utf-8"), report_before)
+        self.assertFalse(layout.child_report(self.bunker, branch).exists())
+        self.assertEqual((self.root / "source.py").read_text(encoding="utf-8"), "VALUE = 1\n")
+
+    def test_missing_report_scope_requires_exact_live_branch_and_cannot_propose_updates(self) -> None:
+        branch = "Ada/TB-9-unsynthesized"
+        git(self.root, "switch", "-c", branch)
+        context = commands.CommandContext(self.root, transport="test")
+        with mock.patch.object(coworker, "_run_pi") as harness:
+            for scope in ("Ada/TB-9-deleted", "main", layout.branch_slug(branch)):
+                with self.subTest(scope=scope):
+                    for action in ("coworker.state", "coworker.chat"):
+                        with self.assertRaises(commands.CommandRejected) as rejected:
+                            commands.dispatch(action, {"ticket": "TB-9", "scope": scope, "category": "file", "path": "source.py", "message": "Explain"}, context)
+                        self.assertEqual(rejected.exception.code, "coworker_scope_missing")
+            harness.assert_not_called()
+        ticket = coworker._ticket(self.root, "", "TB-9")
+        proposal, warning, diagnostics = coworker._prepare_proposal(self.root, ticket, "what", branch, {
+            "category": "what", "changes": [{"branch": self.branch, "proposed_synthesis": "- [real] Source exists at `source.py:1`."}]}, {})
+        self.assertIsNone(proposal)
+        self.assertEqual(warning, coworker.PROPOSAL_CHECK_WARNING)
+        self.assertIn("Publish a synthesis", diagnostics[0])
+        git(self.root, "switch", "--detach")
+        with self.assertRaises(commands.CommandRejected) as rejected:
+            coworker.state(self.root, "", "TB-9", category="file", scope=branch, path="source.py")
+        self.assertEqual(rejected.exception.code, "coworker_scope_missing")
+
     def test_selected_synthesis_reference_is_validated_persisted_and_sent_to_pi(self) -> None:
         reference = {
             "category": "where",

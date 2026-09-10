@@ -10,7 +10,9 @@ on:
       - tests/test_bootstrap.py
       - tests/test_repository_identity.py
       - tests/test_workspace.py
+      - tests/test_directory_browser.py
       - ticketbunker/workspace.py
+      - ticketbunker/application.py
       - ticketbunker/platform_services.py
       - ticketbunker/bunkerruntime.py
       - ticketbunker/truth.py
@@ -47,5 +49,7 @@ jobs:
         run: python -m unittest discover -s tests -p test_repository_identity.py -v
       - name: Exercise checkout workspaces and draft safety
         run: python -m unittest discover -s tests -p test_workspace.py -v
+      - name: Exercise local folder browsing
+        run: python -m unittest discover -s tests -p test_directory_browser.py -v
       - name: Exercise deterministic Checks and scratch cleanup
         run: python -m unittest discover -s tests -p test_bootstrap.py -v

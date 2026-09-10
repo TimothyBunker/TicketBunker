@@ -41,6 +41,7 @@ DESKTOP_ACTIONS = frozenset(
         "application.bunker.project.rename",
         "application.bunker.project.delete",
         "application.repository.inspect",
+        "application.directory.list",
         "application.bunker.repository.attach",
         "application.bunker.repository.detach",
         "application.bunker.repository.replace",

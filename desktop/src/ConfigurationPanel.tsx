@@ -4,7 +4,8 @@ import IconButton from "./IconButton";
 import { cachedBoards, listBoards } from "./boardCache";
 import { useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import TrackerConnections, { type Connection } from "./TrackerConnections";
-import { chooseGitDirectory, command } from "./transport";
+import { command } from "./transport";
+import RepositoryPathInput from "./RepositoryPathInput";
 import { linkedBoards, trackerSummary, type Board, type Bunker, type ConfigurationState, type Integration, type Project, type Repository, type TicketField, type TrackerSource } from "./types";
 
 const FIELD_TYPES = ["string", "text", "number", "boolean", "date", "datetime", "user", "enum", "tags", "url"];
@@ -377,15 +378,14 @@ export default function ConfigurationPanel({
   async function connectRepository(repository: Repository | "auto" = "auto", suppliedPath?: string) {
     if (!project) return;
     setError("");
+    if (suppliedPath === undefined) {
+      setPathRepository(repository);
+      setLocalPath(repository === "auto" ? "" : repository.local_path || "");
+      return;
+    }
     try {
-      const path = suppliedPath ?? await chooseGitDirectory();
-      if (!path) {
-        if (!window.__TAURI__?.dialog) {
-          setPathRepository(repository);
-          setLocalPath(repository === "auto" ? "" : repository.local_path || "");
-        }
-        return;
-      }
+      const path = suppliedPath;
+      if (!path) return;
       setConnecting(repository === "auto" ? "auto" : repository.id);
       const value = await command<{ bunker: Bunker }>("application.bunker.repository.attach", {
         bunker_id: bunker.id,
@@ -479,7 +479,7 @@ export default function ConfigurationPanel({
       </nav>
       {!state && !error && <div className="ticket-loading">Loading configuration</div>}
       {state && !canWrite && <div className="permission-note"><strong>Read only</strong><span>{state.permission.reason}</span></div>}
-      {error && <div className="inline-error">{error}</div>}
+      {error && <div className="inline-error" role="alert">{error}</div>}
 
       {state && !project && tab === "trackers" && <section className="config-surface">
         <div className="config-heading"><div><h3>Trackers</h3><p>Connect your agile app once. Each Project then picks its board from a list.</p></div></div>
@@ -577,7 +577,7 @@ export default function ConfigurationPanel({
                   {repository.local_path ? <>
                     <span title={repository.local_path}>{repository.local_path}</span>
                     <button disabled={Boolean(connecting)} onClick={() => connectRepository(repository)}>Change folder</button>
-                    <button className="danger-control" disabled={Boolean(connecting)} onClick={() => disconnectRepository(repository)}>Disconnect</button>
+                    <button className="danger-control" disabled={Boolean(connecting)} onClick={() => protect(() => { void disconnectRepository(repository); }, true)}>Disconnect</button>
                   </> : <span>Not connected</span>}
                 </div>
               </> : <>
@@ -599,8 +599,8 @@ export default function ConfigurationPanel({
           </div>)}
           {repositories.length === 0 && <div className="repository-empty">{project ? "No repositories enabled. Ask a Bunker owner to enable this Project under Bunker → Repositories → Projects." : "No allowed repositories yet."}</div>}
         </div>
-        {pathRepository && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); void connectRepository(pathRepository, localPath.trim()); }}>
-          <label>Local repository path<input autoFocus value={localPath} onChange={(event) => setLocalPath(event.target.value)} required /></label>
+        {pathRepository && <form className="branch-form" onSubmit={(event) => { event.preventDefault(); const connect = () => { void connectRepository(pathRepository, localPath.trim()); }; if (pathRepository !== "auto" && pathRepository.local_path) protect(connect, true); else connect(); }}>
+          <RepositoryPathInput value={localPath} onChange={setLocalPath} disabled={Boolean(connecting)} />
           <p>{pathRepository === "auto" ? "Choose a Git folder on this computer. Its origin selects the matching repository." : `Path to ${pathRepository.name} on this computer.`}</p>
           <div><button type="button" disabled={Boolean(connecting)} onClick={() => setPathRepository(null)}>Cancel</button><button className="primary" disabled={Boolean(connecting) || !localPath.trim()}>Connect repository</button></div>
         </form>}

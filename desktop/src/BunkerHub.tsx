@@ -737,7 +737,7 @@ function Hub({
           const repo = owner?.repositories.find((item) => item.id === row.repositoryId);
           if (!owner || !repo?.local_path) return null;
           const selected = selection?.bunkerId === row.bunkerId && selection.repositoryId === row.repositoryId;
-          return <div key={`${row.bunkerId}:${row.repositoryId}`} hidden={!selected} className="repository-workspace-host"><RepositoryWorkspace bunker={owner} repository={repo} visible={visible && selected} target={workspaceTarget?.bunkerId === row.bunkerId && workspaceTarget.repositoryId === row.repositoryId ? workspaceTarget : null} onTicket={(ticket) => onTicket(owner.id, ticket)} notify={notify} /></div>;
+          return <div key={`${row.bunkerId}:${row.repositoryId}:${repo.local_path}`} hidden={!selected} className="repository-workspace-host"><RepositoryWorkspace bunker={owner} repository={repo} visible={visible && selected} target={workspaceTarget?.bunkerId === row.bunkerId && workspaceTarget.repositoryId === row.repositoryId ? workspaceTarget : null} onTicket={(ticket) => onTicket(owner.id, ticket)} notify={notify} /></div>;
         })}
       </main>
       {contextMenu && <div ref={contextRef} className="project-context-menu" role="menu" aria-label={`${contextMenu.project.key} actions`} style={{ left: Math.max(8, contextMenu.x), top: Math.max(8, contextMenu.y) }} onKeyDown={(event) => {

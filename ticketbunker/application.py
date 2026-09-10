@@ -7,6 +7,7 @@ dispatcher used by every other TicketBunker transport.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -34,6 +35,34 @@ _REMOTE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _REMOTE_HOST_RE = re.compile(
     r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
 )
+
+
+@commands.register("application.directory.list")
+def list_local_directories(_context: commands.CommandContext, payload: dict[str, Any]) -> dict[str, Any]:
+    """Explicit local folder browsing, never uploaded or exposed by the remote service."""
+    home = Path.home()
+    raw = payload.get("path", "")
+    if not isinstance(raw, str):
+        raise commands.CommandRejected("directory_invalid", "Enter a folder path or choose a location.")
+    raw = raw or str(home)
+    try:
+        folder = Path(raw).expanduser().resolve(strict=True)
+        rows = []
+        scanned = 0
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                scanned += 1
+                if not entry.name.startswith(".") and entry.is_dir():
+                    rows.append({"name": entry.name, "path": str(folder / entry.name)})
+                if scanned >= 2000:
+                    break
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise commands.CommandRejected("directory_unavailable", "This folder cannot be opened. Choose another folder or enter a readable path.") from exc
+    locations = [str(home), folder.anchor]
+    if os.name == "nt":
+        locations.extend(f"{letter}:\\" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{letter}:\\").is_dir())
+    return {"path": str(folder), "parent": str(folder.parent), "locations": list(dict.fromkeys(locations)),
+            "directories": sorted(rows, key=lambda row: row["name"].casefold()), "truncated": scanned >= 2000}
 
 
 def _git_value(key: str) -> str:

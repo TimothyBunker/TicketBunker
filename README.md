@@ -45,6 +45,14 @@ Select a Project, then a connected repository in the left sidebar. Its workspace
 has a file tree, filename/path search, file tabs and a Monaco editor. The header
 shows the branch actually checked out. Opening a ticket's code link brings you
 here with that ticket selected; its header chip returns to the ticket.
+The explorer and context drawer icons sit on their own edges. Collapse either
+pane for more editing space, then use its edge icon to reopen it.
+
+Project settings → Repositories → **+** offers both a local path and a folder
+button, as does **Change folder**. Browse, select, then **Connect repository**;
+the same origin check applies whether you type or browse. Native mode uses your
+system folder picker. Browser mode browses folders on the computer running
+TicketBunker (WSL paths if the backend runs in WSL), without uploading files.
 
 Use **+** beside the ticket chips to layer other tickets onto the same workspace.
 **Comments** shows their file notes; **Session** chooses one ticket coworker to
@@ -63,6 +71,11 @@ your repository or shared Bunker. It is plaintext private device data, not an
 encrypted backup. Unsent chat drafts survive workspace navigation within the
 running app; sent conversations use the existing ticket session persistence.
 This is a focused repository editor, not a full IDE or agent coding environment.
+
+For a disposable two-repository project you can explore without touching your
+work, see the [Grid Garden simulation](docs/workspace-simulation.md). Run its
+browser role-play with `npm run test:simulation --prefix desktop` after building
+the UI; CI keeps its screenshots and scenario results as an artifact.
 
 A **Bunker** is the configuration, membership, security, and synchronization
 boundary. It contains a recursive tree of **Projects**. A Project is a work

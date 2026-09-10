@@ -22,6 +22,9 @@ def _repository(payload: dict[str, Any]) -> tuple[Path, str]:
     root = Path(row["local_path"]).resolve()
     if not root.is_dir():
         raise commands.CommandRejected("workspace_folder_missing", "This checkout is unavailable. Reconnect its folder in Project settings.")
+    expected = payload.get("expected_root")
+    if expected is not None and (not isinstance(expected, str) or platform_services.local_path_identity(Path(expected)) != platform_services.local_path_identity(root)):
+        raise commands.CommandRejected("workspace_checkout_replaced", "This repository now points to another folder. Reopen its workspace. The old draft will not be written into the new checkout.")
     key = hashlib.sha256(platform_services.local_path_identity(root).encode()).hexdigest()
     return root, key
 

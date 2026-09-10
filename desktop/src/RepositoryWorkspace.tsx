@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import IconButton from "./IconButton";
 import { command } from "./transport";
 import { useUnsavedEditor } from "./UnsavedChanges";
 import { CoworkerDrawer, type Quote } from "./TicketWorkspace";
@@ -17,7 +18,8 @@ type Props = { bunker: Bunker; repository: Repository; visible: boolean; target?
   onTicket: (ticket: TicketReference) => void; notify: (message: string, error?: boolean) => void };
 
 export default function RepositoryWorkspace({ bunker, repository, visible, target, onTicket, notify }: Props) {
-  const payload = { bunker_id: bunker.id, repository_id: repository.id };
+  const payload = useMemo(() => ({ bunker_id: bunker.id, repository_id: repository.id, expected_root: repository.local_path || "" }), [bunker.id, repository.id, repository.local_path]);
+  const paneId = useId();
   const [view, setView] = useState<ViewState>({ tabs: [], active: "", overlays: [], conversation: "", bunkerId: bunker.id });
   const [ready, setReady] = useState(false);
   const [branch, setBranch] = useState("");
@@ -54,10 +56,14 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   const targetSeen = useRef<number | undefined>(undefined);
   const file = view.tabs.find((tab) => tab.path === view.active);
   const activeTicket = details[view.conversation];
-  const currentNotes = file && !file.changed && file.content === file.saved ? view.overlays.flatMap((id) => (details[id]?.reports || []).filter((report) => {
-    const stamp = verifiedStamp(report.content);
-    return report.repository_id === repository.id && stamp?.branch === branch && Boolean(stamp.commit) && head.startsWith(stamp.commit);
-  }).flatMap((report) => sourceNotes(report.content, file.path).map((note) => ({ ...note, text: `${id}: ${note.text}` })))) : [];
+  const cleanFile = Boolean(file && !file.changed && file.content === file.saved);
+  // Parsing reports is independent of typing and cursor movement.
+  const fileNotes = useMemo(() => view.overlays.flatMap((id) => (details[id]?.reports || [])
+    .filter((report) => report.repository_id === repository.id && report.scope.startsWith("branch:"))
+    .flatMap((report) => file?.path ? sourceNotes(report.content, file.path).map((note) => ({ id, report, note, stamp: verifiedStamp(report.content) })) : [])),
+  [view.overlays, details, repository.id, file?.path]);
+  const currentNotes = useMemo(() => cleanFile ? fileNotes.filter(({ stamp }) => stamp?.branch === branch && Boolean(stamp.commit) && head.startsWith(stamp.commit))
+    .map(({ id, note }) => ({ ...note, text: `${id}: ${note.text}` })) : [], [fileNotes, cleanFile, branch, head]);
   function persist() {
     const task = serial.current.then(async () => {
       const result = await command<{ revision: number }>("workspace.save", { ...payload, revision: revision.current, state: latest.current });
@@ -110,7 +116,7 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
     return () => window.clearTimeout(timer);
   }, [view, ready]);
 
-  async function openFile(path: string, line = 1) {
+  const openFile = useCallback(async (path: string, line = 1) => {
     setJump({ line, sequence: Date.now() });
     const existing = latest.current.tabs.find((tab) => tab.path === path);
     setSelection(null);
@@ -121,7 +127,10 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
       setView((old) => ({ ...old, active: draft.path, tabs: old.tabs.some((tab) => tab.path === draft.path) ? old.tabs : [...old.tabs, { ...draft, saved: draft.content }] }));
       setSelection(null);
     } catch (reason) { setError(String(reason)); }
-  }
+  }, [payload]);
+  const sourceActions = useMemo(() => ({ open: openFile }), [openFile]);
+  const expanded = useMemo(() => view.expanded || [], [view.expanded]);
+  const toggleDirectory = useCallback((path: string) => setView((old) => ({ ...old, expanded: old.expanded?.includes(path) ? old.expanded.filter((value) => value !== path) : [...old.expanded || [], path] })), []);
   useEffect(() => {
     if (!ready || !target || target.repositoryId !== repository.id || target.nonce === targetSeen.current) return;
     targetSeen.current = target.nonce;
@@ -175,46 +184,51 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
     setPane("session"); setContextOpen(true);
   }
 
+  const contextPane = useMemo(() => (<aside id={paneId + "-context"} className="workspace-context" hidden={!contextOpen}><nav aria-label="File context"><button aria-pressed={pane === "comments"} onClick={() => setPane("comments")}>Comments</button><button aria-pressed={pane === "session"} onClick={() => setPane("session")}>Session</button><IconButton icon="panel-right" label="Hide ticket context" aria-expanded={true} aria-controls={paneId + "-context"} onClick={() => setContextOpen(false)} /></nav>
+        <label>Conversation<select aria-label="Active ticket session" value={view.conversation} onChange={(event) => { setView((old) => ({ ...old, conversation: event.target.value })); setQuote(null); }}><option value="">No ticket</option>{view.overlays.map((id) => <option key={id}>{id}</option>)}</select></label>
+        <SourceActionsContext.Provider value={sourceActions}>
+        <div className="workspace-comments" hidden={pane !== "comments"}>{!view.overlays.length && <p>Add a ticket overlay to see its file notes.</p>}{view.overlays.map((id) => <section key={id}><strong>{id}</strong>{fileNotes.filter((item) => item.id === id).map(({ report, note, stamp }, index) => {
+          const current = stamp?.branch === branch && Boolean(stamp?.commit) && head.startsWith(stamp!.commit) && cleanFile;
+          return <article key={`${report.scope}:${index}`}><small>{report.scope.slice(7)} · lines {note.line}–{note.endLine}{current ? "" : " · Historical report reference; verify against current code"}</small><Markdown compact>{note.text}</Markdown><button onClick={() => { setView((old) => ({ ...old, conversation: id })); setQuote({ kind: "synthesis", category: "file", scope: report.scope.slice(7), branch: stamp?.branch || "", path: file!.path, line_start: note.line, line_end: note.endLine, text: note.text }); setPane("session"); }}>Discuss</button></article>;
+        })}</section>)}</div>
+        {view.overlays.map((id) => details[id] && <div className="workspace-session" key={id} hidden={pane !== "session" || id !== view.conversation}><CoworkerDrawer embedded open={visible && contextOpen && pane === "session" && id === view.conversation} onOpen={() => {}} detail={details[id]} bunkerId={bunker.id} repoRoot={root} scope={branch || "all"} quote={id === view.conversation ? quote : null} onQuote={(value) => { if (id === latest.current.conversation) setQuote(value); }} pending={null} onPendingSent={() => {}} openFile={file?.path || ""} onReload={() => loadOverlay(id)} notify={notify} /></div>)}
+        {pane === "session" && !activeTicket && <p>Choose a ticket session before sending a message.</p>}
+        </SourceActionsContext.Provider>
+      </aside>), [paneId, contextOpen, pane, view.conversation, view.overlays, activeTicket, details, fileNotes, cleanFile, branch, head, file?.path, visible, bunker.id, root, quote, notify, sourceActions]);
+
   return <section className="repository-workspace" aria-label={`${repository.name} workspace`}>
     <header className="repository-workspace-header"><strong title={root}>{repository.name}</strong><span title="Actual checked-out branch">⎇ {branch || "Detached HEAD"}</span>
-      <button title="Reload Git state, file tree and unchanged files without discarding drafts" onClick={() => refresh(false, true)}>↻</button>
+      <IconButton icon="sync" label="Refresh workspace" hint="Reload Git state, file tree and unchanged files without discarding drafts" onClick={() => refresh(false, true)} />
       <div className="overlay-chips">{view.overlays.map((id) => <span key={id} className={id === view.conversation ? "active" : ""}>
         <button title={`Open ticket ${id}`} onClick={() => details[id] && onTicket(details[id].ticket as TicketReference)}>{id}</button>
         <button aria-label={`Hide ${id} overlay`} onClick={() => { setView((old) => ({ ...old, overlays: old.overlays.filter((value) => value !== id), conversation: old.conversation === id ? old.overlays.find((value) => value !== id) || "" : old.conversation })); setQuote(null); }}>×</button>
       </span>)}<button aria-label="Add ticket overlay" onClick={() => setAdding(!adding)}>+</button></div>
-      <button aria-label="Toggle file tree" aria-expanded={treeOpen} onClick={() => setTreeOpen(!treeOpen)}>Files</button>
-      <button aria-label="Toggle ticket context" aria-expanded={contextOpen} onClick={() => setContextOpen(!contextOpen)}>Context</button>
     </header>
     {adding && <div className="overlay-picker"><input aria-label="Find ticket overlay" placeholder="Find ticket" value={query} onChange={(event) => setQuery(event.target.value)} />{tickets.map((ticket) => <button key={ticket.id} onClick={() => addOverlay(ticket.id)}>{ticket.id} {ticket.title}</button>)}</div>}
     {error && <div className="inline-error" role="alert">{error}<button aria-label="Dismiss workspace error" onClick={() => setError("")}>×</button></div>}
     {!ready ? <p>Loading workspace…</p> : <div className="repository-workspace-body">
-      {treeOpen && <nav className="workspace-tree" aria-label="Repository files"><form onSubmit={(event) => { event.preventDefault(); void openFile(fileQuery); }}><input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} name="path" aria-label="Find file or open path" placeholder="Find file or path…" /></form>{fileQuery ? <ul>{foundFiles.map((path) => <li key={path}><button onClick={() => { void openFile(path); setFileQuery(""); }}>{path}</button></li>)}</ul> : <Directory key={treeVersion} payload={payload} path="" onOpen={openFile} expanded={view.expanded || []} toggle={(path) => setView((old) => ({ ...old, expanded: old.expanded?.includes(path) ? old.expanded.filter((value) => value !== path) : [...old.expanded || [], path] }))} />}</nav>}
+      {!treeOpen && <div className="workspace-drawer-rail"><IconButton icon="panel-left" label="Show explorer" aria-expanded={false} aria-controls={paneId + "-explorer"} onClick={() => setTreeOpen(true)} /></div>}
+      <nav id={paneId + "-explorer"} hidden={!treeOpen} className="workspace-tree" aria-label="Repository files">
+        <div className="workspace-pane-header"><span>Explorer</span><IconButton icon="panel-left" label="Hide explorer" aria-expanded={true} aria-controls={paneId + "-explorer"} onClick={() => setTreeOpen(false)} /></div>
+        <form onSubmit={(event) => { event.preventDefault(); void openFile(fileQuery); }}><input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} name="path" aria-label="Find file or open path" placeholder="Find file or path…" /></form>
+        {fileQuery ? <ul>{foundFiles.map((path) => <li key={path}><button onClick={() => { void openFile(path); setFileQuery(""); }}>{path}</button></li>)}</ul> : <Directory key={treeVersion} payload={payload} path="" onOpen={openFile} expanded={expanded} toggle={toggleDirectory} />}
+      </nav>
       <main className="workspace-file-area"><div className="workspace-file-tabs" role="tablist" aria-label="Open files">{view.tabs.map((tab) => <div key={tab.path}><button role="tab" aria-selected={view.active === tab.path} title={tab.path} onClick={() => { setView((old) => ({ ...old, active: tab.path })); setSelection(null); }}>{tab.path.split("/").pop()}{tab.content !== tab.saved ? " •" : ""}</button><button aria-label={`Close ${tab.path}`} onClick={() => tab.content !== tab.saved ? setClosing(tab.path) : closeFile(tab.path)}>×</button></div>)}</div>
         {file ? <><div className="workspace-file-tools"><span title={file.path}>{file.path}</span>{file.changed && <span role="status">Changed on disk or branch</span>}<button disabled={busy || file.content === file.saved} onClick={() => save(file)}>Save</button>{selection && <button disabled={!activeTicket} title={activeTicket ? `Send selection to ${view.conversation}` : "Add a ticket overlay to discuss code"} onClick={() => discuss(selection)}>Discuss selection</button>}</div>
           <Suspense fallback={<p>Loading editor…</p>}><CodeEditor path={file.path} value={file.content} line={file.line} jump={jump} notes={currentNotes} tabSize={file.settings.tab_size} tabs={file.settings.indent_style === "tabs"} wrap={file.settings.line_wrap} onSave={() => { if (!busy) void save(file); }}
             onChange={(content) => setView((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, content } : tab) }))}
             onLine={(line) => setView((old) => old.tabs.find((tab) => tab.path === old.active)?.line === line ? old : ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, line } : tab) }))} onSelection={setSelection} /></Suspense></> : <p className="quiet-empty">Open a file from this repository.</p>}
       </main>
-      <aside className="workspace-context" hidden={!contextOpen}><nav aria-label="File context"><button aria-pressed={pane === "comments"} onClick={() => setPane("comments")}>Comments</button><button aria-pressed={pane === "session"} onClick={() => setPane("session")}>Session</button></nav>
-        <label>Conversation<select aria-label="Active ticket session" value={view.conversation} onChange={(event) => { setView((old) => ({ ...old, conversation: event.target.value })); setQuote(null); }}><option value="">No ticket</option>{view.overlays.map((id) => <option key={id}>{id}</option>)}</select></label>
-        <SourceActionsContext.Provider value={{ open: openFile }}>
-        <div className="workspace-comments" hidden={pane !== "comments"}>{!view.overlays.length && <p>Add a ticket overlay to see its file notes.</p>}{view.overlays.map((id) => <section key={id}><strong>{id}</strong>{file && (details[id]?.reports || []).filter((report) => report.repository_id === repository.id && report.scope.startsWith("branch:")).flatMap((report) => sourceNotes(report.content, file.path).map((note, index) => {
-          const stamp = verifiedStamp(report.content);
-          const current = stamp?.branch === branch && Boolean(stamp?.commit) && head.startsWith(stamp!.commit) && !file.changed && file.content === file.saved;
-          return <article key={`${report.scope}:${index}`}><small>{report.scope.slice(7)} · lines {note.line}–{note.endLine}{current ? "" : " · Historical report reference; verify against current code"}</small><Markdown compact>{note.text}</Markdown><button onClick={() => { setView((old) => ({ ...old, conversation: id })); setQuote({ kind: "synthesis", category: "file", scope: report.scope.slice(7), branch: stamp?.branch || "", path: file.path, line_start: note.line, line_end: note.endLine, text: note.text }); setPane("session"); }}>Discuss</button></article>;
-        }))}</section>)}</div>
-        {view.overlays.map((id) => details[id] && <div className="workspace-session" key={id} hidden={pane !== "session" || id !== view.conversation}><CoworkerDrawer embedded open={visible && contextOpen && pane === "session" && id === view.conversation} onOpen={() => {}} detail={details[id]} bunkerId={bunker.id} repoRoot={root} scope={branch || "all"} quote={id === view.conversation ? quote : null} onQuote={(value) => { if (id === latest.current.conversation) setQuote(value); }} pending={null} onPendingSent={() => {}} openFile={file?.path || ""} onReload={() => loadOverlay(id)} notify={notify} /></div>)}
-        {pane === "session" && !activeTicket && <p>Choose a ticket session before sending a message.</p>}
-        </SourceActionsContext.Provider>
-      </aside>
+      {contextPane}
+      {!contextOpen && <div className="workspace-drawer-rail right"><IconButton icon="panel-right" label="Show ticket context" aria-expanded={false} aria-controls={paneId + "-context"} onClick={() => setContextOpen(true)} /></div>}
     </div>}
     {closing && <dialog ref={closeDialog} className="workspace-close-dialog" aria-label="Close file" onCancel={(event) => { event.preventDefault(); if (!busy) setClosing(""); }}><h2>You have unsaved changes</h2><p>{closing}</p><button disabled={busy} onClick={() => setClosing("")}>Cancel</button><button disabled={busy} onClick={() => closeFile(closing)}>Do not save</button><button disabled={busy} onClick={async () => { const tab = view.tabs.find((tab) => tab.path === closing); if (tab && await save(tab)) closeFile(closing); }}>Save</button></dialog>}
   </section>;
 }
 
-function Directory({ payload, path, onOpen, expanded, toggle }: { payload: Record<string, string>; path: string; onOpen: (path: string) => void; expanded: string[]; toggle: (path: string) => void }) {
+const Directory = memo(function DirectoryRows({ payload, path, onOpen, expanded, toggle }: { payload: Record<string, string>; path: string; onOpen: (path: string) => void; expanded: string[]; toggle: (path: string) => void }) {
   const [entries, setEntries] = useState<TreeEntry[]>([]);
   const [message, setMessage] = useState("");
   useEffect(() => { let active = true; command<{ entries: TreeEntry[]; truncated: boolean }>("workspace.tree", { ...payload, path }).then((result) => { if (active) { setEntries(result.entries); setMessage(result.truncated ? "First 1,000 entries shown. Open a file by path if it is not listed." : ""); } }).catch((reason) => active && setMessage(String(reason))); return () => { active = false; }; }, [path]);
   return <ul>{entries.map((entry) => <li key={entry.path}><button title={entry.path} aria-expanded={entry.directory ? expanded.includes(entry.path) : undefined} onClick={() => entry.directory ? toggle(entry.path) : onOpen(entry.path)}>{entry.directory ? expanded.includes(entry.path) ? "▾ " : "▸ " : ""}{entry.name}</button>{entry.directory && expanded.includes(entry.path) && <Directory payload={payload} path={entry.path} onOpen={onOpen} expanded={expanded} toggle={toggle} />}</li>)}{message && <li role="status">{message}</li>}</ul>;
-}
+});

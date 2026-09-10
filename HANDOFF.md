@@ -4,6 +4,45 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Drawer controls, folder selection and simulation (2026-09-09, source only)
+
+Explorer/context toggles now belong to pane headers and collapsed edge rails,
+using shared named SVG icons without animation. Keystrokes/cursor movement no
+longer reparse report notes, rebuild explorer/session subtrees, regenerate unchanged
+markers or reapply editor options. UI tests assert this repeated work stays absent;
+browser timing samples are diagnostic, not proof of native latency improvement.
+
+Add local repository and Change folder always offer manual path + Browse, followed
+by explicit Connect. Native uses the system directory dialog; browser uses the
+bounded local `application.directory.list` navigator, not file uploads. Cancel keeps
+the old path/attachment. Connect errors are announced; controls lock while attaching.
+Replacement/disconnect protects retained dirty editors. `expected_root` prevents a
+delayed workspace request from writing an old draft into a replacement checkout.
+
+Three delegated QA tracks exercised components/Monaco, folder browsing, and real
+browser role-play. The latter found first-synthesis absence breaking Session with
+"branch report no longer available". Coworker now permits the exact live branch
+without a report, explicitly advice-only; arbitrary missing scopes/detached HEAD
+still reject. Report proposals still require published children and all gates.
+Selected source quotes preserve the actual branch. Native Windows passes the
+14 coworker, six workspace and four directory-browser tests.
+
+Reusable Grid Garden lab: `tests/workspace_simulation_fixture.py` and
+`desktop/tests/workspace-simulation.e2e.mjs`; instructions in
+`docs/workspace-simulation.md`. Two real disposable repos/local bare remotes, three
+fictional tickets, two failing tests repaired through Monaco. No real Bunkers,
+credentials, model calls or external Git remotes. Role-play covers folder picker,
+drawer state, multi-file/repo drafts, ticket/file chat, selected-code reference,
+external conflicts, reload recovery and both bug fixes. `npm run test:simulation
+--prefix desktop` is in browser CI; screenshots/results become an artifact.
+Manual fixture stays alive until Enter, then removes its temporary project.
+No installer, release tag or version bump in this slice.
+Final verification: 408 Python tests (three native-platform skips), 101 UI tests,
+12 Rust tests, production frontend build, existing browser hardening and repeated
+Grid Garden role-play all pass. Native Windows backend checks above passed; real
+native folder-dialog/typing behavior remains an interactive installer smoke task.
+No skills used to direct this pass, per Tim's preference.
+
 ## Repository workspace (2026-09-09, source only)
 
 Tim approved repository-specific workspaces under the Project sidebar, with

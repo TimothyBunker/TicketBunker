@@ -2,6 +2,30 @@
 
 ### Repository workspace (2026-09-09)
 
+Explorer and ticket context are drawers: their icon controls belong to their own
+headers, with slim reopen rails when collapsed. Tooltips, accessible names and
+expanded/controlled-pane semantics remain explicit; no drawer animation is needed.
+Do not replace meaningful values such as the selected ticket with anonymous icons.
+Typing/cursor updates must not reparse report notes, rebuild the explorer/session
+subtrees or reconfigure Monaco. Cache by report/file identity and settings instead.
+
+Local repository attachment always offers an editable path and a folder button,
+including replacement of an existing checkout. Native mode opens the system folder
+picker; browser mode uses a bounded directory navigator on the backend computer,
+not a browser upload or remote service filesystem. Selection fills the path only;
+Connect still performs origin/allowed-repository validation. Cancelling a picker
+does not change the existing attachment. Allowed remote URLs remain remote values.
+Replacing/disconnecting a checkout checks retained unsaved editors first. Workspace
+requests carry their expected checkout identity so delayed requests cannot save an
+old buffer or recovery state into a newly attached folder.
+
+A ticket conversation may precede synthesis. A report-free branch scope is valid
+only for the exact checked-out Git branch, never an arbitrary missing branch or
+slug. Its context says no synthesis exists and remains advice-only. File quotes
+retain their actual branch and source range. Published-report proposals still need
+an existing child report and the normal lint/anchor gates; file chat cannot modify
+reports. A missing synthesis is not a failed synthesis or a permanently loading chat.
+
 A connected local checkout is a workspace, independent of any one ticket.
 Project navigation exposes its connected repositories alongside Tickets. The
 workspace shows the actual checked-out branch, a lazy file tree/path finder,

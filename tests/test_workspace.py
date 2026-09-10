@@ -79,3 +79,15 @@ class WorkspaceTests(unittest.TestCase):
         for state in ({"tabs": ["bad"]}, {"tabs": [{"path": "README.md"}]}, {"tabs": [], "overlays": [None]}):
             self.assertEqual(self.call("workspace.save", revision=0, state=state)["code"], "workspace_state_invalid")
         self.assertEqual(self.call("workspace.open")["revision"], 0)
+
+    def test_old_view_cannot_write_after_checkout_replacement(self):
+        original = self.call("workspace.file.read", path="README.md")
+        other, _ = self.lab.second_repository()
+        for action, values in (
+            ("workspace.file.save", {"path": "README.md", "content": "wrong checkout", "branch": "main", "expected_digest": original["digest"]}),
+            ("workspace.save", {"revision": 0, "state": {}}),
+        ):
+            rejected = self.call(action, expected_root=str(other), **values)
+            self.assertEqual(rejected["code"], "workspace_checkout_replaced")
+        self.assertEqual((self.repo / "README.md").read_text(), original["content"])
+        self.assertEqual(self.call("workspace.open")["revision"], 0)
