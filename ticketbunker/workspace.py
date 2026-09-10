@@ -161,10 +161,14 @@ def save_workspace(_context: commands.CommandContext, payload: dict[str, Any]) -
     try:
         with db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT revision FROM workspaces WHERE id=?", (key,)).fetchone()
+            row = db.execute("SELECT revision,state FROM workspaces WHERE id=?", (key,)).fetchone()
             revision = row[0] if row else 0
             if payload.get("revision") != revision:
-                raise commands.CommandRejected("workspace_conflict", "This workspace is open in another window. Your drafts remain here; close the other window before reopening this workspace.")
+                # Retrying a lost receipt is harmless only while the complete
+                # requested snapshot is still the one already stored.
+                if row and json.loads(row[1]) == state:
+                    return {"revision": revision}
+                raise commands.CommandRejected("workspace_conflict", "Another window updated this workspace's recovery. Your unsaved text is still in this window. Save your files or copy your drafts before closing it; do not discard either window's work.")
             db.execute("INSERT INTO workspaces VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state", (key, revision + 1, encoded))
     finally:
         db.close()

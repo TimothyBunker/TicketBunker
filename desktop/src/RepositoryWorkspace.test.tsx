@@ -16,6 +16,7 @@ const repositories: Repository[] = ["one", "two"].map((id) => ({ id, project_id:
 const bunker = { id: "bunker", repositories, projects: [], name: "Demo" } as unknown as Bunker;
 afterEach(cleanup);
 beforeEach(() => {
+  sessionStorage.clear();
   vi.mocked(sourceNotes).mockClear();
   vi.mocked(verifiedStamp).mockClear();
   transport.command.mockReset();

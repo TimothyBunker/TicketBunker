@@ -62,3 +62,64 @@ file outside TicketBunker before saving another draft to see the conflict guard.
 Leave the fixture terminal open while exploring. Press Enter to stop the server
 and delete the disposable lab. Saving in the browser affects only those temporary
 repositories. Do not use this fixture for work you want to keep.
+
+## Keyboard, concurrent windows, and repeated campaigns
+
+```bash
+node desktop/tests/workspace-keyboard-simulation.e2e.mjs
+node desktop/tests/workspace-multiwindow-simulation.e2e.mjs
+node desktop/tests/workspace-simulation-repeat.mjs --runs=3
+```
+
+The keyboard journey uses Tab/Enter after onboarding to navigate folder selection,
+drawers, the editor, close dialogs and save errors. It checks keyboard escape from
+the editor and focus restoration instead of assuming clickable controls are
+keyboard-accessible.
+
+The concurrent-window journey opens two browser pages against the same local
+worker and checkout, writes distinct drafts, verifies the recovery conflict, and
+reloads one page. The unique first-window draft must remain recoverable; a warning
+alone does not count as draft preservation. A refresh also verifies that rescuing
+one window has not overwritten the other window's durable recovery snapshot; both
+windows are then reloaded independently. This is multiple local windows, not a
+claim that multi-user remote sharing has been tested.
+
+The repeat runner creates a fresh disposable fixture for every journey. Options
+use `--name=value` syntax:
+
+```bash
+node desktop/tests/workspace-simulation-repeat.mjs \
+  --runs=10 --journeys=roleplay,keyboard,multiwindow \
+  --timeout=180000 --output=/tmp/ticketbunker-qa
+```
+
+`--runs` accepts 1–100; `--timeout` is each journey's deadline in milliseconds.
+Choose `--journeys=roleplay` to repeat just the end-to-end bug-fixing story. Each
+run gets its own log, results and screenshots; `campaign.json` summarizes failures
+without stopping later runs. A failing regression is reported as failed, not
+silently skipped. Do not rebuild UI assets while a campaign is running.
+
+The fixture and browser are shut down after each journey, including assertion
+failures. Timed-out children receive a graceful shutdown signal first; a stuck
+process is forcibly stopped after a bounded grace period. Ctrl+C stops the current
+campaign. As with any abruptly killed process, a machine crash or forced shutdown
+can leave temporary files; none are placed in a user's source repositories.
+
+### Recorded campaign: 9 September 2026
+
+The final Linux Chromium campaign completed 30/30 journeys: ten full role-plays,
+ten keyboard journeys, and ten concurrent-window journeys. There were no retries,
+timeouts, browser exceptions or failed assertions in that campaign. A separate
+deliberate one-second timeout correctly produced a failed/timed-out result and
+cleaned up its fixture and browser.
+
+The concurrent-window acceptance checks both layers: each tab recovers its own
+unsaved text after reload, while the durable workspace recovery keeps the other
+tab's accepted snapshot. Restoring a local rescue must retain its original
+revision; adopting the newer shared revision would allow an unintended overwrite.
+The regression was reproduced against the earlier build before verifying the fix.
+
+Keyboard checks likewise reproduced lost drawer focus and an editor that could
+not release Tab focus with Ctrl+M, then passed after those fixes. These results
+cover the browser worker on this Linux environment—not native Windows/Mac dialogs,
+whole-browser crash recovery, remote participants, or live agent conversations.

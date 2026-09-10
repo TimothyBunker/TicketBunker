@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import difflib
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -141,11 +143,16 @@ def _validate_editor(command: str) -> None:
 
 
 def _source(root: Path, raw: str) -> tuple[Path, str]:
-    value = raw.strip()
-    if not value:
+    if not isinstance(raw, str):
+        raise commands.CommandRejected("source_path_invalid", "Choose a valid source file path, then retry.")
+    value = raw
+    if not value.strip():
         raise commands.CommandRejected("source_path_required", "Choose a source file, then retry.")
-    candidate = Path(value).expanduser()
-    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        candidate = Path(value).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise commands.CommandRejected("source_path_invalid", "That file path cannot be opened. Choose a readable source file, then retry.") from exc
     try:
         relative = resolved.relative_to(root)
     except ValueError as exc:
@@ -217,7 +224,57 @@ def _decode_source(value: bytes) -> str:
 def _newline(value: bytes) -> str:
     crlf = value.count(b"\r\n")
     lf = value.count(b"\n") - crlf
+    cr = value.count(b"\r") - crlf
+    if cr > max(crlf, lf):
+        return "cr"
     return "crlf" if crlf > lf else "lf"
+
+
+def _encode_source(content: str, current: bytes) -> bytes:
+    """Retain original terminators instead of rewriting unrelated mixed-EOL lines."""
+    original = _decode_source(current)
+    if content == original.replace("\r\n", "\n").replace("\r", "\n"):
+        return current
+    default = {"crlf": "\r\n", "cr": "\r", "lf": "\n"}[_newline(current)]
+    parts = re.split(r"(\r\n|\r|\n)", original)
+    old_lines, endings = parts[::2], parts[1::2]
+    if len(set(endings)) <= 1:
+        return content.replace("\n", default).encode("utf-8")
+    new_lines = content.split("\n")
+    mapped = {}
+    prefix = 0
+    while prefix < min(len(old_lines), len(new_lines)) and old_lines[prefix] == new_lines[prefix]:
+        prefix += 1
+    old_end, new_end = len(old_lines), len(new_lines)
+    while old_end > prefix and new_end > prefix and old_lines[old_end - 1] == new_lines[new_end - 1]:
+        old_end -= 1
+        new_end -= 1
+    mapped.update(zip(range(prefix), range(prefix)))
+    mapped.update(zip(range(new_end, len(new_lines)), range(old_end, len(old_lines))))
+    old_count, new_count = old_end - prefix, new_end - prefix
+    # SequenceMatcher's autojunk does not bound periodic, low-cardinality
+    # input. Keep unchanged edges exactly, then use positional terminators
+    # for equal-sized edits or large changed regions. Only small unequal
+    # regions need alignment; the fallback affects terminators, never text.
+    if old_count == new_count or old_count * new_count > 1_000_000:
+        mapped.update(zip(range(prefix, new_end), range(prefix, old_end)))
+    else:
+        for operation, start, end, new_start, new_stop in difflib.SequenceMatcher(None, old_lines[prefix:old_end], new_lines[prefix:new_end]).get_opcodes():
+            if operation in {"equal", "replace"}:
+                mapped.update(zip(range(prefix + new_start, prefix + new_stop), range(prefix + start, prefix + end)))
+    pieces = []
+    for index, line in enumerate(new_lines):
+        pieces.append(line)
+        if index < len(new_lines) - 1:
+            prior = mapped.get(index, len(endings))
+            ending = endings[prior] if prior < len(endings) else default
+            # Removing a line's text can place a bare CR immediately before
+            # its LF terminator. Those bytes would become one CRLF newline,
+            # silently dropping a blank line. Keep two logical separators.
+            if not line and len(pieces) >= 2 and pieces[-2] == "\r" and ending == "\n":
+                ending = "\r\n"
+            pieces.append(ending)
+    return "".join(pieces).encode("utf-8")
 
 
 def read_source(root: Path, path: str, line: int = 1) -> dict[str, Any]:
@@ -279,8 +336,9 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
         )
     settings = local_state(root)
     formatted = _formatted_content(content, settings)
-    newline = "\r\n" if _newline(current) == "crlf" else "\n"
-    encoded = formatted.replace("\n", newline).encode("utf-8")
+    if "\x00" in formatted:
+        raise commands.CommandRejected("source_binary", "The editor saves text only. Remove the null character from this draft, then retry.")
+    encoded = _encode_source(formatted, current)
     if len(encoded) > _SOURCE_LIMIT:
         raise commands.CommandRejected(
             "source_too_large",
@@ -296,6 +354,8 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
     temporary = ""
     try:
         mode = stat.S_IMODE(source.stat().st_mode)
+        if not mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH) or not os.access(source, os.W_OK):
+            raise PermissionError("The source file is read-only")
         descriptor, temporary = tempfile.mkstemp(prefix=f".{source.name}.tb-", dir=source.parent)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
@@ -311,15 +371,16 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
             )
         os.replace(temporary, source)
     except OSError as exc:
+        raise commands.CommandRejected(
+            "source_save_failed",
+            "The file could not be saved. Your draft was kept in the browser. Check local permissions, then retry.",
+        ) from exc
+    finally:
         if temporary:
             try:
                 os.unlink(temporary)
             except OSError:
                 pass
-        raise commands.CommandRejected(
-            "source_save_failed",
-            "The file could not be saved. Your draft was kept in the browser. Check local permissions, then retry.",
-        ) from exc
     return {
         "saved": True,
         "path": relative,

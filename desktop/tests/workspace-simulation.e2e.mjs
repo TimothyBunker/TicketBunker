@@ -1,25 +1,14 @@
 // Repeatable role-play: fix Grid Garden's edge clamp while comparing its renderer.
 // Real UI/worker/Git/SQLite; isolated temporary data and local-only Git remotes.
-import { spawn, spawnSync } from 'node:child_process';
-import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { chromium, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { startLab } from './workspace-simulation-support.mjs';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = process.env.TB_SIMULATION_OUTPUT || join(tmpdir(), 'ticketbunker-workspace-simulation');
-mkdirSync(output, { recursive: true });
-const fixture = spawn(process.env.PYTHON || 'python', ['tests/workspace_simulation_fixture.py'], {
-  cwd: root, env: { ...process.env, PYTHONPATH: `${root}${delimiter}${join(root, 'tests')}` }, stdio: ['pipe', 'pipe', 'inherit'],
-});
-const lines = createInterface({ input: fixture.stdout });
-const lab = await new Promise((resolve, reject) => {
-  lines.once('line', line => { try { resolve(JSON.parse(line)); } catch (error) { reject(error); } });
-  fixture.once('exit', code => reject(new Error(`Fixture exited ${code}`)));
-});
-let browser;
+const lab = await startLab(output);
 let page;
 const errors = [];
 const metrics = { scenarios: [], typing: {} };
@@ -30,8 +19,7 @@ try {
     expect(baseline.status, baseline.stderr).toBe(1);
     expect(baseline.stderr).toContain('AssertionError');
   }
-  browser = await chromium.launch({ executablePath: process.env.TB_E2E_CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : chromium.executablePath()), headless: process.env.TB_SIMULATION_HEADED !== '1' });
-  page = await browser.newPage({ viewport: { width: 1500, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  page = await lab.context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(lab.url);
   await page.getByRole('button', { name: 'Use without agent', exact: true }).click();
@@ -196,7 +184,5 @@ try {
   throw error;
 } finally {
   writeFileSync(join(output, 'results.json'), JSON.stringify({ passed, ...metrics, browser_errors: errors }, null, 2));
-  await browser?.close();
-  fixture.stdin.end('\n');
-  lines.close();
+  await lab.stop();
 }

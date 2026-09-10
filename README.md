@@ -70,12 +70,19 @@ Recovery lives in the application data folder (`workspaces.sqlite3`), never in
 your repository or shared Bunker. It is plaintext private device data, not an
 encrypted backup. Unsent chat drafts survive workspace navigation within the
 running app; sent conversations use the existing ticket session persistence.
+If two windows edit the same checkout, each keeps a reload-rescue copy of its
+dirty files. Conflicting recovery is never merged automatically: save or copy
+your drafts before closing a conflicting window. Reload rescue is not a backup.
 This is a focused repository editor, not a full IDE or agent coding environment.
 
 For a disposable two-repository project you can explore without touching your
 work, see the [Grid Garden simulation](docs/workspace-simulation.md). Run its
 browser role-play with `npm run test:simulation --prefix desktop` after building
 the UI; CI keeps its screenshots and scenario results as an artifact.
+The [workspace QA checklist](docs/qa-workspace-campaign.md) records reproduced
+bugs, fixes, test coverage and remaining manual checks. To repeat the role-play,
+keyboard and two-window journeys, run `npm run test:simulation:repeat --prefix
+desktop -- --runs=10`.
 
 A **Bunker** is the configuration, membership, security, and synchronization
 boundary. It contains a recursive tree of **Projects**. A Project is a work

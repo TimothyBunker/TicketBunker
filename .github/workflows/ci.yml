@@ -100,8 +100,8 @@ jobs:
           npm run test:e2e --prefix desktop
       - name: Verify unsaved drafts and default-ticket workflow in a disposable project
         run: npm run test:hardening --prefix desktop
-      - name: Role-play the two-repository workspace
-        run: npm run test:simulation --prefix desktop
+      - name: Role-play repository work, keyboard navigation and concurrent drafts
+        run: npm run test:simulation:repeat --prefix desktop -- --runs=1 --output="${{ runner.temp }}/ticketbunker-workspace-simulation"
         env:
           TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation
       - name: Keep workspace simulation evidence

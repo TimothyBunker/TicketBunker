@@ -8,6 +8,11 @@ expanded/controlled-pane semantics remain explicit; no drawer animation is neede
 Do not replace meaningful values such as the selected ticket with anonymous icons.
 Typing/cursor updates must not reparse report notes, rebuild the explorer/session
 subtrees or reconfigure Monaco. Cache by report/file identity and settings instead.
+Hiding or reopening a drawer transfers keyboard focus to its visible control.
+The editor's Ctrl+M Tab-focus mode must be bundled so keyboard users can leave it.
+Closed file models are disposed; model-local indentation must not alter another
+repository's editor. Pending opens reserve the file limit, and delayed reads
+cannot steal a newer selection or replace content saved after that read started.
 
 Local repository attachment always offers an editable path and a folder button,
 including replacement of an existing checkout. Native mode opens the system folder
@@ -40,6 +45,9 @@ remain owned by their ticket report; only clean-file notes whose verified branch
 and commit match the checkout get editor markers. Historical notes remain labeled
 in Comments, not silently painted onto unrelated current code. The coworker still
 only advises and proposes report updates through the existing publication gates.
+Delayed messages, state reads, errors and proposal receipts retain their full
+Bunker/repository/ticket/branch/topic/file identity. They cannot appear under a
+newly selected context, clear a newer quote, or overwrite a newer reply.
 
 `workspace.*` actions share the desktop/browser command backend. Device-local
 recovery is in `data_home/workspaces.sqlite3`, owned by `workspace.py`, keyed by
@@ -47,6 +55,14 @@ checkout filesystem identity. This is not Bunker truth and is never synchronized
 or exported: it stores open buffers, cursor lines, expanded folders and selected
 ticket overlays. Revision checks refuse competing recovery writers. Private drafts
 are plaintext local data with owner-only file permissions where supported.
+A retry of an already accepted recovery snapshot may acknowledge its current
+revision only when the entire stored state still matches. Competing snapshots
+remain conflicts. A per-window session-storage rescue preserves dirty buffers
+and their original revision across reload without overwriting another window's
+durable recovery. This is not a backup or cross-window buffer merge: browser
+session storage may disappear when a window closes, and a conflicting window
+must save or copy its work before closing. Storage failures give that explicit
+instruction; recovery does not grant permission to write source files.
 Source saving remains explicit, with expected-content digest and checked-out
 branch guards; app Git operations share the repository lock. External Git and
 filesystem writers cannot be made transactional with a separate app process.
@@ -1078,9 +1094,14 @@ opening the file, then copies the absolute local path and line to the clipboard.
 `editor.save` requires the digest returned by that read, refuses to overwrite a
 file changed since it opened, and atomically replaces only that file. It does
 not stage, format with an external process, or run Git. The page preserves the
-file's LF/CRLF convention, supports configurable spaces/tabs, tab width and
+file's LF/CRLF/CR convention and unrelated mixed line endings, rejects null
+characters and read-only replacement, supports configurable spaces/tabs, tab width and
 line wrapping, and can opt into deterministic trailing-whitespace and final-
 newline cleanup. Unsaved drafts stay in the browser when a save is rejected.
+Mixed-ending preservation must have bounded work: unchanged leading/trailing
+lines keep their terminators; large ambiguous changed regions use ordinal
+alignment rather than unbounded diff matching. Decoding the saved bytes must
+always yield the requested normalized text, including empty lines.
 The fixed toolbar names the originating ticket as its back destination. When
 the editor belongs to a ticket, selecting bounded source text reveals an Ask
 about selection control; the same ticket coworker receives the guarded relative

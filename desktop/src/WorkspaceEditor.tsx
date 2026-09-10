@@ -4,6 +4,7 @@ import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import "monaco-editor/editor/contrib/find/browser/findController.js";
 import "monaco-editor/editor/contrib/folding/browser/folding.js";
 import "monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js";
+import "monaco-editor/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode.js";
 import "monaco-editor/languages/definitions/cpp/register.js";
 import "monaco-editor/languages/definitions/python/register.js";
 import "monaco-editor/languages/definitions/javascript/register.js";
@@ -14,7 +15,7 @@ import "monaco-editor/languages/definitions/shell/register.js";
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
 export type CodeSelection = { text: string; line_start: number; line_end: number };
-type Props = { path: string; value: string; line: number; tabSize?: number; wrap?: boolean; tabs?: boolean; onSave: () => void;
+type Props = { path: string; value: string; line: number; openPaths?: string[]; tabSize?: number; wrap?: boolean; tabs?: boolean; onSave: () => void;
   jump?: { line: number; sequence: number }; notes?: Array<{ line: number; endLine: number; text: string }>;
   onChange: (value: string) => void; onLine: (line: number) => void; onSelection: (value: CodeSelection | null) => void };
 const language = (path: string) => ({ cpp: "cpp", cc: "cpp", c: "cpp", h: "cpp", hpp: "cpp", py: "python", js: "javascript", ts: "typescript", tsx: "typescript", md: "markdown", sh: "shell" }[path.split(".").pop() || ""] || "plaintext");
@@ -47,6 +48,8 @@ export default function WorkspaceEditor(props: Props) {
     changing.current = true;
     let state = models.current.get(props.path);
     if (!state) { state = { model: monaco.editor.createModel(props.value, language(props.path)), view: null }; models.current.set(props.path, state); }
+    // Keep insertion order as the fallback least-recently-used order.
+    models.current.delete(props.path); models.current.set(props.path, state);
     instance.setModel(state.model);
     if (state.model.getValue() !== props.value) state.model.setValue(props.value);
     if (state.view) instance.restoreViewState(state.view);
@@ -54,6 +57,13 @@ export default function WorkspaceEditor(props: Props) {
     changing.current = false;
     return () => { state!.view = instance.saveViewState(); };
   }, [props.path]);
+  useEffect(() => {
+    const open = props.openPaths ? new Set([...props.openPaths, props.path]) : null;
+    for (const [path, state] of models.current) {
+      if (path === props.path || (open ? open.has(path) : models.current.size <= 30)) continue;
+      state.model.dispose(); models.current.delete(path);
+    }
+  }, [props.path, JSON.stringify(props.openPaths)]);
   useEffect(() => {
     if (props.jump) { editor.current?.setPosition({ lineNumber: props.jump.line, column: 1 }); editor.current?.revealLineInCenter(props.jump.line); }
   }, [props.jump?.sequence]);
@@ -67,7 +77,12 @@ export default function WorkspaceEditor(props: Props) {
     }
   }, [props.value]);
   useEffect(() => {
-    editor.current?.updateOptions({ tabSize: props.tabSize || 4, insertSpaces: !props.tabs, wordWrap: props.wrap ? "on" : "off" });
-  }, [props.tabSize, props.wrap, props.tabs]);
+    // Formatting belongs to this file, not Monaco's shared configuration
+    // service (which would also change models in other repository drawers).
+    editor.current?.getModel()?.updateOptions({ tabSize: props.tabSize || 4, insertSpaces: !props.tabs });
+  }, [props.path, props.tabSize, props.tabs]);
+  useEffect(() => {
+    editor.current?.updateOptions({ wordWrap: props.wrap ? "on" : "off" });
+  }, [props.wrap]);
   return <div ref={host} className="workspace-code-editor" />;
 }

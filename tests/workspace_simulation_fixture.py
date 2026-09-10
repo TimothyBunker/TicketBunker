@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 from pathlib import Path
 import tempfile
 import threading
@@ -35,6 +36,10 @@ def label(position):
 
 def main():
     with tempfile.TemporaryDirectory(prefix="tb-workspace-simulation-") as temporary, contextlib.ExitStack() as stack:
+        def terminate(_signal, _frame):
+            raise SystemExit(0)
+        previous = signal.signal(signal.SIGTERM, terminate)
+        stack.callback(signal.signal, signal.SIGTERM, previous)
         root = Path(temporary).resolve()
         settings = root / "settings.json"
         settings.write_text(json.dumps({"credentials_file": str(root / "isolated-tracker-credentials.env")}) + "\n", encoding="utf-8")

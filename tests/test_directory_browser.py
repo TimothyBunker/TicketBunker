@@ -20,13 +20,13 @@ class DirectoryBrowserTests(unittest.TestCase):
         return app_worker.dispatch_request({"id": 1, "action": "application.directory.list", "payload": payload})
 
     def test_only_visible_directories_sorted_and_no_mutation(self):
-        for name in ("zebra", "Alpha", ".hidden", "space project"):
+        for name in ("zebra", "Alpha", ".hidden", "space project", "日本語 café"):
             (self.root / name).mkdir()
         (self.root / "README.md").write_text("simulation", encoding="utf-8")
         before = set(self.root.iterdir())
         result = self.listing(path=str(self.root))
         self.assertTrue(result["ok"], result)
-        self.assertEqual([entry["name"] for entry in result["directories"]], ["Alpha", "space project", "zebra"])
+        self.assertEqual([entry["name"] for entry in result["directories"]], ["Alpha", "space project", "zebra", "日本語 café"])
         self.assertEqual(result["path"], str(self.root))
         self.assertEqual(result["parent"], str(self.root.parent))
         self.assertIn(str(self.root), result["locations"])
@@ -58,8 +58,10 @@ class DirectoryBrowserTests(unittest.TestCase):
             self.assertEqual(self.listing(path=str(self.root))["code"], "directory_unavailable")
 
     def test_large_listing_is_bounded(self):
-        for index in range(2001):
+        for index in range(2000):
             (self.root / f"folder-{index:04}").mkdir()
+        self.assertFalse(self.listing(path=str(self.root))["truncated"])
+        (self.root / "one-more").mkdir()
         result = self.listing(path=str(self.root))
         self.assertTrue(result["ok"], result)
         self.assertTrue(result["truncated"])

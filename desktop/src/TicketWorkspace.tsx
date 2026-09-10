@@ -739,46 +739,71 @@ export function CoworkerDrawer({
     previousFile.current = openFile;
   }, [embedded, openFile]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const draftKey = `${scope}:${topic}`;
-  const [coworker, setCoworker] = useState<Record<string, unknown> | null>(null);
+  const [response, setResponse] = useState<{ route: string; value: Record<string, unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic === "files" ? "standing" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
   const scoped = scope === "all" ? "combined" : scope;
+  const identity = JSON.stringify([bunkerId, repoRoot, detail.project.key, detail.ticket.id]);
+  const routeFor = (target: { category: string; path: string }) => JSON.stringify([identity, scoped, target.category, target.path]);
+  const route = routeFor(thread);
+  const draftKey = route;
+  const coworker = response?.route === route ? response.value : null;
+  const error = errors[route] || "";
   const currentRoute = useRef("");
-  const route = JSON.stringify([repoRoot, detail.ticket.id, scoped, thread.category, thread.path]);
   currentRoute.current = route;
+  const requestVersions = useRef(new Map<string, number>());
+  const startRequest = (key: string) => { const version = (requestVersions.current.get(key) || 0) + 1; requestVersions.current.set(key, version); return version; };
+  const isLatest = (key: string, version: number) => requestVersions.current.get(key) === version;
+  const activeOperations = useRef(0);
+  const mutatingRoutes = useRef(new Map<string, number>());
+  const beginOperation = (key: string) => { activeOperations.current++; mutatingRoutes.current.set(key, (mutatingRoutes.current.get(key) || 0) + 1); setBusy(true); };
+  const endOperation = (key: string) => { activeOperations.current--; const count = (mutatingRoutes.current.get(key) || 1) - 1; if (count) mutatingRoutes.current.set(key, count); else mutatingRoutes.current.delete(key); setBusy(activeOperations.current > 0); };
+  const latestQuote = useRef(quote); latestQuote.current = quote;
+  const quoteOwner = useRef({ quote, identity });
+  if (quoteOwner.current.quote !== quote) quoteOwner.current = { quote, identity };
+  const quoteMatchesView = Boolean(quote && quoteOwner.current.identity === identity
+    && (quote.scope === "all" ? "combined" : quote.scope) === scoped
+    && (!embedded || quote.category !== "file" || quote.path === openFile));
+  const selectedQuote = quoteMatchesView && quote?.category === thread.category
+    && (thread.category !== "file" || quote?.path === thread.path) ? quote : null;
   useEffect(() => {
-    if (quote) {
+    if (quote && quoteMatchesView) {
       setTopic(topicOf(quote));
       onOpen(true);
+    } else if (quote) {
+      onQuote(null);
     }
-  }, [quote, onOpen]);
+  }, [quote, quoteMatchesView, onOpen]);
   useEffect(() => {
-    if (!open || !repoRoot) return;
+    // A note reply may select this topic and start its chat in one render.
+    // Do not race that pending mutation with an older saved-state read.
+    if (!open || !repoRoot || mutatingRoutes.current.has(route)) return;
     let active = true;
-    setCoworker((current) => (current && current.path === thread.path && current.category === thread.category ? current : null));
+    const version = startRequest(route);
     command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot)
-      .then((value) => { if (active) setCoworker(value); })
-      .catch((reason) => active && setError(String(reason)));
+      .then((value) => { if (active && isLatest(route, version)) setResponse({ route, value }); })
+      .catch((reason) => { if (active && isLatest(route, version)) setErrors((old) => ({ ...old, [route]: String(reason) })); });
     return () => { active = false; };
-  }, [open, repoRoot, detail.project.key, detail.ticket.id, thread.category, thread.path, scoped]);
+  }, [open, route]);
 
   async function deliver(message: string, reference: Quote | null, target: { category: string; path: string }) {
-    setBusy(true);
-    setError("");
+    const targetRoute = routeFor(target);
+    beginOperation(targetRoute);
+    const version = startRequest(targetRoute);
+    setErrors((old) => ({ ...old, [targetRoute]: "" }));
     try {
       const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: target.category, scope: scoped, path: target.path, message, reference }, repoRoot);
-      if (currentRoute.current === JSON.stringify([repoRoot, detail.ticket.id, scoped, target.category, target.path])) {
-        setCoworker(result);
-        onQuote(null);
+      if (currentRoute.current === targetRoute && isLatest(targetRoute, version)) {
+        setResponse({ route: targetRoute, value: result });
+        if (reference && latestQuote.current === reference) onQuote(null);
       }
       return true;
     } catch (reason) {
-      setError(String(reason));
+      if (isLatest(targetRoute, version)) setErrors((old) => ({ ...old, [targetRoute]: String(reason) }));
       return false;
     } finally {
-      setBusy(false);
+      endOperation(targetRoute);
     }
   }
   // A reply typed under a note in the editor: open the file's tab and send.
@@ -795,21 +820,24 @@ export function CoworkerDrawer({
     const form = event.currentTarget;
     const message = String(new FormData(form).get("message") || "");
     if (!message.trim()) return;
-    if (await deliver(message, quote, thread)) setDrafts((old) => ({ ...old, [draftKey]: old[draftKey] === message ? "" : old[draftKey] }));
+    if (await deliver(message, selectedQuote, thread)) setDrafts((old) => ({ ...old, [draftKey]: old[draftKey] === message ? "" : old[draftKey] }));
   }
 
   async function proposal(action: "accept" | "dismiss", id: string) {
-    setBusy(true);
+    beginOperation(route);
+    const version = startRequest(route);
+    setErrors((old) => ({ ...old, [route]: "" }));
     try {
       await command(`coworker.proposal.${action}`, { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, proposal: id }, repoRoot);
       notify(action === "accept" ? "Report update accepted" : "Proposal dismissed");
+      if (currentRoute.current !== route || !isLatest(route, version)) return;
       onReload();
       const refreshed = await command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot);
-      setCoworker(refreshed);
+      if (currentRoute.current === route && isLatest(route, version)) setResponse({ route, value: refreshed });
     } catch (reason) {
-      setError(String(reason));
+      if (isLatest(route, version)) setErrors((old) => ({ ...old, [route]: String(reason) }));
     } finally {
-      setBusy(false);
+      endOperation(route);
     }
   }
 
@@ -827,16 +855,20 @@ export function CoworkerDrawer({
   const inFiles = topic === "files" || thread.category === "file";
   const placeholder = thread.category === "file" ? `Ask about ${thread.path.split("/").pop()}` : `Ask about ${thread.category}`;
   async function forget(path: string) {
-    setBusy(true);
+    beginOperation(route);
+    const version = startRequest(route);
+    setErrors((old) => ({ ...old, [route]: "" }));
     try {
       const value = await command<Record<string, unknown>>("coworker.file.forget", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, scope: scoped, path }, repoRoot);
-      setCoworker(value);
-      if (thread.path === path) setTopic("files");
+      if (currentRoute.current === route && isLatest(route, version)) {
+        setResponse({ route: routeFor({ category: "standing", path: "" }), value });
+        if (thread.path === path) setTopic("files");
+      }
       notify(`Forgot the conversation about ${path.split("/").pop()}`);
     } catch (reason) {
-      setError(String(reason));
+      if (isLatest(route, version)) setErrors((old) => ({ ...old, [route]: String(reason) }));
     } finally {
-      setBusy(false);
+      endOperation(route);
     }
   }
   return (
@@ -864,7 +896,7 @@ export function CoworkerDrawer({
         </div>
       )}
       {topic !== "files" && <div className="chat-messages">{!coworker && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
-      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.path && `${quote.path}: `}{quote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} value={drafts[draftKey] || ""} onChange={(event) => setDrafts((old) => ({ ...old, [draftKey]: event.target.value }))} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
+      {topic !== "files" && <form className="chat-input" onSubmit={send}>{selectedQuote && <div className="quote-chip"><span>{selectedQuote.path && `${selectedQuote.path}: `}{selectedQuote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} value={drafts[draftKey] || ""} onChange={(event) => setDrafts((old) => ({ ...old, [draftKey]: event.target.value }))} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
       {topic === "files" && error && <p className="inline-error">{error}</p>}
     </aside>
   );

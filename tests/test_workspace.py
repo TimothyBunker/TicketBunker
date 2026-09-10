@@ -49,6 +49,19 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(self.call("workspace.file.read", path="escape/private.txt")["ok"])
         self.assertNotIn("escape", [row["name"] for row in self.call("workspace.tree")["entries"]])
 
+    def test_lost_save_receipt_can_retry_identical_state_but_not_replace_newer_work(self):
+        state = {"tabs": [], "active": "", "overlays": []}
+        accepted = self.call("workspace.save", revision=0, state=state)
+        self.assertEqual(accepted["revision"], 1)
+        # The worker accepted this write, but the first reply never reached UI.
+        retry = self.call("workspace.save", revision=0, state=state)
+        self.assertTrue(retry["ok"], retry)
+        self.assertEqual(retry["revision"], 1)
+        self.assertEqual(self.call("workspace.save", revision=1, state={"tabs": []})["revision"], 2)
+        rejected = self.call("workspace.save", revision=0, state=state)
+        self.assertEqual(rejected["code"], "workspace_conflict")
+        self.assertEqual(self.call("workspace.open")["state"], {"tabs": []})
+
     def test_saves_refuse_external_edits_and_switched_branch(self):
         original = self.call("workspace.file.read", path="README.md")
         git(self.repo, "switch", "-c", "Ada/ECS-4-work")

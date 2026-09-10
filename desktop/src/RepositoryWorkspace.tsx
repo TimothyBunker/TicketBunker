@@ -20,6 +20,8 @@ type Props = { bunker: Bunker; repository: Repository; visible: boolean; target?
 export default function RepositoryWorkspace({ bunker, repository, visible, target, onTicket, notify }: Props) {
   const payload = useMemo(() => ({ bunker_id: bunker.id, repository_id: repository.id, expected_root: repository.local_path || "" }), [bunker.id, repository.id, repository.local_path]);
   const paneId = useId();
+  const drawerFocus = useRef<string | null>(null);
+  const rescueKey = `tb.workspace.rescue:${JSON.stringify(payload)}`;
   const [view, setView] = useState<ViewState>({ tabs: [], active: "", overlays: [], conversation: "", bunkerId: bunker.id });
   const [ready, setReady] = useState(false);
   const [branch, setBranch] = useState("");
@@ -30,6 +32,14 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   const [treeVersion, setTreeVersion] = useState(0);
   const [treeOpen, setTreeOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(true);
+  useEffect(() => {
+    if (drawerFocus.current) document.getElementById(drawerFocus.current)?.focus();
+    drawerFocus.current = null;
+  }, [treeOpen, contextOpen]);
+  function toggleDrawer(side: "explorer" | "context", open: boolean) {
+    drawerFocus.current = `${paneId}-${side}-${open ? "hide" : "show"}`;
+    if (side === "explorer") setTreeOpen(open); else setContextOpen(open);
+  }
   const [pane, setPane] = useState<"comments" | "session">("comments");
   const [details, setDetails] = useState<Record<string, TicketDetail>>({});
   const [adding, setAdding] = useState(false);
@@ -51,6 +61,11 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   const [jump, setJump] = useState<{ line: number; sequence: number }>();
   const revision = useRef(0);
   const serial = useRef(Promise.resolve());
+  const refreshGeneration = useRef(0);
+  const fileEpochs = useRef(new Map<string, number>());
+  const pendingFiles = useRef(new Map<string, Promise<SourceDraft>>());
+  const openIntent = useRef(0);
+  const bumpFile = (path: string) => fileEpochs.current.set(path, (fileEpochs.current.get(path) || 0) + 1);
   const latest = useRef(view);
   latest.current = view;
   const targetSeen = useRef<number | undefined>(undefined);
@@ -64,6 +79,12 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   [view.overlays, details, repository.id, file?.path]);
   const currentNotes = useMemo(() => cleanFile ? fileNotes.filter(({ stamp }) => stamp?.branch === branch && Boolean(stamp.commit) && head.startsWith(stamp.commit))
     .map(({ id, note }) => ({ ...note, text: `${id}: ${note.text}` })) : [], [fileNotes, cleanFile, branch, head]);
+  function rescueDrafts() {
+    try {
+      if (latest.current.tabs.some((tab) => tab.content !== tab.saved)) sessionStorage.setItem(rescueKey, JSON.stringify({ state: latest.current, revision: revision.current }));
+      else sessionStorage.removeItem(rescueKey);
+    } catch { setError("This window's reload recovery could not be stored. Save your files or copy your unsaved text before reloading or closing."); }
+  }
   function persist() {
     const task = serial.current.then(async () => {
       const result = await command<{ revision: number }>("workspace.save", { ...payload, revision: revision.current, state: latest.current });
@@ -74,26 +95,42 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   }
 
   async function refresh(initial = false, reloadTree = false) {
+    const generation = ++refreshGeneration.current;
     try {
       const result = await command<{ root: string; branch: string; head: string; revision: number; state: Partial<ViewState> }>("workspace.open", payload);
+      if (generation !== refreshGeneration.current) return;
       setRoot(result.root); setBranch(result.branch); setHead(result.head);
       if (initial) {
         revision.current = result.revision;
-        const restored = result.state;
+        let restored = result.state;
+        try {
+          const stored = JSON.parse(sessionStorage.getItem(rescueKey) || "null") as { state?: ViewState; revision?: number } & Partial<ViewState> | null;
+          const rescue = stored?.state || stored;
+          if (rescue?.bunkerId === bunker.id && Array.isArray(rescue.tabs) && rescue.tabs.some((tab) => tab.content !== tab.saved)) {
+            restored = rescue;
+            // Reload must not silently adopt another window's revision and
+            // overwrite its durable recovery with this window's older draft.
+            // Older state-only rescue entries conservatively start at zero.
+            const rescuedRevision = stored?.revision;
+            revision.current = typeof rescuedRevision === "number" && Number.isSafeInteger(rescuedRevision) && rescuedRevision >= 0 ? rescuedRevision : 0;
+          }
+        } catch { /* The durable workspace remains available when browser storage is unavailable. */ }
         setView({ tabs: restored.tabs || [], active: restored.active || "", overlays: restored.bunkerId === bunker.id ? restored.overlays || [] : [], conversation: restored.bunkerId === bunker.id ? restored.conversation || "" : "", bunkerId: bunker.id, expanded: restored.expanded || [] });
         setReady(true);
       }
       // Clean buffers follow external changes; dirty buffers stay untouched.
       for (const tab of initial ? result.state.tabs || [] : latest.current.tabs) {
+        const epoch = fileEpochs.current.get(tab.path) || 0;
         try {
           const disk = await command<SourceDraft>("workspace.file.read", { ...payload, path: tab.path });
-          setView((old) => ({ ...old, tabs: old.tabs.map((current) => current.path !== tab.path ? current : current.content === current.saved
+          if (generation !== refreshGeneration.current || epoch !== (fileEpochs.current.get(tab.path) || 0)) continue;
+          setView((old) => ({ ...old, tabs: old.tabs.map((current) => current.path !== tab.path || current.digest !== tab.digest || current.branch !== tab.branch ? current : current.content === current.saved
             ? { ...disk, line: current.line, saved: disk.content }
             : { ...current, changed: disk.digest !== current.digest || disk.branch !== current.branch }) }));
-        } catch { setView((old) => ({ ...old, tabs: old.tabs.map((current) => current.path === tab.path ? { ...current, changed: true } : current) })); }
+        } catch { if (generation === refreshGeneration.current && epoch === (fileEpochs.current.get(tab.path) || 0)) setView((old) => ({ ...old, tabs: old.tabs.map((current) => current.path === tab.path ? { ...current, changed: true } : current) })); }
       }
-      if (initial || reloadTree) setTreeVersion((value) => value + 1);
-    } catch (reason) { setError(String(reason)); }
+      if (generation === refreshGeneration.current && (initial || reloadTree)) setTreeVersion((value) => value + 1);
+    } catch (reason) { if (generation === refreshGeneration.current) setError(String(reason)); }
   }
   useEffect(() => { void refresh(true); }, []);
   useEffect(() => {
@@ -110,23 +147,37 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   }, [visible, ready]);
   useEffect(() => {
     if (!ready) return;
+    const flush = () => rescueDrafts();
+    window.addEventListener("beforeunload", flush);
+    return () => window.removeEventListener("beforeunload", flush);
+  }, [ready]);
+  useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => {
+      rescueDrafts();
       void persist().catch((reason) => setError(`Draft recovery was not updated. ${String(reason)}`));
     }, 350);
     return () => window.clearTimeout(timer);
   }, [view, ready]);
 
   const openFile = useCallback(async (path: string, line = 1) => {
-    setJump({ line, sequence: Date.now() });
     const existing = latest.current.tabs.find((tab) => tab.path === path);
-    setSelection(null);
-    if (existing) { setView((old) => ({ ...old, active: path, tabs: old.tabs.map((tab) => tab.path === path ? { ...tab, line } : tab) })); return; }
-    if (latest.current.tabs.length >= 30) return setError("Close a file tab before opening another (30 open files).");
+    if (!existing && !pendingFiles.current.has(path) && latest.current.tabs.length + pendingFiles.current.size >= 30) return setError("Close a file tab before opening another (30 open files).");
+    const intent = ++openIntent.current;
+    if (existing) { setJump({ line, sequence: intent }); setSelection(null); setView((old) => ({ ...old, active: path, tabs: old.tabs.map((tab) => tab.path === path ? { ...tab, line } : tab) })); return; }
     try {
-      const draft = await command<SourceDraft>("workspace.file.read", { ...payload, path, line });
-      setView((old) => ({ ...old, active: draft.path, tabs: old.tabs.some((tab) => tab.path === draft.path) ? old.tabs : [...old.tabs, { ...draft, saved: draft.content }] }));
-      setSelection(null);
-    } catch (reason) { setError(String(reason)); }
+      let read = pendingFiles.current.get(path);
+      if (!read) { read = command<SourceDraft>("workspace.file.read", { ...payload, path, line }); pendingFiles.current.set(path, read); }
+      const draft = await read;
+      bumpFile(draft.path);
+      if (intent === openIntent.current) { setJump({ line, sequence: intent }); setSelection(null); }
+      setView((old) => {
+        const present = old.tabs.some((tab) => tab.path === draft.path);
+        if (!present && old.tabs.length >= 30) return old;
+        return { ...old, active: intent === openIntent.current ? draft.path : old.active, tabs: present ? old.tabs : [...old.tabs, { ...draft, line, saved: draft.content }] };
+      });
+    } catch (reason) { setError(`${path}: ${String(reason)}`); }
+    finally { pendingFiles.current.delete(path); }
   }, [payload]);
   const sourceActions = useMemo(() => ({ open: openFile }), [openFile]);
   const expanded = useMemo(() => view.expanded || [], [view.expanded]);
@@ -160,11 +211,14 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   }, [adding, query]);
 
   async function save(tab: Tab): Promise<boolean> {
+    bumpFile(tab.path);
     setBusy(true); setError("");
     try {
       const result = await command<{ content: string; digest: string }>("workspace.file.save", { ...payload, path: tab.path, branch: tab.branch, content: tab.content, expected_digest: tab.digest });
+      bumpFile(tab.path);
       const updated = { ...latest.current, tabs: latest.current.tabs.map((current) => current.path === tab.path ? { ...current, saved: result.content, content: current.content === tab.content ? result.content : current.content, digest: result.digest, changed: false } : current) };
       latest.current = updated; setView(updated);
+      rescueDrafts();
       await persist();
       return true;
     } catch (reason) { setError(String(reason)); return false; }
@@ -175,6 +229,8 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
     save: async () => { for (const tab of latest.current.tabs.filter((tab) => tab.content !== tab.saved)) if (!await save(tab)) return false; return true; },
     discard: async () => { const clean = { ...latest.current, tabs: latest.current.tabs.map((tab) => ({ ...tab, content: tab.saved })) }; latest.current = clean; setView(clean); await persist(); } });
   function closeFile(path: string) {
+    bumpFile(path);
+    openIntent.current++;
     setView((old) => { const tabs = old.tabs.filter((tab) => tab.path !== path); return { ...old, tabs, active: old.active === path ? tabs.at(-1)?.path || "" : old.active }; });
     setClosing("");
   }
@@ -184,7 +240,7 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
     setPane("session"); setContextOpen(true);
   }
 
-  const contextPane = useMemo(() => (<aside id={paneId + "-context"} className="workspace-context" hidden={!contextOpen}><nav aria-label="File context"><button aria-pressed={pane === "comments"} onClick={() => setPane("comments")}>Comments</button><button aria-pressed={pane === "session"} onClick={() => setPane("session")}>Session</button><IconButton icon="panel-right" label="Hide ticket context" aria-expanded={true} aria-controls={paneId + "-context"} onClick={() => setContextOpen(false)} /></nav>
+  const contextPane = useMemo(() => (<aside id={paneId + "-context"} className="workspace-context" hidden={!contextOpen}><nav aria-label="File context"><button aria-pressed={pane === "comments"} onClick={() => setPane("comments")}>Comments</button><button aria-pressed={pane === "session"} onClick={() => setPane("session")}>Session</button><IconButton id={paneId + "-context-hide"} icon="panel-right" label="Hide ticket context" aria-expanded={true} aria-controls={paneId + "-context"} onClick={() => toggleDrawer("context", false)} /></nav>
         <label>Conversation<select aria-label="Active ticket session" value={view.conversation} onChange={(event) => { setView((old) => ({ ...old, conversation: event.target.value })); setQuote(null); }}><option value="">No ticket</option>{view.overlays.map((id) => <option key={id}>{id}</option>)}</select></label>
         <SourceActionsContext.Provider value={sourceActions}>
         <div className="workspace-comments" hidden={pane !== "comments"}>{!view.overlays.length && <p>Add a ticket overlay to see its file notes.</p>}{view.overlays.map((id) => <section key={id}><strong>{id}</strong>{fileNotes.filter((item) => item.id === id).map(({ report, note, stamp }, index) => {
@@ -207,20 +263,20 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
     {adding && <div className="overlay-picker"><input aria-label="Find ticket overlay" placeholder="Find ticket" value={query} onChange={(event) => setQuery(event.target.value)} />{tickets.map((ticket) => <button key={ticket.id} onClick={() => addOverlay(ticket.id)}>{ticket.id} {ticket.title}</button>)}</div>}
     {error && <div className="inline-error" role="alert">{error}<button aria-label="Dismiss workspace error" onClick={() => setError("")}>×</button></div>}
     {!ready ? <p>Loading workspace…</p> : <div className="repository-workspace-body">
-      {!treeOpen && <div className="workspace-drawer-rail"><IconButton icon="panel-left" label="Show explorer" aria-expanded={false} aria-controls={paneId + "-explorer"} onClick={() => setTreeOpen(true)} /></div>}
+      {!treeOpen && <div className="workspace-drawer-rail"><IconButton id={paneId + "-explorer-show"} icon="panel-left" label="Show explorer" aria-expanded={false} aria-controls={paneId + "-explorer"} onClick={() => toggleDrawer("explorer", true)} /></div>}
       <nav id={paneId + "-explorer"} hidden={!treeOpen} className="workspace-tree" aria-label="Repository files">
-        <div className="workspace-pane-header"><span>Explorer</span><IconButton icon="panel-left" label="Hide explorer" aria-expanded={true} aria-controls={paneId + "-explorer"} onClick={() => setTreeOpen(false)} /></div>
+        <div className="workspace-pane-header"><span>Explorer</span><IconButton id={paneId + "-explorer-hide"} icon="panel-left" label="Hide explorer" aria-expanded={true} aria-controls={paneId + "-explorer"} onClick={() => toggleDrawer("explorer", false)} /></div>
         <form onSubmit={(event) => { event.preventDefault(); void openFile(fileQuery); }}><input value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} name="path" aria-label="Find file or open path" placeholder="Find file or path…" /></form>
         {fileQuery ? <ul>{foundFiles.map((path) => <li key={path}><button onClick={() => { void openFile(path); setFileQuery(""); }}>{path}</button></li>)}</ul> : <Directory key={treeVersion} payload={payload} path="" onOpen={openFile} expanded={expanded} toggle={toggleDirectory} />}
       </nav>
-      <main className="workspace-file-area"><div className="workspace-file-tabs" role="tablist" aria-label="Open files">{view.tabs.map((tab) => <div key={tab.path}><button role="tab" aria-selected={view.active === tab.path} title={tab.path} onClick={() => { setView((old) => ({ ...old, active: tab.path })); setSelection(null); }}>{tab.path.split("/").pop()}{tab.content !== tab.saved ? " •" : ""}</button><button aria-label={`Close ${tab.path}`} onClick={() => tab.content !== tab.saved ? setClosing(tab.path) : closeFile(tab.path)}>×</button></div>)}</div>
+      <main className="workspace-file-area"><div className="workspace-file-tabs" role="tablist" aria-label="Open files">{view.tabs.map((tab) => <div key={tab.path}><button role="tab" aria-selected={view.active === tab.path} title={tab.path} onClick={() => { openIntent.current++; setView((old) => ({ ...old, active: tab.path })); setSelection(null); }}>{tab.path.split("/").pop()}{tab.content !== tab.saved ? " •" : ""}</button><button aria-label={`Close ${tab.path}`} onClick={() => tab.content !== tab.saved ? setClosing(tab.path) : closeFile(tab.path)}>×</button></div>)}</div>
         {file ? <><div className="workspace-file-tools"><span title={file.path}>{file.path}</span>{file.changed && <span role="status">Changed on disk or branch</span>}<button disabled={busy || file.content === file.saved} onClick={() => save(file)}>Save</button>{selection && <button disabled={!activeTicket} title={activeTicket ? `Send selection to ${view.conversation}` : "Add a ticket overlay to discuss code"} onClick={() => discuss(selection)}>Discuss selection</button>}</div>
-          <Suspense fallback={<p>Loading editor…</p>}><CodeEditor path={file.path} value={file.content} line={file.line} jump={jump} notes={currentNotes} tabSize={file.settings.tab_size} tabs={file.settings.indent_style === "tabs"} wrap={file.settings.line_wrap} onSave={() => { if (!busy) void save(file); }}
+          <Suspense fallback={<p>Loading editor…</p>}><CodeEditor openPaths={view.tabs.map((tab) => tab.path)} path={file.path} value={file.content} line={file.line} jump={jump} notes={currentNotes} tabSize={file.settings.tab_size} tabs={file.settings.indent_style === "tabs"} wrap={file.settings.line_wrap} onSave={() => { if (!busy) void save(file); }}
             onChange={(content) => setView((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, content } : tab) }))}
             onLine={(line) => setView((old) => old.tabs.find((tab) => tab.path === old.active)?.line === line ? old : ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, line } : tab) }))} onSelection={setSelection} /></Suspense></> : <p className="quiet-empty">Open a file from this repository.</p>}
       </main>
       {contextPane}
-      {!contextOpen && <div className="workspace-drawer-rail right"><IconButton icon="panel-right" label="Show ticket context" aria-expanded={false} aria-controls={paneId + "-context"} onClick={() => setContextOpen(true)} /></div>}
+      {!contextOpen && <div className="workspace-drawer-rail right"><IconButton id={paneId + "-context-show"} icon="panel-right" label="Show ticket context" aria-expanded={false} aria-controls={paneId + "-context"} onClick={() => toggleDrawer("context", true)} /></div>}
     </div>}
     {closing && <dialog ref={closeDialog} className="workspace-close-dialog" aria-label="Close file" onCancel={(event) => { event.preventDefault(); if (!busy) setClosing(""); }}><h2>You have unsaved changes</h2><p>{closing}</p><button disabled={busy} onClick={() => setClosing("")}>Cancel</button><button disabled={busy} onClick={() => closeFile(closing)}>Do not save</button><button disabled={busy} onClick={async () => { const tab = view.tabs.find((tab) => tab.path === closing); if (tab && await save(tab)) closeFile(closing); }}>Save</button></dialog>}
   </section>;

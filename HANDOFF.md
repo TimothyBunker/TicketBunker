@@ -4,6 +4,54 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Extended workspace QA campaign (2026-09-09, source only)
+
+Tim requested a ticketed, multi-agent campaign on dummy projects while away.
+`docs/qa-workspace-campaign.md` is the durable QA-01 through QA-10 checklist,
+reproduction record and remaining manual-test backlog. Three delegated tracks
+covered editor/chat components, filesystem/native Windows/server permissions,
+and actual browser role-play; the root integrated lifecycle/recovery fixes.
+
+Safety fixes: pending opens cannot steal a newer selection or bypass 30 tabs;
+old refresh responses cannot overwrite a newer save; closed Monaco models are
+disposed; indentation is model-local; drawer focus and Ctrl+M keyboard escape
+work. Coworker state/errors/drafts/quotes and delayed mutations are keyed to the
+full Bunker/repository/ticket/branch/topic/file route, with stale-response guards.
+No model authority or report publication gate changed.
+
+Recovery rescue is per browser/window session and retains the original revision.
+Never adopt another window's latest revision merely to save an older rescue: the
+real multiwindow regression exposed that as a silent durable-snapshot takeover.
+Identical recovery retries acknowledge lost receipts without overwriting newer
+different state. Conflicting windows must save/copy before closing; session rescue
+is not crash-proof storage. Unsent chat drafts still live only in memory.
+
+Source saves retain CR/LF/CRLF and mixed endings, reject NUL drafts and read-only
+replacement, validate malformed paths and clean failed temporary writes. Near-
+limit periodic files exposed quadratic line alignment; prefix/suffix trimming
+and bounded changed-region matching fix it. Seeded edits also caught adjacent
+CR/empty-line/LF collapsing a blank line; normalized text is preserved exactly.
+Directory browsing no longer falsely marks exactly 2,000 entries as truncated.
+
+Eight real HTTP owner/member scenarios pass on Linux and native Windows: member
+local attachment does not publish configuration, forged local permissions cannot
+bypass server authorization, stale bindings/allowlists reject, and owner config
+propagates without device paths. These are backend tests, not installed GUI claims.
+Native Windows additionally passes 15 source boundary tests (one platform skip),
+seven workspace tests and four directory tests; Unicode JSONL worker round-trip
+uses real Git in a disposable checkout.
+
+`npm run test:simulation:repeat --prefix desktop -- --runs=10` creates fresh labs
+for role-play, keyboard and concurrent-window journeys, with separate screenshots,
+JSON results, logs and bounded shutdown. CI now runs all three once and uploads
+the evidence. No installer, version bump, real project, tracker or provider use.
+See the campaign checklist for final integrated counts and remaining limitations.
+Final: 432 Python tests (three platform skips), 121 UI tests, 12 Rust tests,
+production build and existing browser hardening pass. The strengthened final
+campaign passes 30/30 journeys with no retries/timeouts; detailed local evidence
+is `/tmp/tb-qa-workspace-final`. Native installed GUI/provider smoke tests remain
+explicitly outside this source-only campaign.
+
 ## Drawer controls, folder selection and simulation (2026-09-09, source only)
 
 Explorer/context toggles now belong to pane headers and collapsed edge rails,
