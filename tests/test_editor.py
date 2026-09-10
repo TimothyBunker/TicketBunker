@@ -22,6 +22,17 @@ class EditorTests(unittest.TestCase):
         config.GLOBAL_CONFIG = self.old_global_config
         self.temp.cleanup()
 
+    def test_editor_git_queries_use_headless_platform_options(self) -> None:
+        windows = editor.platform_services.PlatformServices.detect(system="win32")
+        result = mock.Mock(returncode=0, stdout="test-branch")
+        with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):
+            with mock.patch.object(editor.platform_services, "current", return_value=windows):
+                with mock.patch.object(editor.subprocess, "run", return_value=result) as run:
+                    editor.read_source(self.root, "src/main.py")
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs.get("creationflags"), 0x08000000)
+
     def test_automatic_editor_prefers_vim_then_nano(self) -> None:
         git_result = mock.Mock(returncode=1, stdout="")
         with mock.patch.dict(os.environ, {"TB_EDITOR": "", "VISUAL": "", "EDITOR": ""}):

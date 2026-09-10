@@ -4,6 +4,32 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Two-hour failure campaign (2026-09-10, source verified; final replay underway)
+
+`docs/qa-two-hour-campaign.md` tracks this follow-up to the earlier campaign.
+It began at 06:45:58 UTC, was interrupted by a usage limit around 07:18, and
+resumed at 13:35 UTC. The inactive interval is not counted as active QA. The
+autonomous browser soak did finish: 156/156 fresh-lab journeys over 20m18s,
+no failures, 539 KB artifacts in `/tmp/tb-trackc-soak-20m-v2`.
+
+Verified fixes cover source write redirection/temporary ownership, invalid Unicode
+and recovery storage, delayed save/close and refresh races, detached HEAD identity,
+exact note/file-chat paths, read-error retry, and stale/incomplete shared snapshots.
+Independent review additionally found enrollment not advancing its snapshot cursor
+and missing Windows no-console flags in background Git/report/check helpers.
+Unsent coworker text plus quotes now have bounded per-window session recovery;
+closing warns for hidden drafts, and Save never sends a message. Storage failure
+still requires saving/sending/copying; this is not crash-proof recovery.
+
+Integrated source validation: 513 Python tests on Linux (three skips) and native
+Windows (four skips), 194 frontend tests, TypeScript and 12 Rust tests. A single
+worker/page ran 4,245 editor cycles over 30 minutes with stable model/editor
+counts; shared-concurrency repetition ran 645 executions over 15 minutes.
+Fresh browser role-play, keyboard, multiwindow and failure cases pass. Follow the
+checklist for source commit/CI status and remaining tests. Two earlier intermittent
+stops remain unexplained despite later green runs; they are not erased by them.
+No installer release or native installed GUI validation is claimed.
+
 ## Extended workspace QA campaign (2026-09-09, source only)
 
 Tim requested a ticketed, multi-agent campaign on dummy projects while away.
@@ -24,7 +50,8 @@ Never adopt another window's latest revision merely to save an older rescue: the
 real multiwindow regression exposed that as a silent durable-snapshot takeover.
 Identical recovery retries acknowledge lost receipts without overwriting newer
 different state. Conflicting windows must save/copy before closing; session rescue
-is not crash-proof storage. Unsent chat drafts still live only in memory.
+is not crash-proof storage. This slice's memory-only chat drafts were superseded
+by bounded per-window session recovery in the 10 September campaign above.
 
 Source saves retain CR/LF/CRLF and mixed endings, reject NUL drafts and read-only
 replacement, validate malformed paths and clean failed temporary writes. Near-
@@ -113,7 +140,8 @@ file close has Save / Do not save / Cancel. Conflict saves preserve drafts.
 Entry: Project sidebar → repository, or a ticket code link / Workspace chapter.
 Still one local folder per existing repository binding; duplicate windows for
 one checkout refuse recovery conflicts rather than merge buffers. Chat drafts
-are in-memory, sent chat remains in the existing ticket session. Local recovery
+were in-memory in this slice (superseded by 10 September session recovery);
+sent chat remains in the existing ticket session. Local recovery
 is plaintext and not a backup. No installer/tag/version bump in this slice.
 
 Verified: 400 Python tests (three platform skips), 86 UI tests, 12 Rust tests,

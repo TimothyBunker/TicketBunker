@@ -80,12 +80,42 @@ describe("plan steps", () => {
 
 
 describe("source notes", () => {
+  const anchored = (path: string) => `## What\n- [real] Defect: check @[${path}]:7.`;
+  it("never treats a relative suffix as the same repository file", () => {
+    expect(sourceNotes(anchored("src/file.py"), "file.py")).toEqual([]);
+    expect(sourceNotes(anchored("file.py"), "src/file.py")).toEqual([]);
+    expect(sourceNotes(anchored("src/file.py"), "tests/file.py")).toEqual([]);
+    expect(sourceNotes(anchored("./src/./file.py"), "src/file.py")).toHaveLength(1);
+    expect(sourceNotes(anchored("../src/file.py"), "src/file.py")).toEqual([]);
+  });
+  it("matches absolute citations only within an explicit repository root", () => {
+    expect(sourceNotes(anchored("/repo/src/file.py"), "src/file.py")).toEqual([]);
+    expect(sourceNotes(anchored("/repo/src/file.py"), "src/file.py", "/repo")).toHaveLength(1);
+    expect(sourceNotes(anchored("/other/src/file.py"), "src/file.py", "/repo")).toEqual([]);
+    expect(sourceNotes(anchored("/repo-other/src/file.py"), "src/file.py", "/repo")).toEqual([]);
+    expect(sourceNotes(anchored("/repo/../other/src/file.py"), "src/file.py", "/repo")).toEqual([]);
+  });
+  it("normalizes Windows separators without confusing unrelated directories", () => {
+    expect(sourceNotes(anchored("src\\file.py"), "src/file.py")).toHaveLength(1);
+    expect(sourceNotes(anchored("C:\\repo\\src\\file.py"), "src/file.py", "C:\\repo")).toHaveLength(1);
+    expect(sourceNotes(anchored("D:\\repo\\src\\file.py"), "src/file.py", "C:\\repo")).toEqual([]);
+    expect(sourceNotes(anchored("C:\\repo\\tests\\file.py"), "src/file.py", "C:\\repo")).toEqual([]);
+  });
+  it("preserves nested reference targets when rendering file-note prose", () => {
+    const onOpen = vi.fn();
+    const notes = sourceNotes("## What\n- [real] Defect: `src/file.py:7` needs the same fix as @[tests/file.py]:12.", "src/file.py");
+    const { unmount } = render(<Markdown onOpenSource={onOpen}>{notes[0].text}</Markdown>);
+    fireEvent.click(screen.getByRole("button", { name: "src/file.py line 7" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
+    expect(onOpen).toHaveBeenCalledWith("src/file.py", 7);
+    unmount();
+  });
   const report = "## Reader brief\n\n### Standing\n\n- [real] Verdict: blocked — it does not build (@[coal/a.cpp]:21).\n\n### What\n\n- [real] Defect: `coal/a.cpp:21` defines Pos3 twice; see @[coal/a.h]:7-9.\n\n### Plan\n\n- [real] Step: remove the second constructor (@[coal/a.cpp]:21).\n\n## Where\n\n- [observation] Edit already happened: coal/a.cpp (diff).\n- [speculation] grounded — Fix the conversions near @coal/a.cpp:40 first.\n";
   it("collects anchored claims for one file with their kind and line", () => {
     const notes = sourceNotes(report, "coal/a.cpp");
     expect(notes.map((note) => [note.line, note.label, note.tone])).toEqual([[21, "Standing", "real"], [21, "Defect", "defect"], [21, "Step", "next"], [40, "Where", "speculation"]]);
-    expect(notes[1].text).toBe("`a.cpp:21` defines Pos3 twice; see a.h:7-9.");
-    expect(sourceNotes(report, "coal/a.h")).toEqual([{ line: 7, endLine: 9, label: "Defect", tone: "defect", text: "`a.cpp:21` defines Pos3 twice; see a.h:7-9.", section: "What" }]);
+    expect(notes[1].text).toBe("`coal/a.cpp:21` defines Pos3 twice; see @[coal/a.h]:7-9.");
+    expect(sourceNotes(report, "coal/a.h")).toEqual([{ line: 7, endLine: 9, label: "Defect", tone: "defect", text: "`coal/a.cpp:21` defines Pos3 twice; see @[coal/a.h]:7-9.", section: "What" }]);
     expect(sourceNotes(report, "other.cpp")).toEqual([]);
   });
 });

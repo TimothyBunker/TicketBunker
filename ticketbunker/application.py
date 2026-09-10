@@ -70,6 +70,7 @@ def _git_value(key: str) -> str:
         ["git", "config", "--global", "--get", key],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     return process.stdout.strip() if process.returncode == 0 else ""
 
@@ -99,6 +100,7 @@ def _source_root(raw: str) -> Path:
         ["git", "-C", str(selected), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if process.returncode != 0 or not process.stdout.strip():
         raise commands.CommandRejected(
@@ -112,6 +114,7 @@ def _source_remote(root: Path) -> str:
         ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     return process.stdout.strip() if process.returncode == 0 else ""
 
@@ -1503,7 +1506,7 @@ def command_bunker_sync(
     bunker_id = str(payload.get("bunker_id") or "")
     adapter, connection = _remote_adapter(bunker_id)
     snapshot = _bunker_result(adapter.pull, str(connection["remote_bunker_id"]), "")
-    applied = _bunker_result(bunkerdb.apply_snapshot, bunker_id, snapshot)
+    applied = _bunker_result(bunkerdb.apply_snapshot, bunker_id, snapshot, expected_cursor=str(connection.get("sync_cursor") or ""))
     return {
         "sync": applied,
         "bunker": bunkerdb.get_bunker(bunker_id),

@@ -727,7 +727,8 @@ class SharedBunkerTests(unittest.TestCase):
                 )["sync"]
         self.assertEqual(synced["created"], 2)
         # fields, mapping, board, then two tickets, after the five earlier changes
-        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-10")
+        # Enrollment is snapshot-visible and advances the service cursor.
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-11")
 
         # A member joining afterwards receives the tracker and its tickets, and
         # may sync too because members hold tickets:write.

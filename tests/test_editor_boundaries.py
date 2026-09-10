@@ -182,6 +182,28 @@ class EditorBoundaryTests(unittest.TestCase):
             self.reject("source_binary", editor.save_source, self.root, "file.py", "private draft", read["digest"])
         self.assertEqual(list(self.root.glob(".file.py.tb-*")), [])
 
+    def test_replaced_staging_file_is_never_published_as_the_users_draft(self):
+        path = self.file()
+        original = path.read_bytes()
+        read = editor.read_source(self.root, "file.py")
+        source_bytes = editor._source_bytes
+        calls = 0
+        def replace_staging(source):
+            nonlocal calls
+            calls += 1
+            value = source_bytes(source)
+            if calls == 2:
+                staged = next(self.root.glob(".file.py.tb-*"))
+                replacement = self.root / "foreign-stage"
+                replacement.write_bytes(b"Not the user's draft")
+                os.replace(replacement, staged)
+            return value
+        with patch.object(editor, "_source_bytes", side_effect=replace_staging):
+            self.reject("source_changed", editor.save_source, self.root, "file.py", "The real draft", read["digest"])
+        self.assertEqual(path.read_bytes(), original)
+        # A staging name replaced by another writer is not ours to delete.
+        self.assertEqual([item.read_bytes() for item in self.root.glob(".file.py.tb-*")], [b"Not the user's draft"])
+
     def test_read_permission_error_is_actionable(self):
         self.file()
         with patch.object(Path, "read_bytes", side_effect=PermissionError("simulation unreadable")):

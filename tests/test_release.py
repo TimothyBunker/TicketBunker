@@ -18,7 +18,22 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@unittest.skipUnless(shutil.which("bash"), "Release publication runs in Bash on Ubuntu")
+def publication_bash() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    # WindowsApps/System32 bash.exe may be a WSL launcher: that is a different
+    # OS environment and does not preserve this native process's arguments or
+    # environment contract. Prefer Git for Windows' own Bash when installed.
+    git = shutil.which("git")
+    if git:
+        for parent in list(Path(git).parents)[:3]:
+            candidate = parent / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+@unittest.skipUnless(publication_bash(), "Ubuntu release shell needs Bash (native Git Bash on Windows; a WSL launcher is not equivalent)")
 class ReleasePublicationTests(unittest.TestCase):
     def test_artifact_only_publication_names_repository_and_preserves_tag_flags(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -30,8 +45,8 @@ class ReleasePublicationTests(unittest.TestCase):
             for tag, prerelease in (("v0.6.0", False), ("v0.6.0-rc1", True)):
                 with self.subTest(tag=tag):
                     result = subprocess.run(
-                        [shutil.which("bash"), "--noprofile", "--norc", "-e", "-c",
-                         "gh() { printf '%s\\n' \"$@\"; }\n" + script],
+                        [publication_bash(), "--noprofile", "--norc", "-e"],
+                        input="gh() { printf '%s\\n' \"$@\"; }\n" + script,
                         cwd=temporary,
                         env={**os.environ, "GITHUB_REPOSITORY": "example/ticketbunker",
                              "GITHUB_REF_NAME": tag, "GH_TOKEN": "test-only"},

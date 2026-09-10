@@ -142,7 +142,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self'; font-src 'self' data:; "
-            "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'",
+            "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         )
         self.end_headers()
 
@@ -156,14 +156,43 @@ class AppHandler(BaseHTTPRequestHandler):
     def _json(self, status: int, value: Any) -> None:
         self._send(
             status,
-            json.dumps(value, ensure_ascii=False).encode("utf-8"),
+            json.dumps(value, ensure_ascii=False).encode("utf-8", errors="backslashreplace"),
             "application/json; charset=utf-8",
         )
 
     def _authorized(self) -> bool:
-        return secrets.compare_digest(
-            self.headers.get("X-TicketBunker-Token", ""), self.server.token
-        )
+        tokens = self.headers.get_all("X-TicketBunker-Token", [])
+        return (len(tokens) == 1 and tokens[0].isascii()
+                and secrets.compare_digest(tokens[0], self.server.token))
+
+    def _local_request(self) -> bool:
+        # Binding loopback alone does not make arbitrary Host names trustworthy.
+        # Never expose the launch token or local data through a foreign authority.
+        hosts = self.headers.get_all("Host", [])
+        origins = self.headers.get_all("Origin", [])
+        if (len(hosts) != 1 or len(origins) > 1
+                or not self.path.startswith("/") or self.path.startswith("//")):
+            return False
+        def authority(raw: str) -> tuple[str, int] | None:
+            # Validate the raw spelling: URL parsers intentionally normalize
+            # controls and empty delimiters, which is unsuitable for this gate.
+            match = re.fullmatch(r"(localhost|127\.0\.0\.1|\[::1\])(?::([0-9]{1,5}))?", raw, re.IGNORECASE | re.ASCII)
+            if match is None:
+                return None
+            port = int(match[2]) if match[2] else 80
+            return (match[1].lower(), port) if port == self.server.server_address[1] else None
+        host = authority(hosts[0])
+        if host is None:
+            return False
+        if origins:
+            return origins[0].startswith("http://") and authority(origins[0][7:]) == host
+        return True
+
+    def _reject_foreign_request(self) -> bool:
+        if self._local_request():
+            return False
+        self._json(403, {"ok": False, "message": "Open TicketBunker using its local 127.0.0.1 or localhost address."})
+        return True
 
     def _payload(self) -> dict[str, Any] | None:
         try:
@@ -174,7 +203,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return None
         try:
             value = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
+        except (UnicodeDecodeError, ValueError, RecursionError):
             return None
         return value if isinstance(value, dict) else None
 
@@ -188,6 +217,8 @@ class AppHandler(BaseHTTPRequestHandler):
         return candidate if candidate.is_file() else None
 
     def do_GET(self) -> None:  # noqa: N802
+        if self._reject_foreign_request():
+            return
         path = urlsplit(self.path).path
         if path == "/_viewer/health":
             self._json(
@@ -242,6 +273,8 @@ class AppHandler(BaseHTTPRequestHandler):
         self._send(200, document.encode("utf-8"), "text/html; charset=utf-8")
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._reject_foreign_request():
+            return
         path = urlsplit(self.path).path
         if not self._authorized():
             self._json(403, {"ok": False, "message": "Reload the TicketBunker app and retry."})

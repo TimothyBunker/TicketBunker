@@ -577,6 +577,7 @@ def command_refresh(context: commands.CommandContext, payload: dict[str, Any]) -
             ["git", "-C", str(root), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            **platform_services.current().headless_process_options(),
         ).stdout.strip() or "origin"
         _code, summary, action = project.classify_remote_failure(
             remote, detail, retry="the ticket refresh"

@@ -33,7 +33,12 @@ export default function WorkspaceEditor(props: Props) {
       scrollBeyondLastLine: false, glyphMargin: true, ariaLabel: "Repository file editor", fixedOverflowWidgets: true });
     editor.current = instance;
     marks.current = instance.createDecorationsCollection();
-    instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => current.current.onSave());
+    // addCommand installs a global binding: a later hidden editor can steal
+    // Ctrl+S. addAction scopes its binding to this editor's identity and gives
+    // us a disposable registration when a repository workspace closes.
+    const save = instance.addAction({ id: "ticketbunker.save-file", label: "Save file",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], precondition: "editorTextFocus",
+      run: () => current.current.onSave() });
     const content = instance.onDidChangeModelContent(() => { if (!changing.current) current.current.onChange(instance.getValue()); });
     const selection = instance.onDidChangeCursorSelection(() => {
       if (changing.current) return;
@@ -41,7 +46,7 @@ export default function WorkspaceEditor(props: Props) {
       if (range) current.current.onLine(range.positionLineNumber);
       current.current.onSelection(range && !range.isEmpty() ? { text: instance.getModel()!.getValueInRange(range), line_start: range.startLineNumber, line_end: range.endLineNumber } : null);
     });
-    return () => { content.dispose(); selection.dispose(); instance.dispose(); models.current.forEach(({ model }) => model.dispose()); models.current.clear(); };
+    return () => { save.dispose(); content.dispose(); selection.dispose(); instance.dispose(); models.current.forEach(({ model }) => model.dispose()); models.current.clear(); };
   }, []);
   useEffect(() => {
     const instance = editor.current!;

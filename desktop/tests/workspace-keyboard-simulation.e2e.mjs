@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect } from '@playwright/test';
-import { startLab, enterProject, tabTo, activate } from './workspace-simulation-support.mjs';
+import { startLab, enterProject, tabTo, activate, capture } from './workspace-simulation-support.mjs';
 
 const output = process.env.TB_SIMULATION_OUTPUT || join(tmpdir(), 'ticketbunker-keyboard-simulation');
 const lab = await startLab(output);
@@ -66,7 +66,7 @@ try {
   await activate(page, dialog.getByRole('button', { name: 'Do not save', exact: true }));
   await expect(workspace.getByRole('tab')).toHaveCount(0);
   results.checks.push('Editor keyboard escape, close dialog focus, failed-save recovery');
-  await page.screenshot({ path: join(output, 'keyboard-finished.png') });
+  await capture(page, join(output, 'keyboard-finished.png'));
   expect(results.errors).toEqual([]);
   // Losing focus to BODY after hiding/removing a drawer control is a regression,
   // even when a determined user can Tab through the whole window to recover it.

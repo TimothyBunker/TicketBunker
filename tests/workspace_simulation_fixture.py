@@ -9,6 +9,8 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -32,6 +34,22 @@ def label(position):
     # LAB-2: labels should be one-based for players.
     return f\"Cell {position}\"
 """
+
+
+def worker(repo: Path, port: int):
+    """Run the real browser transport in an independently restartable process."""
+    server = app_server.serve(repo, port, launch_id="workspace-simulation-child")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        print(json.dumps({"port": server.server_port, "pid": os.getpid()}), flush=True)
+        try:
+            input()
+        except EOFError:
+            pass
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def main():
@@ -100,6 +118,47 @@ def main():
         bunkerdb.apply_ticket_sync_change(bid, change)
         repo = Path(repositories["engine"])
         commands.dispatch("application.profile.update", {"name": "Simulation QA", "email": "qa@example.test", "branch_user": "qa"}, commands.CommandContext(repo, transport="desktop"))
+        if os.environ.get("TB_SIMULATION_WORKER_PROCESS") == "1":
+            child = None
+            port = 0
+            def stop_child():
+                nonlocal child
+                if child is not None and child.poll() is None:
+                    try:
+                        child.communicate("\n", timeout=10)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                        child.wait(timeout=5)
+                child = None
+            def start_child():
+                nonlocal child, port
+                child = subprocess.Popen([sys.executable, __file__, "--worker", str(repo), str(port)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                line = child.stdout.readline()
+                if not line:
+                    raise RuntimeError("The disposable child worker did not start")
+                info = json.loads(line)
+                port = info["port"]
+                return info
+            try:
+                info = start_child()
+                print(json.dumps({"url": f"http://127.0.0.1:{port}", "root": str(root), "repositories": repositories, "worker_pid": info["pid"]}), flush=True)
+                for line in sys.stdin:
+                    if not line.strip():
+                        break
+                    request = json.loads(line)
+                    action = request.get("action")
+                    if action == "worker.stop":
+                        stop_child()
+                        result = {"stopped": True}
+                    elif action == "worker.restart":
+                        stop_child()
+                        result = start_child()
+                    else:
+                        result = {"error": "Unknown disposable fixture control"}
+                    print(json.dumps(result), flush=True)
+            finally:
+                stop_child()
+            return
         server = app_server.serve(repo, 0, launch_id="workspace-simulation")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -115,4 +174,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 4 and sys.argv[1] == "--worker":
+        worker(Path(sys.argv[2]), int(sys.argv[3]))
+    else:
+        main()

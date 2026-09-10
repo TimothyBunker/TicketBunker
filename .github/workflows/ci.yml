@@ -100,10 +100,19 @@ jobs:
           npm run test:e2e --prefix desktop
       - name: Verify unsaved drafts and default-ticket workflow in a disposable project
         run: npm run test:hardening --prefix desktop
-      - name: Role-play repository work, keyboard navigation and concurrent drafts
-        run: npm run test:simulation:repeat --prefix desktop -- --runs=1 --output="${{ runner.temp }}/ticketbunker-workspace-simulation"
+        env:
+          TB_HARDENING_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation/hardening
+          TB_HARDENING_VIEWPORT: "1280x720"
+      - name: Role-play repository work, keyboard navigation, concurrent drafts and failures
+        run: npm run test:simulation:repeat --prefix desktop -- --runs=1 --journeys=roleplay,keyboard,multiwindow,failures --output="${{ runner.temp }}/ticketbunker-workspace-simulation"
         env:
           TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation
+          TB_SIMULATION_REQUIRE_CURRENT_COPY: "1"
+      - name: Verify focused keyboard saves across retained repository editors
+        run: npm run test:simulation:steady --prefix desktop -- --duration=60000 --cycles=20
+        env:
+          TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation/steady
+          TB_SIMULATION_SCREENSHOTS: failures
       - name: Keep workspace simulation evidence
         if: always()
         uses: actions/upload-artifact@v4

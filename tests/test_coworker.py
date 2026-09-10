@@ -612,6 +612,12 @@ class FileThreadTests(unittest.TestCase):
         self.assertIn("file", coworker.CATEGORIES)
         self.assertEqual(coworker._thread_path({"path": "./coal/a.cpp"}, "file"), "coal/a.cpp")
         self.assertEqual(coworker._thread_path({"path": "coal/a.cpp"}, "what"), "")
+        for path in (".editorconfig", "...notes.md", " leading and trailing.py ", "src/日本語 café.py"):
+            self.assertEqual(coworker._thread_path({"path": path}, "file"), path)
+        self.assertEqual(coworker._thread_path({"path": "./.editorconfig"}, "file"), ".editorconfig")
+        for path in ("../outside.py", "/etc/config", "C:\\outside.py", "src/../../outside.py", "bad\0path"):
+            with self.assertRaises(commands.CommandRejected):
+                coworker._thread_path({"path": path}, "file")
         with self.assertRaises(commands.CommandRejected):
             coworker._thread_path({}, "file")
         self.assertIsNone(coworker._proposal_part("file", "Plan"))

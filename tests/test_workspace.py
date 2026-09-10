@@ -83,6 +83,27 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual((self.repo / "README.md").read_text(), "saved\n")
         self.assertNotEqual((other / "README.md").read_text(), "saved\n")
 
+    def test_detached_draft_cannot_be_saved_at_another_commit_with_identical_file_bytes(self):
+        first = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "commit", "--allow-empty", "-m", "Second identical tree")
+        second = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "switch", "--detach", first)
+        read = self.call("workspace.file.read", path="README.md")
+        self.assertEqual(read["branch"], "")
+        git(self.repo, "switch", "--detach", second)
+        result = self.call("workspace.file.save", path="README.md", branch="", head=read.get("head"), content="wrong commit", expected_digest=read["digest"])
+        self.assertEqual(result.get("code"), "workspace_branch_changed", result)
+        self.assertEqual((self.repo / "README.md").read_text(), read["content"])
+        git(self.repo, "switch", "--detach", first)
+        result = self.call("workspace.file.save", path="README.md", branch="", head=read.get("head"), content="right commit", expected_digest=read["digest"])
+        self.assertTrue(result["ok"], result)
+
+    def test_old_detached_draft_without_commit_identity_is_refused(self):
+        git(self.repo, "switch", "--detach", "HEAD")
+        read = self.call("workspace.file.read", path="README.md")
+        result = self.call("workspace.file.save", path="README.md", branch="", content="unidentified", expected_digest=read["digest"])
+        self.assertEqual(result.get("code"), "workspace_branch_changed", result)
+
     def test_file_search_respects_ignores_and_workspace_schema(self):
         (self.repo / ".gitignore").write_text("ignored.py\n")
         (self.repo / "ignored.py").write_text("ignored")

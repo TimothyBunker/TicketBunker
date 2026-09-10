@@ -101,8 +101,8 @@ def _error(request_id: Any, code: str, message: str, **extra: Any) -> dict[str, 
 
 def _diagnostic(action: str, exc: BaseException) -> tuple[str, str]:
     diagnostic_id = uuid.uuid4().hex[:12]
-    path = platform_services.current().data_home() / "diagnostics" / "app-worker.jsonl"
     try:
+        path = platform_services.current().data_home() / "diagnostics" / "app-worker.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         frames = [
             {
@@ -123,8 +123,8 @@ def _diagnostic(action: str, exc: BaseException) -> tuple[str, str]:
         }
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(value, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    except (OSError, ValueError, RuntimeError):
+        return diagnostic_id, ""
     return diagnostic_id, str(path)
 
 
@@ -133,6 +133,10 @@ def dispatch_request(value: Any, *, default_root: Path | None = None) -> dict[st
         return _error(None, "request_invalid", "The application request must be an object.")
     request_id = value.get("id")
     if not isinstance(request_id, (str, int)) or len(str(request_id)) > 128:
+        return _error(None, "request_id_invalid", "The application request ID is invalid.")
+    try:
+        str(request_id).encode("utf-8")
+    except UnicodeError:
         return _error(None, "request_id_invalid", "The application request ID is invalid.")
     action = value.get("action")
     if not isinstance(action, str) or action not in DESKTOP_ACTIONS:
@@ -147,11 +151,12 @@ def dispatch_request(value: Any, *, default_root: Path | None = None) -> dict[st
     raw_root = value.get("project_root")
     if raw_root is not None and (not isinstance(raw_root, str) or not raw_root.strip()):
         return _error(request_id, "project_root_invalid", "The project root is invalid.")
-    root = (
-        Path(raw_root).expanduser().resolve()
-        if raw_root
-        else (default_root or Path.cwd()).resolve()
-    )
+    try:
+        if raw_root:
+            raw_root.encode("utf-8")
+        root = Path(raw_root).expanduser().resolve() if raw_root else (default_root or Path.cwd()).resolve()
+    except (ValueError, OSError, RuntimeError):
+        return _error(request_id, "project_root_invalid", "That project folder cannot be opened. Choose a readable local repository folder.")
     try:
         # A stray print from a handler must never corrupt the JSONL protocol.
         with contextlib.redirect_stdout(sys.stderr):
@@ -165,10 +170,12 @@ def dispatch_request(value: Any, *, default_root: Path | None = None) -> dict[st
         return _error(request_id, exc.code, exc.message)
     except Exception as exc:  # the native shell is an error boundary
         diagnostic_id, diagnostic_path = _diagnostic(action, exc)
+        detail = (f"Diagnostic {diagnostic_id} was saved at {diagnostic_path}." if diagnostic_path
+                  else "Local diagnostic storage is unavailable. Check TicketBunker's data-folder permissions, then retry.")
         return _error(
             request_id,
             "internal_error",
-            f"TicketBunker could not complete that action. Diagnostic {diagnostic_id} was saved at {diagnostic_path}.",
+            f"TicketBunker could not complete that action. {detail}",
             diagnostic_id=diagnostic_id,
             diagnostic_path=diagnostic_path,
         )
@@ -198,7 +205,7 @@ def serve(
         else:
             try:
                 request = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError):
+            except (UnicodeDecodeError, ValueError, RecursionError):
                 response = _error(
                     None,
                     "request_invalid",
@@ -206,8 +213,13 @@ def serve(
                 )
             else:
                 response = dispatch_request(request, default_root=default_root)
-        target.write((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
-        target.flush()
+        try:
+            # Keep ordinary Unicode compact while escaping any lone surrogate
+            # carried by older JSON data instead of ending the worker stream.
+            target.write((json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8", errors="backslashreplace"))
+            target.flush()
+        except BrokenPipeError:
+            return 0  # The owning app closed its private response pipe.
 
 
 __all__ = ["DESKTOP_ACTIONS", "MAX_REQUEST_BYTES", "dispatch_request", "serve"]

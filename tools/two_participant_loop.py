@@ -54,7 +54,13 @@ class Participant:
         self.git("remote", "set-url", "origin", "ssh://git@git.example.test/team/dummy.git")
         # Execute Git's real pack transport against the scratch bare origin.
         # This avoids requiring an SSH server or touching personal SSH keys.
-        self.env["GIT_SSH_COMMAND"] = f'"{sys.executable}" "{Path(__file__).resolve()}" --git-transport "{origin}"'
+        # Git invokes this through its POSIX-style shell, including on Windows.
+        # Forward-slash UNC paths survive that shell without losing a leading
+        # backslash and becoming an unrelated C:\\wsl.localhost path.
+        self.env["GIT_SSH_COMMAND"] = shlex.join([
+            Path(sys.executable).as_posix(), Path(__file__).resolve().as_posix(),
+            "--git-transport", origin.as_posix(),
+        ])
         self.env["GIT_SSH_VARIANT"] = "ssh"
         self.git("config", "user.name", name)
         self.git("config", "user.email", f"{name}@example.test")

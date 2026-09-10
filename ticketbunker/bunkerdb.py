@@ -2885,7 +2885,7 @@ def apply_ticket_sync_change(
         for row in rows:
             payload = row["payload"]
             updated = str(
-                (payload.get("metadata") or {}).get("source_updated")
+                ((payload.get("metadata") or {}).get("source_updated") or "")
                 if isinstance(payload.get("metadata"), Mapping)
                 else ""
             ) or now
@@ -3216,7 +3216,7 @@ def _replace_members(connection: sqlite3.Connection, members: Iterable[Mapping[s
         )
 
 
-def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot) -> dict[str, Any]:
+def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_cursor: str | None = None) -> dict[str, Any]:
     """Reconcile a replica with the service's authorized snapshot.
 
     Shared records are upserted by identity; repository bindings the service
@@ -3226,11 +3226,14 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot) -> dict[str,
     bunker_id = _id(bunker_id, "Bunker")
     counts = {"projects": 0, "repositories": 0, "documents": 0, "tickets": 0, "reports": 0}
     with _database(bunker_id) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         if _mode(connection, bunker_id) != "remote":
             raise BunkerDatabaseError("This Bunker is local; there is nothing to sync from.")
         row = connection.execute(
-            "SELECT remote_bunker_id FROM remote_connection WHERE singleton = 1"
+            "SELECT remote_bunker_id, sync_cursor FROM remote_connection WHERE singleton = 1"
         ).fetchone()
+        if expected_cursor is not None and (row is None or str(row["sync_cursor"] or "") != expected_cursor):
+            raise BunkerDatabaseError("A newer synchronization finished while this response was loading. Its data was kept. Sync again to load current shared state.")
         remote_id = str(row["remote_bunker_id"]) if row else ""
         if str(snapshot.bunker.get("id") or "") != remote_id:
             raise BunkerDatabaseError("The service answered for a different Bunker.")
@@ -3240,8 +3243,9 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot) -> dict[str,
             connection.execute("UPDATE bunker SET name = ?, updated_at = ? WHERE id = ?", (name, now, bunker_id))
         # Projects: parents before children.
         pending = [dict(value) for value in snapshot.projects]
-        known = {str(item["id"]) for item in connection.execute("SELECT id FROM projects").fetchall()}
-        placed = set(known)
+        # A full snapshot must prove its own hierarchy. Seeding this set from
+        # existing rows would accept cycles between already-known Projects.
+        placed: set[str] = set()
         while pending:
             progressed = False
             for value in list(pending):

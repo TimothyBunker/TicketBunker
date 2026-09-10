@@ -416,6 +416,9 @@ class ServiceStore:
         bunker_id = _identifier(bunker_id, "Bunker")
         connection = self._connect()
         try:
+            # Membership, records, revision and cursor describe one database
+            # view even if another participant publishes during collection.
+            connection.execute("BEGIN")
             self._require_member(connection, bunker_id, user_id)
             if after:
                 return self._changes_after(connection, bunker_id, user_id, after)
@@ -673,6 +676,9 @@ class ServiceStore:
         connection = self._connect()
         try:
             with connection:
+                # A one-use invitation must be validated and consumed under
+                # the same write lock, including concurrent HTTP enrollments.
+                connection.execute("BEGIN IMMEDIATE")
                 invitation = self._invitation(connection, bunker_id, token)
                 now = _now()
                 if user_id:
@@ -701,6 +707,14 @@ class ServiceStore:
                 connection.execute(
                     "UPDATE invitations SET redeemed_by = ?, redeemed_at = ? WHERE id = ?",
                     (member_id, now, str(invitation["id"])),
+                )
+                # Membership is part of every snapshot, including incremental
+                # responses. Advance its version atomically so a delayed pull
+                # cannot replace newer membership with the same cursor. This
+                # sequence has no record delta: the full member list carries it.
+                connection.execute(
+                    "UPDATE bunkers SET change_seq = change_seq + 1, revision = revision + 1, updated_at = ? WHERE id = ?",
+                    (now, bunker_id),
                 )
                 snapshot = self._snapshot(connection, bunker_id, member_id)
         finally:

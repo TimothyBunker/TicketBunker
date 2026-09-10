@@ -99,8 +99,8 @@ run gets its own log, results and screenshots; `campaign.json` summarizes failur
 without stopping later runs. A failing regression is reported as failed, not
 silently skipped. Do not rebuild UI assets while a campaign is running.
 
-The fixture and browser are shut down after each journey, including assertion
-failures. Timed-out children receive a graceful shutdown signal first; a stuck
+The repeat runner shuts down fixtures and browsers after each journey, including
+assertion failures. Its timed-out children receive a graceful signal first; a stuck
 process is forcibly stopped after a bounded grace period. Ctrl+C stops the current
 campaign. As with any abruptly killed process, a machine crash or forced shutdown
 can leave temporary files; none are placed in a user's source repositories.
@@ -123,3 +123,89 @@ Keyboard checks likewise reproduced lost drawer focus and an editor that could
 not release Tab focus with Ctrl+M, then passed after those fixes. These results
 cover the browser worker on this Linux environment—not native Windows/Mac dialogs,
 whole-browser crash recovery, remote participants, or live agent conversations.
+
+## Failure and lifecycle journeys
+
+```bash
+npm run test:simulation:failures --prefix desktop
+```
+
+The failure suite runs nine cases by default, each in its own disposable fixture:
+
+- `initial`: refuse one initial workspace read, then retry using the interface.
+- `refresh`: refuse one ordinary workspace refresh; a successful retry must clear
+  that error without masking a distinct source-save error.
+- `branches`: externally switch a real checkout and detach HEAD while a draft is
+  open; stale saves must preserve disk and the draft. Return to its branch, save,
+  and remove/switch ticket overlays without losing repository context.
+- `worktree`: create a linked Git worktree, attach it through Project settings,
+  and verify editor saves touch only that worktree.
+- `detached`: move between two detached commits with identical source bytes;
+  a draft from the first commit must not save into the second. Return to the
+  first commit and verify saving works.
+- `worktree-dirty`: replace a checkout attachment while a source draft is open;
+  cancellation preserves the old attachment, and Save writes the old checkout
+  before connecting the new one.
+- `transport`: delay a real file read while selecting another file; then let a
+  source save complete in Python but drop its HTTP reply. Reload/retry must
+  reconcile the identical saved content without overwriting divergent changes.
+- `worker`: stop the actual isolated browser-worker process, observe the offline
+  interface, restart on the same port with a new PID/token, and recover the draft.
+- `busy`: complete a real source save and hold its recovery reply. Type another
+  edit while Save is disabled; Ctrl+S must not write it until recovery finishes
+  and Save becomes enabled, then the shortcut must save to the correct checkout.
+
+Use `TB_FAILURE_CASES=worker,transport` to select cases. Fault interception controls
+only delivery or injects the deliberately failed initial response; it does not
+replace successful command responses. External Git commands are scenario setup,
+not claims that TicketBunker exposes those Git operations. Worktree attachment,
+editing, navigation, retry and recovery use the real interface. This worker test
+is an actual process restart, but is not a simulated machine/browser crash.
+Current connection-interruption wording is checked by default;
+`TB_SIMULATION_REQUIRE_CURRENT_COPY=0` permits legacy wording for diagnostics only.
+
+For a bounded twenty-minute soak with small artifacts:
+
+```bash
+TB_SIMULATION_SCREENSHOTS=failures node desktop/tests/workspace-simulation-repeat.mjs \
+  --journeys=roleplay,keyboard,multiwindow,failures --duration=1200000 \
+  --fail-fast=1 --output=/tmp/ticketbunker-twenty-minute-soak
+```
+
+The duration is checked between complete batches; the final batch may extend past
+the deadline. `--runs` still caps batches (100 when duration is supplied alone).
+Each child retains its own timeout. Failure-only screenshots omit repeated success
+images, never assertions; run one normal batch first for representative images.
+The campaign records elapsed wall time, counts, failures and artifact bytes. A
+fail-fast soak stops at a regression so investigation can precede another batch.
+
+## One persistent session
+
+```bash
+TB_SIMULATION_SCREENSHOTS=failures TB_SIMULATION_OUTPUT=/tmp/ticketbunker-steady \
+  npm run test:simulation:steady --prefix desktop -- --duration=1800000
+```
+
+This is one browser page and one worker process for the entire requested duration,
+not repeated fixture launches. It alternates both repositories, opens a temporary
+file tab, edits and saves with Ctrl+S, closes the tab, preserves unsent file-chat
+drafts, changes overlays, toggles drawers and periodically refreshes. It makes no
+model requests. `--cycles=10 --duration=60000` is a short pilot; the first limit
+reached stops the run. Source code changes are confined to the disposable fixture.
+
+The harness reads Monaco's real model registry and asserts that transient tabs
+return to the warmed-up model/editor/tab counts. `progress.json` and `results.json`
+record actual elapsed time, cycle count, browser errors, worker PID, Linux process
+RSS (unavailable elsewhere), local recovery-database/observation-log sizes, and
+Chromium diagnostic metrics. Memory observations
+are not cross-platform performance guarantees or arbitrary leak thresholds.
+Successful screenshots can be suppressed; failure screenshots are always retained.
+The optional `--save-button=1` is diagnostic only and explicitly labels the result;
+it does not validate the keyboard-save journey.
+
+The keyboard journey waits for the visible Save button to be enabled and records
+focus/readiness and recent command metadata before each shortcut. New runs also
+capture those conditions at the keydown event itself. This distinguishes an
+unavailable action from a shortcut that fails despite being ready. A prior run
+that timed out without that evidence remains an unexplained failure; a later
+successful soak or a deliberately blocked-save probe cannot prove its cause.

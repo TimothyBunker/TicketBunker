@@ -60,16 +60,22 @@ talk to. Select code and use **Discuss selection** to quote its lines, including
 an explicit indication when they are unsaved. Switching tickets does not switch
 branches, run synthesis or give the agent permission to edit source.
 
-Files and unsaved drafts survive navigation and are recovered locally on reopening
-that checkout. **Save** or Ctrl/Cmd+S writes the source file. Closing an unsaved tab
+Files and unsaved drafts survive navigation. When recovery storage is available,
+they are restored locally on reopening that checkout. **Save** or Ctrl/Cmd+S writes
+the source file. Closing an unsaved tab
 or the native app asks whether to save. If the branch or file changed elsewhere,
 TicketBunker keeps your draft and refuses to overwrite it. Local refresh rereads
 Git state, the file tree and unchanged buffers; it does not fetch or pull.
 
 Recovery lives in the application data folder (`workspaces.sqlite3`), never in
 your repository or shared Bunker. It is plaintext private device data, not an
-encrypted backup. Unsent chat drafts survive workspace navigation within the
-running app; sent conversations use the existing ticket session persistence.
+encrypted backup. Unsent chat text and quoted context survive navigation and
+reload in that browser window when session storage is available. Native close
+warns even for a hidden conversation; Save never sends it. Send or copy the
+message, or explicitly choose Do not save. Browser close uses its own stay/leave
+warning, not the native Save/Discard dialog.
+Storage failures show copy/send guidance; closing or crashing the app is not a
+guaranteed recovery path. Sent conversations use ticket session persistence.
 If two windows edit the same checkout, each keeps a reload-rescue copy of its
 dirty files. Conflicting recovery is never merged automatically: save or copy
 your drafts before closing a conflicting window. Reload rescue is not a backup.
@@ -83,6 +89,11 @@ The [workspace QA checklist](docs/qa-workspace-campaign.md) records reproduced
 bugs, fixes, test coverage and remaining manual checks. To repeat the role-play,
 keyboard and two-window journeys, run `npm run test:simulation:repeat --prefix
 desktop -- --runs=10`.
+The [extended failure campaign](docs/qa-two-hour-campaign.md) adds fault injection,
+sharing/concurrency, native Windows and sustained single-worker coverage. Use
+`npm run test:simulation:failures --prefix desktop` for the failure cases, or
+`npm run test:simulation:steady --prefix desktop -- --duration=1800000` for a
+30-minute retained-editor run. Both operate only on disposable projects.
 
 A **Bunker** is the configuration, membership, security, and synchronization
 boundary. It contains a recursive tree of **Projects**. A Project is a work
@@ -170,7 +181,7 @@ compare `Get-FileHash .\ticketbunker-<version>-windows-x64.zip -Algorithm SHA256
 with the value in its `.sha256` file. The installer prints the installed path
 and the only PATH change, if one is needed.
 
-Linux and Windows are the first tested desktop targets on x64 and arm64. The
+Linux and Windows are the initial desktop build targets on x64 and arm64. The
 macOS build remains experimental until it has been verified on real hardware;
 the portable core keeps the same platform-neutral command and data contracts.
 The build verifies the official Pi archive checksum before extraction; the

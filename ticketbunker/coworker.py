@@ -18,7 +18,7 @@ import re
 import subprocess
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from . import (
@@ -125,6 +125,7 @@ def _git_dir(root: Path) -> Path:
         ["git", "-C", str(Path(root).resolve()), "rev-parse", "--absolute-git-dir"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if proc.returncode == 0 and proc.stdout.strip():
         return Path(proc.stdout.strip()).resolve()
@@ -273,10 +274,17 @@ def _thread_path(payload: Mapping[str, Any], category: str) -> str:
     """The repository path a file conversation is about; empty otherwise."""
     if category != "file":
         return ""
-    raw = str(payload.get("path") or "").strip().replace("\\", "/").lstrip("./")
-    if not raw:
+    raw = payload.get("path") or ""
+    if not isinstance(raw, str):
+        raise commands.CommandRejected("coworker_path_invalid", "Choose a file path inside this repository.")
+    raw = raw.replace("\\", "/")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    if not raw.strip() or raw == ".":
         raise commands.CommandRejected("coworker_path_required", "Open a file to start a conversation about it.")
-    return raw
+    if "\x00" in raw or raw.startswith("/") or re.match(r"^[A-Za-z]:", raw) or ".." in PurePosixPath(raw).parts:
+        raise commands.CommandRejected("coworker_path_invalid", "Choose a file path inside this repository.")
+    return str(PurePosixPath(raw))
 
 
 def _proposal_part(category: str, requested: Any) -> str | None:

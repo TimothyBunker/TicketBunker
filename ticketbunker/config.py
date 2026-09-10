@@ -15,6 +15,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import platform_services
+
 GLOBAL_CONFIG = Path(os.environ.get("TB_CONFIG", str(Path.home() / ".tbconfig")))
 
 DEFAULT_TICKET_PATTERN = r"^[A-Z][A-Z0-9]*-\d+$"
@@ -46,7 +48,7 @@ def get_user(repo: Path | str | None = None) -> tuple[str | None, str]:
     if repo is not None:
         argv.extend(["-C", str(Path(repo).resolve())])
     argv.extend(["config", "--get", "user.name"])
-    proc = subprocess.run(argv, capture_output=True, text=True)
+    proc = subprocess.run(argv, capture_output=True, text=True, **platform_services.current().headless_process_options())
     if proc.returncode == 0 and proc.stdout.strip():
         return sanitize_user(proc.stdout), "git"
     return None, "unset"
@@ -62,7 +64,7 @@ def get_identity_name(repo: Path | str | None = None) -> str | None:
     if repo is not None:
         command.extend(["-C", str(Path(repo).resolve())])
     command.extend(["config", "--get", "user.name"])
-    proc = subprocess.run(command, capture_output=True, text=True)
+    proc = subprocess.run(command, capture_output=True, text=True, **platform_services.current().headless_process_options())
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip()
     return None

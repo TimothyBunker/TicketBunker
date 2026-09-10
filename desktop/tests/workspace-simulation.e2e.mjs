@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect } from '@playwright/test';
-import { startLab } from './workspace-simulation-support.mjs';
+import { startLab, capture } from './workspace-simulation-support.mjs';
 
 const output = process.env.TB_SIMULATION_OUTPUT || join(tmpdir(), 'ticketbunker-workspace-simulation');
 const lab = await startLab(output);
@@ -111,7 +111,7 @@ try {
   await expect(engine.locator('.workspace-session:not([hidden]) .quote-chip')).toContainText('Grid Garden');
   await engine.getByRole('button', { name: 'Remove quoted context', exact: true }).click();
   metrics.scenarios.push('Multiple ticket overlays; unsent questions scoped by ticket and file');
-  await page.screenshot({ path: join(output, '01-engine-context.png') });
+  await capture(page, join(output, '01-engine-context.png'));
   const renderer = await selectRepo('Garden renderer');
   await expect(renderer.locator('.repository-workspace-header')).toContainText('qa/LAB-2-grid');
   await openPath(renderer, 'src/grid.py');
@@ -132,7 +132,7 @@ try {
   await engine.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(engine.getByRole('alert')).toContainText(/changed/);
   expect(readFileSync(join(lab.repositories.engine, 'src/grid.py'), 'utf8')).toBe(external);
-  await page.screenshot({ path: join(output, '02-external-edit-conflict.png') });
+  await capture(page, join(output, '02-external-edit-conflict.png'));
   await engine.getByRole('button', { name: 'Close src/grid.py', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Close file' });
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -157,7 +157,7 @@ try {
   const samples = await page.evaluate(() => window.__typingPaints);
   const sorted = [...samples].sort((a, b) => a - b);
   metrics.typing = { samples: samples.length, median_keydown_to_frame_ms: sorted[Math.floor(sorted.length / 2)], p95_keydown_to_frame_ms: sorted[Math.floor(sorted.length * .95)] };
-  await page.screenshot({ path: join(output, '03-two-repository-workspace.png') });
+  await capture(page, join(output, '03-two-repository-workspace.png'));
   // Wait for the production draft recovery write; a reload remounts all editors.
   await page.waitForResponse(response => {
     try { return response.request().postDataJSON()?.action === 'workspace.save' && response.ok(); }

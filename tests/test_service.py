@@ -243,10 +243,11 @@ class ReferenceServiceTests(unittest.TestCase):
 
         accepted = owner.push(bunker_id, "change-0", (document,))
         self.assertEqual(accepted["results"][0], {"key": "change-1", "ok": True, "revision": "shared:abc"})
-        self.assertEqual(accepted["cursor"], "change-1")
+        # Enrollment already advanced the snapshot-visible membership version.
+        self.assertEqual(accepted["cursor"], "change-2")
         replayed = owner.push(bunker_id, "change-1", (document,))
         self.assertTrue(replayed["results"][0]["replayed"])
-        self.assertEqual(replayed["cursor"], "change-1")
+        self.assertEqual(replayed["cursor"], "change-2")
 
         stale = remote.change_record(
             key="change-2",
@@ -297,13 +298,13 @@ class ReferenceServiceTests(unittest.TestCase):
         owner.push(bunker_id, "change-2", (bindings,))
         latest = owner.pull(bunker_id, "")
         self.assertEqual({item["id"] for item in latest.repository_bindings}, {"coal", "flux"})
-        self.assertEqual(latest.cursor, "change-3")
+        self.assertEqual(latest.cursor, "change-4")
         self.assertEqual({item["key"] for item in latest.projects}, {"SYS", "ECS", "REN"})
 
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
         connection.request(
             "GET",
-            f"/api/v1/bunkers/{bunker_id}/snapshot?after=change-1",
+            f"/api/v1/bunkers/{bunker_id}/snapshot?after={accepted['cursor']}",
             headers={"Authorization": f"Bearer {member.bearer}"},
         )
         response = connection.getresponse()

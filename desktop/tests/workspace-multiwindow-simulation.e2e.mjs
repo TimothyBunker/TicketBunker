@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect } from '@playwright/test';
-import { startLab, enterProject, selectRepo, replaceEditor, editorText } from './workspace-simulation-support.mjs';
+import { startLab, enterProject, selectRepo, replaceEditor, editorText, capture } from './workspace-simulation-support.mjs';
 
 const output = process.env.TB_SIMULATION_OUTPUT || join(tmpdir(), 'ticketbunker-multiwindow-simulation');
 const lab = await startLab(output);
@@ -49,7 +49,7 @@ try {
   expect(expectedB).toContain('Second window');
   expect(readFileSync(join(lab.repositories.engine, 'README.md'), 'utf8')).toBe(original);
   result.checks.push('Concurrent recovery revision conflict is reported; both live drafts and disk stay separate');
-  await first.screenshot({ path: join(output, '01-recovery-conflict.png') });
+  await capture(first, join(output, '01-recovery-conflict.png'));
   await first.bringToFront();
   const reloadedRecovery = saved(first, 'additional independent');
   first.once('dialog', dialog => dialog.accept());
@@ -68,7 +68,7 @@ try {
   const durable = await (await durableRead).json();
   result.durable_after_first_reload = durable.state.tabs.find(tab => tab.path === 'README.md')?.content;
   expect(result.durable_after_first_reload, 'Restoring A locally must not silently overwrite B’s durable recovery snapshot').toBe(expectedB);
-  await first.screenshot({ path: join(output, '02-after-reload.png') });
+  await capture(first, join(output, '02-after-reload.png'));
   expect(result.after_reload, 'Reload must not silently replace this window’s independently edited draft with another window’s recovery state').toBe(expectedA);
   await second.bringToFront();
   second.once('dialog', dialog => dialog.accept());

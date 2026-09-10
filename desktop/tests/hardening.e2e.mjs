@@ -2,26 +2,84 @@
 // product interactions; no real tracker, model account or user repository.
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { delimiter } from 'node:path';
+import { basename, delimiter, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { chromium, expect } from '@playwright/test';
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const viewportMatch = /^(\d+)x(\d+)$/.exec(process.env.TB_HARDENING_VIEWPORT || '1440x940');
+if (!viewportMatch || Number(viewportMatch[1]) < 320 || Number(viewportMatch[2]) < 240) throw new Error('TB_HARDENING_VIEWPORT must be WIDTHxHEIGHT (at least 320x240).');
+const viewport = { width: Number(viewportMatch[1]), height: Number(viewportMatch[2]) };
+const output = process.env.TB_HARDENING_OUTPUT || mkdtempSync(join(tmpdir(), 'tb-hardening-'));
+mkdirSync(output, { recursive: true });
+const evidence = { passed: false, started_at: new Date().toISOString(), output, viewport, requests: [], request_failures: [], fixture_stderr: '', fixture_events: [] };
+const lifecycleDeadlineMs = Number(process.env.TB_HARDENING_DEADLINE_MS || 10000);
+if (!Number.isInteger(lifecycleDeadlineMs) || lifecycleDeadlineMs < 100 || lifecycleDeadlineMs > 60000) throw new Error('TB_HARDENING_DEADLINE_MS must be an integer between 100 and 60000.');
+const bounded = async (promise, label, milliseconds = lifecycleDeadlineMs) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} exceeded ${milliseconds}ms`)), milliseconds); })]);
+  } finally { clearTimeout(timer); }
+};
+let phase = 'setup';
 const fixture = spawn(process.env.PYTHON || 'python', ['tests/ui_hardening_fixture.py'], {
-  cwd: root, env: { ...process.env, PYTHONPATH: `${root}${delimiter}${root}/tests`, TB_AGENT_DISABLE: '1' }, stdio: ['pipe', 'pipe', 'inherit'],
+  cwd: root, env: { ...process.env, PYTHONPATH: `${root}${delimiter}${root}/tests`, TB_AGENT_DISABLE: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
 });
+fixture.stderr.on('data', chunk => { evidence.fixture_stderr = (evidence.fixture_stderr + chunk.toString()).slice(-64000); process.stderr.write(chunk); });
+fixture.stdin.on('error', error => evidence.fixture_events.push({ phase, at: new Date().toISOString(), error: error.message }));
+let fixtureClosed = false;
+const fixtureExited = new Promise(resolve => fixture.once('close', (code, signal) => { fixtureClosed = true; evidence.fixture_events.push({ phase, at: new Date().toISOString(), code, signal }); resolve(); }));
 const lines = createInterface({ input: fixture.stdout });
-const lab = await new Promise((resolve, reject) => {
+const fixtureReady = new Promise((resolve, reject) => {
   lines.once('line', (line) => { try { resolve(JSON.parse(line)); } catch (error) { reject(error); } });
   fixture.once('exit', (code) => reject(new Error(`Fixture exited ${code}`)));
+  fixture.once('error', error => { evidence.fixture_events.push({ phase, at: new Date().toISOString(), error: error.message }); reject(error); });
 });
-const browser = await chromium.launch({ executablePath: process.env.TB_E2E_CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : chromium.executablePath()), headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
+let browser, page;
+const responseReads = [];
 const errors = [];
+evidence.fixture_pid = fixture.pid;
+try {
+const lab = await bounded(fixtureReady, 'Fixture startup');
+browser = await chromium.launch({ executablePath: process.env.TB_E2E_CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : chromium.executablePath()), headless: true, timeout: lifecycleDeadlineMs });
+page = await bounded(browser.newPage({ viewport }), 'Browser page startup');
+page.setDefaultTimeout(15000);
+evidence.lab = lab;
+const requestIds = new WeakMap();
+let requestNumber = 0;
+const requestInfo = request => {
+  let input = {};
+  try { input = request.postDataJSON() || {}; } catch {}
+  return { id: requestIds.get(request), method: request.method(), url: request.url(), action: input.action,
+    project_id: input.payload?.project_id, ticket_id: input.payload?.ticket_id };
+};
+page.on('request', request => {
+  requestIds.set(request, ++requestNumber);
+  evidence.requests.push({ event: 'request', at: new Date().toISOString(), phase, ...requestInfo(request) });
+});
+page.on('requestfailed', request => {
+  const failure = { event: 'requestfailed', at: new Date().toISOString(), phase, ...requestInfo(request), failure: request.failure(), timing: request.timing() };
+  evidence.requests.push(failure); evidence.request_failures.push(failure);
+});
+page.on('response', response => {
+  const entry = { event: 'response', at: new Date().toISOString(), phase, ...requestInfo(response.request()), status: response.status() };
+  evidence.requests.push(entry);
+  if (response.url().includes('/api/')) responseReads.push(response.json().then(value => {
+    entry.body = { ok: value.ok, code: value.code, message: value.message, tickets: value.tickets?.map(ticket => ({ id: ticket.id, project_id: ticket.project_id })), bunker_count: value.bunkers?.length };
+  }).catch(error => { entry.body_error = error.message; }));
+});
+// Existing stage captures remain available, and each run also keeps a unique copy.
+const screenshot = page.screenshot.bind(page);
+page.screenshot = async options => {
+  const result = await screenshot(options);
+  if (options?.path) writeFileSync(join(output, basename(options.path)), result);
+  return result;
+};
 let boardLoads = 0;
 page.on('request', (request) => { try { if (request.postDataJSON()?.action === 'application.tracker.boards') boardLoads++; } catch {} });
 page.on('pageerror', (error) => errors.push(error.message));
-try {
+  phase = 'flow';
   await page.goto(lab.url);
   const without = page.getByRole('button', { name: 'Use without agent', exact: true });
   await without.click();
@@ -118,10 +176,13 @@ try {
   await expect(page.getByRole('complementary', { name: 'Configuration' }).getByRole('button', { name: 'Sync tickets', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close configuration', exact: true }).click();
   await page.getByRole('button', { name: 'Sync tickets', exact: true }).click();
+  evidence.sync_clicked_at = new Date().toISOString();
   await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
   await expect(page.getByRole('button', { name: 'Sync tickets', exact: true })).toHaveAttribute('title', /Last successful ticket sync on this device/);
   // Reload drops the in-memory UI cache; the receipt must come from SQLite.
+  evidence.reload_started_at = new Date().toISOString();
   await page.reload();
+  evidence.reload_finished_at = new Date().toISOString();
   await page.getByRole('button', { name: 'All Bunkers', exact: true }).click();
   await page.locator('.bunker-overview > button').first().click();
   await page.locator('.project-row').filter({ hasText: 'Navigation tools' }).click();
@@ -143,8 +204,16 @@ try {
   await expect(page.getByLabel('Local repository path')).toHaveCount(0);
   await page.getByRole('button', { name: 'Checks', exact: true }).click();
   await expect(buildCommand).toHaveValue('make navigation');
-  // The drawer leaves part of the ticket list visible; that route is guarded too.
-  await page.locator('.ticket-row').first().click({ position: { x: 20, y: 15 } });
+  // Wide windows leave the ticket route exposed; smaller windows still expose
+  // the sidebar. Exercise an actually reachable route without forcing a click
+  // through the configuration drawer.
+  const ticketRouteExposed = await page.locator('.ticket-row').first().evaluate(row => {
+    const box = row.getBoundingClientRect();
+    return row.contains(document.elementFromPoint(box.x + 20, box.y + 15));
+  });
+  evidence.unsaved_navigation_route = ticketRouteExposed ? 'ticket' : 'sidebar-project';
+  if (ticketRouteExposed) await page.locator('.ticket-row').first().click({ position: { x: 20, y: 15 } });
+  else await page.getByRole('button', { name: 'TOOLS Navigation tools', exact: true }).click({ position: { x: 30, y: 15 } });
   await page.getByRole('dialog', { name: 'You have unsaved changes' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(buildCommand).toHaveValue('make navigation');
   await page.getByRole('button', { name: 'Close configuration', exact: true }).click();
@@ -192,7 +261,7 @@ try {
   expect(chapterBoxes[1].x).toBe(chapterBoxes[0].x);
   expect(chapterBoxes[1].y).toBeGreaterThan(chapterBoxes[0].y);
   await page.screenshot({ path: '/tmp/ticketbunker-ticket-chapters-narrow.png' });
-  await page.setViewportSize({ width: 1440, height: 940 });
+  await page.setViewportSize(viewport);
   await page.getByRole('button', { name: 'Create branch', exact: true }).click();
   await page.getByLabel('Short description').fill('default-type');
   await page.getByRole('button', { name: 'Review branch' }).click();
@@ -241,15 +310,46 @@ try {
   await expect.poll(() => readFileSync(`${lab.repo}/README.md`, 'utf8')).toBe('saved through workspace\n');
   await page.screenshot({ path: '/tmp/ticketbunker-repository-workspace.png' });
   if (errors.length) throw new Error(errors.join('\n'));
-  console.log('PASS real-browser compact controls, Project context rename and confirmed empty deletion, board caching and explicit refresh, Project-page ticket sync failure/retry, Bunker repository availability, automatic local origin matching, configuration and file unsaved-change guards, default type, branch creation, filters, and external-edit conflict');
+  evidence.passed = true;
 } catch (error) {
-  await page.screenshot({ path: '/tmp/ticketbunker-hardening-failure.png' });
-  console.error(await page.locator('body').innerText());
+  evidence.failure = String(error);
+  evidence.failure_body = page ? await bounded(page.locator('body').innerText(), 'Failure page capture').catch(() => 'Page unavailable') : 'Browser not started';
+  evidence.fixture_alive_at_failure = fixture.exitCode === null && fixture.signalCode === null;
+  if (page) await bounded(page.screenshot({ path: '/tmp/ticketbunker-hardening-failure.png' }), 'Failure screenshot').catch(captureError => { evidence.capture_error = String(captureError); });
+  console.error(evidence.failure_body);
   console.error(errors);
-  throw error;
+  console.error(error);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
-  fixture.stdin.end('\n');
-  await new Promise((resolve) => fixture.once('exit', resolve));
+  evidence.errors = errors;
+  phase = 'teardown';
+  const cleanupErrors = [];
+  const cleanup = async (promise, label) => { try { await bounded(promise, label); } catch (error) { cleanupErrors.push(String(error)); } };
+  if (browser) await cleanup(browser.close(), 'Browser cleanup');
+  await cleanup(Promise.allSettled(responseReads), 'Response diagnostics cleanup');
+  if (!fixtureClosed && !fixture.stdin.destroyed) fixture.stdin.end('\n');
+  await cleanup(fixtureExited, 'Fixture cleanup');
+  if (!fixtureClosed && fixture.pid) {
+    // This exact child belongs to this run. Never terminate a process group or
+    // another test's fixture to hide a deadline failure.
+    evidence.fixture_events.push({ phase, at: new Date().toISOString(), action: 'SIGTERM', pid: fixture.pid });
+    fixture.kill('SIGTERM');
+    await cleanup(fixtureExited, 'Fixture termination');
+    if (!fixtureClosed) {
+      evidence.fixture_events.push({ phase, at: new Date().toISOString(), action: 'SIGKILL', pid: fixture.pid });
+      fixture.kill('SIGKILL');
+      await cleanup(fixtureExited, 'Fixture forced termination');
+    }
+  }
   lines.close();
+  evidence.cleanup_errors = cleanupErrors;
+  evidence.cleanup_complete = cleanupErrors.length === 0 && fixtureClosed;
+  evidence.finished_at = new Date().toISOString();
+  if (!evidence.cleanup_complete) { evidence.flow_passed = evidence.passed; evidence.passed = false; process.exitCode = 1; }
+  writeFileSync(join(output, 'results.json'), JSON.stringify(evidence, null, 2));
+  console.log(`Hardening evidence: ${output}`);
+  if (evidence.passed) console.log('PASS real-browser configuration, repository, ticket, branch and workspace flows; cleanup complete');
+  // A timed-out browser/body promise may retain handles even after the owned
+  // fixture was stopped. Evidence explicitly marks this incomplete, never PASS.
+  if (!evidence.cleanup_complete) process.exit(1);
 }

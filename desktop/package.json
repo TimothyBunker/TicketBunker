@@ -13,6 +13,8 @@
     "test:simulation": "node tests/workspace-simulation.e2e.mjs",
     "test:simulation:keyboard": "node tests/workspace-keyboard-simulation.e2e.mjs",
     "test:simulation:multiwindow": "node tests/workspace-multiwindow-simulation.e2e.mjs",
+    "test:simulation:failures": "node tests/workspace-failure-simulation.e2e.mjs",
+    "test:simulation:steady": "node tests/workspace-steady-simulation.e2e.mjs",
     "test:simulation:repeat": "node tests/workspace-simulation-repeat.mjs",
     "tauri": "tauri",
     "check": "npm run build && npm run test && cargo check --manifest-path src-tauri/Cargo.toml",

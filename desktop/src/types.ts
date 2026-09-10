@@ -182,6 +182,7 @@ export type SourceDraft = {
   content: string;
   digest: string;
   branch: string;
+  head?: string;
   settings: {
     tab_size?: number;
     indent_style?: string;

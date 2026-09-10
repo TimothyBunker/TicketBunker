@@ -1,6 +1,7 @@
 """Disposable standalone browser fixture. Never uses an existing user's data."""
 import json
 import threading
+import traceback
 from unittest import mock
 
 from test_bunker_cutover import BunkerCutoverTests
@@ -32,6 +33,13 @@ def main():
             tickets=[{"id": "ECS-4", "title": "Dummy navigation ticket", "description": "See `README.md:1`.", "status": "todo"}])
         bunkerdb.apply_ticket_sync_change(fixture.bid, proposal)
         server = app_server.serve(fixture.repo, 0, launch_id="hardening-qa")
+        # This disposable fixture alone exposes handler tracebacks for QA.
+        # Never print request bodies or the per-launch transport token.
+        original_handle_error = server.handle_error
+        def diagnose_handler_error(request, address):
+            traceback.print_exc()
+            original_handle_error(request, address)
+        server.handle_error = diagnose_handler_error
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         print(json.dumps({"url": f"http://127.0.0.1:{server.server_port}", "repo": str(fixture.repo)}), flush=True)

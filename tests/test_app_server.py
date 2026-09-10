@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import re
 import subprocess
@@ -114,6 +115,57 @@ class StandaloneBrowserServerTests(unittest.TestCase):
         self.assertEqual(value["bunkers"], [])
         self.assertEqual(value["legacy_projects"][0]["path"], str(self.source))
 
+    def test_json_response_with_legacy_surrogate_remains_readable(self) -> None:
+        with mock.patch.object(app_server.app_worker, "dispatch_request", return_value={"ok": True, "text": "saved\ud800"}):
+            status, value = self.post("/api/action", {"action": "application.state"}, token=self.server.token)
+        self.assertEqual(status, 200)
+        self.assertEqual(value["text"], "saved\ud800")
+
+    def test_deeply_nested_request_gets_a_readable_rejection(self) -> None:
+        request = Request(f"{self.base}/api/action", data=b"[" * 10000 + b"0" + b"]" * 10000,
+                          headers={"Content-Type": "application/json", "X-TicketBunker-Token": self.server.token}, method="POST")
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=2)
+        self.assertEqual(caught.exception.code, 400)
+        self.assertFalse(json.loads(caught.exception.read())["ok"])
+        self.assertEqual(self.get("/_viewer/health")[0], 200)
+
+    def test_foreign_host_cannot_read_the_launch_token_or_local_data(self) -> None:
+        port = self.server.server_address[1]
+        for host in (f"example.test:{port}", f"localhost.example.test:{port}", "localhost:1", f"user@localhost:{port}"):
+            for path in ("/", "/api/bootstrap", "/_viewer/health"):
+                with self.subTest(host=host, path=path):
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                    connection.request("GET", path, headers={"Host": host})
+                    response = connection.getresponse()
+                    body = response.read()
+                    connection.close()
+                    self.assertEqual(response.status, 403)
+                    self.assertNotIn(self.server.token.encode(), body)
+                    self.assertNotIn(str(self.source).encode(), body)
+
+    def test_foreign_origin_cannot_invoke_local_actions_even_with_a_token(self) -> None:
+        for origin in ("https://example.test", "null", "http://localhost:1"):
+            connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=2)
+            connection.request("POST", "/api/action", body=b'{"action":"application.state"}', headers={
+                "Content-Type": "application/json", "Origin": origin, "X-TicketBunker-Token": self.server.token,
+            })
+            response = connection.getresponse()
+            response.read(); connection.close()
+            self.assertEqual(response.status, 403)
+
+    def test_loopback_host_and_same_origin_remain_supported(self) -> None:
+        port = self.server.server_address[1]
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            connection.request("POST", "/api/action", body=b'{"action":"application.state"}', headers={
+                "Host": host, "Origin": f"http://{host}", "Content-Type": "application/json", "X-TicketBunker-Token": self.server.token,
+            })
+            response = connection.getresponse()
+            value = json.loads(response.read()); connection.close()
+            self.assertEqual(response.status, 200)
+            self.assertTrue(value["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -173,4 +225,3 @@ class BrowserPresenceTests(unittest.TestCase):
             self.server.idle_reason(start + app_server.FIRST_TAB_TIMEOUT_SECONDS + 1),
             "no browser tab opened within 60 seconds",
         )
-

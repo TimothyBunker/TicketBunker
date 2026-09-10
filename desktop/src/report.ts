@@ -68,18 +68,45 @@ const NOTE_REF_RES = [
   /(?:^|[\s(])@([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?/g,
 ];
 
-function samePath(cited: string, open: string): boolean {
-  const a = cited.replace(/^\.\//, "").replace(/^\/+/, "");
-  const b = open.replace(/^\.\//, "").replace(/^\/+/, "");
-  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+function normalizedPath(path: string): string | null {
+  const value = path.replace(/\\/g, "/");
+  const prefix = /^(?:[A-Za-z]:\/|\/\/|\/)/.exec(value)?.[0] || "";
+  // Drive-relative paths depend on process state, not this repository.
+  if (!prefix && /^[A-Za-z]:/.test(value)) return null;
+  const parts: string[] = [];
+  for (const part of value.slice(prefix.length).split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!parts.length) return null;
+      parts.pop();
+    } else parts.push(part);
+  }
+  return prefix.toLowerCase() + parts.join("/");
+}
+
+function relativeNotePath(path: string, repoRoot: string): string | null {
+  const normalized = normalizedPath(path);
+  if (normalized === null) return null;
+  if (!/^(?:[A-Za-z]:\/|\/)/.test(normalized)) return normalized;
+  const root = normalizedPath(repoRoot);
+  if (!root || !/^(?:[A-Za-z]:\/|\/)/.test(root)) return null;
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : null;
+}
+
+function samePath(cited: string, open: string, repoRoot: string): boolean {
+  const a = relativeNotePath(cited, repoRoot);
+  const b = relativeNotePath(open, repoRoot);
+  return a !== null && a !== "" && a === b;
 }
 
 /**
  * Every claim in the report that anchors into ``path``, as a margin note:
  * the line it points at, what kind of claim it is (Defect, Step, Where…),
- * and the sentence with its tag and anchors stripped. Ordered by line.
+ * and the sentence with its tag stripped and reference targets intact.
+ * Absolute citations require an explicit repository root. Ordered by line.
  */
-export function sourceNotes(text: string, path: string): SourceNote[] {
+export function sourceNotes(text: string, path: string, repoRoot = ""): SourceNote[] {
   const notes: SourceNote[] = [];
   const seen = new Set<string>();
   let section = "";
@@ -100,16 +127,11 @@ export function sourceNotes(text: string, path: string): SourceNote[] {
       re.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = re.exec(value.body))) {
-        if (samePath(match[1], path)) anchors.push([Number(match[2]), Number(match[3] || match[2])]);
+        if (samePath(match[1], path, repoRoot)) anchors.push([Number(match[2]), Number(match[3] || match[2])]);
       }
     }
     if (anchors.length === 0) continue;
-    const prose = value.body
-      .replace(/@\[([^\]\n]+)\]:(\d+)(?:-(\d+))?/g, (_m, p: string, l: string, e?: string) => `${p.split("/").pop()}:${l}${e ? `-${e}` : ""}`)
-      .replace(/`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`/g, (_m, p: string, l: string, e?: string) => `\`${p.split("/").pop()}:${l}${e ? `-${e}` : ""}\``)
-      .replace(/(^|[\s(])@([A-Za-z0-9_./-]+)/g, (_m, lead: string, p: string) => `${lead}${p.split("/").pop()}`)
-      .replace(/\s+\(\s*\)\s*\.?$/, ".")
-      .trim();
+    const prose = value.body.trim();
     for (const [line, endLine] of anchors) {
       const key = `${line}:${prose}`;
       if (seen.has(key)) continue;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { command, OFFLINE_MESSAGE, STALE_SERVICE_MESSAGE } from "./transport";
+import { bootstrap, command, OFFLINE_MESSAGE, STALE_SERVICE_MESSAGE } from "./transport";
 
 describe("browser transport", () => {
   const originalFetch = globalThis.fetch;
@@ -40,5 +40,19 @@ describe("browser transport", () => {
     } as unknown as Response);
 
     await expect(command("application.ticket.list", { page: "x" })).rejects.toThrow("Choose a valid ticket page.");
+  });
+
+  it("explains unreadable or malformed responses without implying an action failed", async () => {
+    for (const value of [null, [], "bad", {}]) {
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(value) });
+      await expect(command("workspace.file.save")).rejects.toThrow("Your action may have completed");
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, json: () => Promise.reject(new SyntaxError("Unexpected token <")) });
+    await expect(command("workspace.file.save")).rejects.toThrow("Refresh the view");
+  });
+
+  it("bootstrap explains a malformed response instead of leaking a TypeError", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(null) });
+    await expect(bootstrap()).rejects.toThrow("could not read");
   });
 });

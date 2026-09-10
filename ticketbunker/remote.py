@@ -506,6 +506,11 @@ def _snapshot(value: Mapping[str, Any]) -> RemoteSnapshot:
     bunker = value.get("bunker")
     if not isinstance(bunker, dict) or not str(bunker.get("id") or ""):
         raise RemoteContractError("The remote snapshot does not identify its Bunker.")
+    required = ("projects", "repository_bindings", "config_documents", "tickets", "reports", "members")
+    if any(field not in value for field in required):
+        raise RemoteContractError("The server returned an incomplete Bunker snapshot. Local data was not changed. Retry synchronization when the server is ready.")
+    if any(not isinstance(value.get(field), str) or not value[field].strip() for field in ("revision", "cursor")):
+        raise RemoteContractError("The server snapshot is missing its synchronization revision or cursor. Local data was not changed. Retry synchronization when the server is ready.")
     capabilities = value.get("capabilities", [])
     if not isinstance(capabilities, list) or any(
         not isinstance(item, str) or not item for item in capabilities

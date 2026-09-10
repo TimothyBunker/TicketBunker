@@ -2,6 +2,7 @@ import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, use
 import FloatingActions from "./FloatingActions";
 import BackButton from "./BackButton";
 import IconButton from "./IconButton";
+import { conversationDraftSaveGuidance, useCoworkerDraftRecovery } from "./CoworkerDraftRecovery";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
 import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
@@ -738,18 +739,20 @@ export function CoworkerDrawer({
     }
     previousFile.current = openFile;
   }, [embedded, openFile]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [response, setResponse] = useState<{ route: string; value: Record<string, unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
+  const [loadVersion, setLoadVersion] = useState(0);
   const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic === "files" ? "standing" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
   const scoped = scope === "all" ? "combined" : scope;
   const identity = JSON.stringify([bunkerId, repoRoot, detail.project.key, detail.ticket.id]);
+  const recovery = useCoworkerDraftRecovery(identity);
   const routeFor = (target: { category: string; path: string }) => JSON.stringify([identity, scoped, target.category, target.path]);
   const route = routeFor(thread);
   const draftKey = route;
   const coworker = response?.route === route ? response.value : null;
-  const error = errors[route] || "";
+  const error = recovery.error || errors[route] || loadErrors[route] || "";
   const currentRoute = useRef("");
   currentRoute.current = route;
   const requestVersions = useRef(new Map<string, number>());
@@ -767,6 +770,14 @@ export function CoworkerDrawer({
     && (!embedded || quote.category !== "file" || quote.path === openFile));
   const selectedQuote = quoteMatchesView && quote?.category === thread.category
     && (thread.category !== "file" || quote?.path === thread.path) ? quote : null;
+  const contextQuote = selectedQuote || recovery.entries[route]?.quote || null;
+  useEffect(() => {
+    if (selectedQuote) recovery.update(route, (draft) => ({ ...draft, quote: selectedQuote }));
+  }, [selectedQuote, route]);
+  useUnsavedEditor({ retained: !recovery.error, dirty: Object.values(recovery.entries).some((draft) => Boolean(draft.text || draft.quote)), busy,
+    description: "This window has unsent conversation drafts.",
+    save: async () => conversationDraftSaveGuidance,
+    discard: () => { recovery.discard(); onQuote(null); } });
   useEffect(() => {
     if (quote && quoteMatchesView) {
       setTopic(topicOf(quote));
@@ -781,17 +792,19 @@ export function CoworkerDrawer({
     if (!open || !repoRoot || mutatingRoutes.current.has(route)) return;
     let active = true;
     const version = startRequest(route);
+    setLoadErrors((old) => old[route] ? { ...old, [route]: "" } : old);
     command<Record<string, unknown>>("coworker.state", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: thread.category, scope: scoped, path: thread.path }, repoRoot)
       .then((value) => { if (active && isLatest(route, version)) setResponse({ route, value }); })
-      .catch((reason) => { if (active && isLatest(route, version)) setErrors((old) => ({ ...old, [route]: String(reason) })); });
+      .catch((reason) => { if (active && isLatest(route, version)) setLoadErrors((old) => ({ ...old, [route]: String(reason) })); });
     return () => { active = false; };
-  }, [open, route]);
+  }, [open, route, loadVersion]);
 
   async function deliver(message: string, reference: Quote | null, target: { category: string; path: string }) {
     const targetRoute = routeFor(target);
     beginOperation(targetRoute);
     const version = startRequest(targetRoute);
     setErrors((old) => ({ ...old, [targetRoute]: "" }));
+    setLoadErrors((old) => old[targetRoute] ? { ...old, [targetRoute]: "" } : old);
     try {
       const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: target.category, scope: scoped, path: target.path, message, reference }, repoRoot);
       if (currentRoute.current === targetRoute && isLatest(targetRoute, version)) {
@@ -820,7 +833,10 @@ export function CoworkerDrawer({
     const form = event.currentTarget;
     const message = String(new FormData(form).get("message") || "");
     if (!message.trim()) return;
-    if (await deliver(message, selectedQuote, thread)) setDrafts((old) => ({ ...old, [draftKey]: old[draftKey] === message ? "" : old[draftKey] }));
+    if (await deliver(message, contextQuote, thread)) recovery.update(draftKey, (draft) => ({
+      text: draft.text === message ? "" : draft.text,
+      quote: draft.text !== message || JSON.stringify(draft.quote) !== JSON.stringify(contextQuote) ? draft.quote : null,
+    }));
   }
 
   async function proposal(action: "accept" | "dismiss", id: string) {
@@ -871,6 +887,7 @@ export function CoworkerDrawer({
       endOperation(route);
     }
   }
+  const errorNotice = error && <p className="inline-error" role="alert">{error}{loadErrors[route] && <IconButton icon="sync" label="Retry conversation" hint="Reload this conversation without changing your draft" onClick={() => setLoadVersion((value) => value + 1)} />}</p>;
   return (
     <aside className={embedded ? "coworker-drawer embedded-session" : "coworker-drawer"}>
       <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
@@ -881,7 +898,7 @@ export function CoworkerDrawer({
       {thread.category === "file" && <div className="file-thread-bar"><button type="button" onClick={() => { setTopic("files"); onQuote(null); }}>‹ Files</button><strong title={thread.path}>{thread.path.split("/").pop()}</strong><small>{thread.path}</small><button type="button" className="danger-control" disabled={busy} onClick={() => forget(thread.path)}>Forget</button></div>}
       {topic === "files" && (
         <div className="file-thread-list">
-          {!coworker && <p className="chat-empty">Loading conversations…</p>}
+          {!coworker && !error && <p className="chat-empty">Loading conversations…</p>}
           {coworker && fileList.length === 0 && <p className="chat-empty">No file conversations yet. Reply under a note in the editor, or select code and send it to chat.</p>}
           {fileList.map((item) => (
             <div key={item.path} className="file-thread">
@@ -895,9 +912,9 @@ export function CoworkerDrawer({
           ))}
         </div>
       )}
-      {topic !== "files" && <div className="chat-messages">{!coworker && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
-      {topic !== "files" && <form className="chat-input" onSubmit={send}>{selectedQuote && <div className="quote-chip"><span>{selectedQuote.path && `${selectedQuote.path}: `}{selectedQuote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} value={drafts[draftKey] || ""} onChange={(event) => setDrafts((old) => ({ ...old, [draftKey]: event.target.value }))} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
-      {topic === "files" && error && <p className="inline-error">{error}</p>}
+      {topic !== "files" && <div className="chat-messages">{!coworker && !error && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
+      {topic !== "files" && <form className="chat-input" onSubmit={send}>{contextQuote && <div className="quote-chip"><span>{contextQuote.path && `${contextQuote.path}: `}{contextQuote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => { recovery.update(route, (draft) => ({ ...draft, quote: null })); onQuote(null); }}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} value={recovery.entries[draftKey]?.text || ""} onChange={(event) => { const value = event.target.value; recovery.update(draftKey, (draft) => ({ ...draft, text: value })); }} required /><button className="primary" disabled={busy}>Send</button>{errorNotice}</form>}
+      {topic === "files" && errorNotice}
     </aside>
   );
 }
@@ -1299,8 +1316,8 @@ function Workspace({ bunker, reference, onBack, notify, onWorkspace }: Props) {
     const branchReports = detail.reports.filter((value) => value.scope.startsWith("branch:"));
     const chosen = scope !== "all" ? branchReports.filter((value) => value.scope === `branch:${scope}`) : branchReports;
     const source = chosen.length ? chosen : branchReports;
-    return source.flatMap((report) => sourceNotes(report.content, editor.path));
-  }, [editor?.path, detail, scope]);
+    return source.flatMap((report) => sourceNotes(report.content, editor.path, repoRoot));
+  }, [editor?.path, detail, scope, repoRoot]);
   if (error && !detail) return <div className="load-error"><BackButton label="Back to tickets" onClick={onBack} /><h1>Ticket could not open</h1><p>{error}</p><button onClick={load}>Retry</button></div>;
   if (!detail) return <div className="ticket-loading full">Opening {reference.id}</div>;
   const ticket = detail.ticket;

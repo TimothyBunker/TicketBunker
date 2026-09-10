@@ -9,9 +9,11 @@ const fake = vi.hoisted(() => {
   let selectionChanged = () => {};
   let save = () => {};
   const marks = { set: vi.fn() };
+  const saveAction = { dispose: vi.fn() };
   const instance = {
     createDecorationsCollection: vi.fn(() => marks),
     addCommand: vi.fn((_key: number, callback: () => void) => { save = callback; }),
+    addAction: vi.fn((descriptor: { run: () => void }) => { save = descriptor.run; return saveAction; }),
     onDidChangeModelContent: vi.fn((callback: () => void) => { contentChanged = callback; return { dispose: vi.fn() }; }),
     onDidChangeCursorSelection: vi.fn((callback: () => void) => { selectionChanged = callback; return { dispose: vi.fn() }; }),
     getSelection: vi.fn(() => ({ positionLineNumber: 4, startLineNumber: 3, endLineNumber: 4, isEmpty: () => false })),
@@ -26,7 +28,7 @@ const fake = vi.hoisted(() => {
     let value = initial;
     return { getValue: () => value, setValue: vi.fn((next: string) => { value = next; contentChanged(); }), dispose: vi.fn(), getValueInRange: () => "selected source", updateOptions: vi.fn() };
   });
-  return { instance, marks, create: vi.fn(() => instance), createModel, type: (value: string) => model!.setValue(value), select: () => selectionChanged(), save: () => save() };
+  return { instance, marks, saveAction, create: vi.fn(() => instance), createModel, type: (value: string) => model!.setValue(value), select: () => selectionChanged(), save: () => save() };
 });
 vi.mock("monaco-editor/editor/editor.api.js", () => ({
   editor: { create: fake.create, createModel: fake.createModel }, KeyMod: { CtrlCmd: 1 }, KeyCode: { KeyS: 2 },
@@ -46,6 +48,20 @@ vi.mock("monaco-editor/languages/definitions/shell/register.js", () => ({}));
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
+
+it("registers a focused editor action instead of a global save shortcut and disposes it", () => {
+  const props = { path: "file.py", value: "source", line: 1,
+    onChange: vi.fn(), onLine: vi.fn(), onSelection: vi.fn(), onSave: vi.fn() };
+  const rendered = render(<WorkspaceEditor {...props} />);
+  expect(fake.instance.addCommand).not.toHaveBeenCalled();
+  expect(fake.instance.addAction).toHaveBeenCalledWith(expect.objectContaining({
+    id: "ticketbunker.save-file", keybindings: [3], precondition: "editorTextFocus",
+  }));
+  fake.save();
+  expect(props.onSave).toHaveBeenCalledOnce();
+  rendered.unmount();
+  expect(fake.saveAction.dispose).toHaveBeenCalledOnce();
+});
 
 it("updates only changed settings, not editor options or the model on each keystroke", () => {
   const props = { path: "src/queue.py", value: "queue = []", line: 1, tabSize: 4, wrap: false, tabs: false,

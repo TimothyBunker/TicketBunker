@@ -30,8 +30,20 @@ const browserToken = () => {
 const browserSession = globalThis.crypto?.randomUUID?.().replaceAll("-", "") ||
   `browser${Date.now()}${Math.random().toString(16).slice(2)}`;
 
-export const OFFLINE_MESSAGE = "TicketBunker's local service is not running. Start it again, then reload this page.";
+export const OFFLINE_MESSAGE = "The connection to TicketBunker's local service was interrupted. If needed, restart TicketBunker, then reload this page to reconnect.";
 export const STALE_SERVICE_MESSAGE = "This page is newer than the TicketBunker service behind it. Restart the service command in your terminal, then reload this page.";
+export const UNREADABLE_RESPONSE_MESSAGE = "TicketBunker could not read the local service's response. Your action may have completed. Refresh the view to check its current state before retrying.";
+
+async function responseObject(response: Response, envelope = false): Promise<Record<string, unknown>> {
+  let value: unknown;
+  try { value = await response.json(); }
+  catch { throw new Error(UNREADABLE_RESPONSE_MESSAGE); }
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || envelope && typeof (value as Record<string, unknown>).ok !== "boolean") {
+    throw new Error(UNREADABLE_RESPONSE_MESSAGE);
+  }
+  return value as Record<string, unknown>;
+}
 
 let offline = false;
 
@@ -84,7 +96,7 @@ export async function bootstrap(): Promise<AppState> {
     }
     throw reason;
   }
-  const value = (await response.json()) as AppState & { ok?: boolean; message?: string };
+  const value = (await responseObject(response)) as AppState & { ok?: boolean; message?: string };
   if (!response.ok || value.ok === false) throw new Error(value.message || "TicketBunker could not open.");
   if (value.launch) value.launch.route = `${window.location.pathname}${window.location.search}`;
   return value;
@@ -121,7 +133,7 @@ export async function command<T>(
     throw reason;
   }
   setOffline(false);
-  const value = (await response.json()) as T & { ok?: boolean; code?: string; message?: string };
+  const value = (await responseObject(response, true)) as T & { ok?: boolean; code?: string; message?: string };
   if (!response.ok || value.ok === false) {
     if (value.code === "command_unavailable") throw new Error(STALE_SERVICE_MESSAGE);
     throw new Error(value.message || "TicketBunker could not complete that action.");

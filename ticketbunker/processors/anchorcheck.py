@@ -17,6 +17,7 @@ import re
 import subprocess
 import urllib.parse
 from pathlib import Path
+from .. import platform_services
 
 # An anchor as reports write them: `path` or `path:line`, where path has a
 # slash or an extension. Backticks optional. Matches the forms the report
@@ -66,6 +67,7 @@ def _file_at_ref(repo: Path, ref: str, path: str) -> str | None:
     proc = subprocess.run(
         ["git", "-C", str(repo), "show", f"{ref}:{path}"],
         capture_output=True, text=True,
+        **platform_services.current().headless_process_options(),
     )
     return proc.stdout if proc.returncode == 0 else None
 
@@ -81,6 +83,7 @@ def _resolves(repo: Path, refs: list[str], bunker: Path, path: str, line: int | 
             proc = subprocess.run(
                 ["git", "-C", str(repo), "cat-file", "-e", f"{ref}:{clean}"],
                 capture_output=True,
+                **platform_services.current().headless_process_options(),
             )
             if proc.returncode == 0:
                 return ref
@@ -169,6 +172,7 @@ def annotate(
     proc = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--short", ref],
         capture_output=True, text=True,
+        **platform_services.current().headless_process_options(),
     )
     sha = proc.stdout.strip() if proc.returncode == 0 else "unknown"
     fields = {"branch": ref, "commit": sha, "ts": ts}

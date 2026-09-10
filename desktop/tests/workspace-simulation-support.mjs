@@ -7,10 +7,16 @@ import { chromium, expect } from '@playwright/test';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 
-export async function startLab(output) {
+// Soaks may omit repeated success images; failure screenshots are unconditional
+// at their call sites. This never changes product interactions or assertions.
+export async function capture(page, path) {
+  if (process.env.TB_SIMULATION_SCREENSHOTS !== 'failures') await page.screenshot({ path });
+}
+
+export async function startLab(output, { workerProcess = false } = {}) {
   mkdirSync(output, { recursive: true });
   const fixture = spawn(process.env.PYTHON || 'python', ['tests/workspace_simulation_fixture.py'], {
-    cwd: root, env: { ...process.env, PYTHONPATH: `${root}${delimiter}${join(root, 'tests')}` }, stdio: ['pipe', 'pipe', 'inherit'],
+    cwd: root, env: { ...process.env, TB_SIMULATION_WORKER_PROCESS: workerProcess ? '1' : '0', PYTHONPATH: `${root}${delimiter}${join(root, 'tests')}` }, stdio: ['pipe', 'pipe', 'inherit'],
   });
   // A failed/terminated fixture can close stdin while teardown is signaling it.
   fixture.stdin.on('error', () => {});
@@ -46,7 +52,14 @@ export async function startLab(output) {
     clearTimeout(timer);
     browser = await chromium.launch({ executablePath: process.env.TB_E2E_CHROME || (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : chromium.executablePath()), headless: process.env.TB_SIMULATION_HEADED !== '1' });
     const context = await browser.newContext({ viewport: { width: 1500, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
-    return { ...lab, browser, context, stop };
+    const control = action => new Promise((resolve, reject) => {
+      if (!workerProcess) return reject(new Error('Fixture controls require workerProcess mode'));
+      const timeout = setTimeout(() => { lines.removeListener('line', receive); reject(new Error(`Fixture control timed out: ${action}`)); }, 15000);
+      const receive = line => { clearTimeout(timeout); try { resolve(JSON.parse(line)); } catch (error) { reject(error); } };
+      lines.once('line', receive);
+      fixture.stdin.write(`${JSON.stringify({ action })}\n`);
+    });
+    return { ...lab, browser, context, stop, control };
   } catch (error) {
     clearTimeout(timer);
     await stop();

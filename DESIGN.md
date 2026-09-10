@@ -2,6 +2,56 @@
 
 ### Repository workspace (2026-09-09)
 
+Failure handling (2026-09-10): checkout identity also includes the commit when
+HEAD is detached. A delayed read from a previous checkout remains visibly stale;
+it cannot appear clean under the new branch header. A lost source-save receipt
+may be reconciled by reading exact matching content in that same checkout, never
+by relaxing the backend digest guard. Late refreshes must not clear newer drafts
+or revive removed ticket overlays. Refresh errors have their own retryable state.
+
+Malformed or duplicate-path recovery is preserved for recovery outside the view,
+not silently normalized into a possibly different draft. Source writes validate
+the file and parent location, use private staging, and clean only staging files
+created by that save. POSIX uses a held directory descriptor; Windows uses checked
+path/identity validation. This reduces redirect races but does not make external
+Git or filesystem writers transactional with TicketBunker.
+
+Report notes use exact repository-relative path identity. An absolute reference
+matches only with its explicit checkout root, never an arbitrary suffix. Their
+display text retains the real nested source link. Report stamps are parsed once
+per report; per-keystroke editor updates do not rescan all claims.
+
+Shared pulls consume complete, versioned snapshots. Missing authoritative arrays
+must not mean deletion, project topology must validate independently of old rows,
+and snapshot reads include membership and version in one database transaction.
+A pull applies only against the local cursor from before its network request;
+a newer completed synchronization wins. Snapshot-visible enrollment advances the
+service version, while an idempotent existing-member enrollment does not.
+
+Worker and browser transport failures name uncertain outcomes honestly: a missing
+reply is not proof that a write failed, and no mutation is automatically replayed.
+Diagnostics must not crash their own error boundary or claim to have been saved
+when storage is unavailable. Background Git helpers use the platform's no-console
+options on Windows.
+The loopback browser worker additionally validates the raw Host authority and,
+when present, same-origin Origin before returning even its launch page or local
+bootstrap data. Only the listening port on localhost/127.0.0.1/[::1] is accepted;
+foreign hostnames, duplicate authorities/tokens and malformed spellings reject.
+This transport is not a remotely hosted UI or a reverse-proxy endpoint. Framing
+is disabled. The independently hosted shared Bunker service is a separate boundary.
+
+Unsent coworker text and quotes have bounded per-window, full-route recovery.
+They survive hiding/remounting an overlay without becoming shared conversation
+history. Overflow or unavailable storage keeps the live draft and says to send
+or copy before closing; it never silently evicts older unsent entries. Closing
+warns even when the associated drawer is unmounted. Save never sends a question;
+the user must explicitly send/copy it or choose Do not save. This is session
+recovery, not guaranteed survival of closing/crashing the app or browser.
+
+Save shortcuts are scoped to the focused editor, including when other repository
+editors are retained but hidden. Editor action/keybinding registrations are
+disposed with that editor, just as its closed file models are disposed.
+
 Explorer and ticket context are drawers: their icon controls belong to their own
 headers, with slim reopen rails when collapsed. Tooltips, accessible names and
 expanded/controlled-pane semantics remain explicit; no drawer animation is needed.

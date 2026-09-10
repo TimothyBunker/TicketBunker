@@ -20,6 +20,7 @@ from ..contracts import StageContract, run_stage
 from ..adapters.gitrun import GitError, git, git_status
 from ..layout import TB_DIR, branch_slug, temporary_check_worktree
 from ..ledger import Ledger
+from .. import platform_services
 
 
 @contextmanager
@@ -592,6 +593,7 @@ def run_bootstrap(
                         text=True,
                         timeout=timeout,
                         env={**os.environ, "CI": "1", "TB_CHECK": name},
+                        **platform_services.current().headless_process_options(),
                     )
                     output = (proc.stdout or "") + (proc.stderr or "")
                     exit_code: int | None = proc.returncode

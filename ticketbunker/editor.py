@@ -70,6 +70,7 @@ def resolve_editor(root: Path) -> tuple[str, str]:
         ["git", "-C", str(root), "config", "--get", "core.editor"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     if proc.returncode == 0 and proc.stdout.strip():
         return proc.stdout.strip(), "Git core.editor"
@@ -149,6 +150,7 @@ def _source(root: Path, raw: str) -> tuple[Path, str]:
     if not value.strip():
         raise commands.CommandRejected("source_path_required", "Choose a source file, then retry.")
     try:
+        value.encode("utf-8")
         candidate = Path(value).expanduser()
         resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
     except (ValueError, OSError, RuntimeError) as exc:
@@ -288,6 +290,7 @@ def read_source(root: Path, path: str, line: int = 1) -> dict[str, Any]:
         ["git", "-C", str(root), "branch", "--show-current"],
         capture_output=True,
         text=True,
+        **platform_services.current().headless_process_options(),
     )
     return {
         "path": relative,
@@ -325,6 +328,19 @@ def _formatted_content(content: str, settings: dict[str, Any]) -> str:
 def save_source(root: Path, path: str, content: str, expected_digest: str) -> dict[str, Any]:
     root = Path(root).resolve()
     source, relative = _source(root, path)
+    try:
+        parent_identity = source.parent.stat()
+        source_identity = source.stat()
+    except OSError as exc:
+        raise commands.CommandRejected("source_read_failed", "That source file could not be read. Check its local permissions, then retry.") from exc
+    def validate_location():
+        checked, _ = _source(root, path)
+        parent_now = source.parent.stat()
+        source_now = source.stat()
+        if (checked != source
+                or (parent_now.st_dev, parent_now.st_ino) != (parent_identity.st_dev, parent_identity.st_ino)
+                or (source_now.st_dev, source_now.st_ino) != (source_identity.st_dev, source_identity.st_ino)):
+            raise commands.CommandRejected("source_changed", "This file's location changed while saving. Your draft is kept. Reopen the file before saving.")
     if not _valid_digest(expected_digest):
         raise commands.CommandRejected("source_digest_required", "Reload the file before saving it.")
     current = _source_bytes(source)
@@ -338,7 +354,10 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
     formatted = _formatted_content(content, settings)
     if "\x00" in formatted:
         raise commands.CommandRejected("source_binary", "The editor saves text only. Remove the null character from this draft, then retry.")
-    encoded = _encode_source(formatted, current)
+    try:
+        encoded = _encode_source(formatted, current)
+    except UnicodeEncodeError as exc:
+        raise commands.CommandRejected("source_encoding", "This draft contains a character that cannot be saved as UTF-8. Your file is unchanged. Copy the draft, remove the invalid character and retry.") from exc
     if len(encoded) > _SOURCE_LIMIT:
         raise commands.CommandRejected(
             "source_too_large",
@@ -352,24 +371,52 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
             "digest": current_digest,
         }
     temporary = ""
+    parent_fd = None
+    temporary_identity = None
     try:
+        validate_location()
         mode = stat.S_IMODE(source.stat().st_mode)
         if not mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH) or not os.access(source, os.W_OK):
             raise PermissionError("The source file is read-only")
-        descriptor, temporary = tempfile.mkstemp(prefix=f".{source.name}.tb-", dir=source.parent)
+        # On systems with directory-relative operations, hold the validated
+        # parent through staging, replacement and cleanup. A later rename
+        # cannot redirect a private temporary file into another directory.
+        if (hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd
+                and os.unlink in os.supports_dir_fd and os.rename in os.supports_dir_fd
+                and os.chmod in os.supports_dir_fd):
+            parent_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
+            validate_location()
+            held_parent = os.fstat(parent_fd)
+            if (held_parent.st_dev, held_parent.st_ino) != (parent_identity.st_dev, parent_identity.st_ino):
+                raise commands.CommandRejected("source_changed", "This file's folder changed while saving. Your draft is kept. Reopen the file before saving.")
+            temporary = f".{source.name}.tb-{os.urandom(12).hex()}"
+            descriptor = os.open(temporary, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent_fd)
+        else:
+            descriptor, temporary = tempfile.mkstemp(prefix=f".{source.name}.tb-", dir=source.parent)
+        temporary_identity = os.fstat(descriptor)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, mode)
+        validate_location()
         if hashlib.sha256(_source_bytes(source)).hexdigest() != current_digest:
-            os.unlink(temporary)
-            temporary = ""
             raise commands.CommandRejected(
                 "source_changed",
                 "This file changed while it was being saved. Your draft was kept in the browser. Reload before saving.",
             )
-        os.replace(temporary, source)
+        validate_location()
+        staged = (os.stat(temporary, dir_fd=parent_fd, follow_symlinks=False)
+                  if parent_fd is not None else Path(temporary).lstat())
+        if (staged.st_dev, staged.st_ino) != (temporary_identity.st_dev, temporary_identity.st_ino):
+            raise commands.CommandRejected("source_changed", "The temporary file changed while saving. Your draft is kept and the source file was not replaced. Retry the save after other file operations finish.")
+        if parent_fd is not None:
+            os.chmod(temporary, mode, dir_fd=parent_fd)
+            os.replace(temporary, source.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        else:
+            os.chmod(temporary, mode)
+            validate_location()
+            os.replace(temporary, source)
+        temporary = ""
     except OSError as exc:
         raise commands.CommandRejected(
             "source_save_failed",
@@ -378,9 +425,18 @@ def save_source(root: Path, path: str, content: str, expected_digest: str) -> di
     finally:
         if temporary:
             try:
-                os.unlink(temporary)
+                if parent_fd is not None:
+                    candidate = os.stat(temporary, dir_fd=parent_fd, follow_symlinks=False)
+                    if temporary_identity is not None and (candidate.st_dev, candidate.st_ino) == (temporary_identity.st_dev, temporary_identity.st_ino):
+                        os.unlink(temporary, dir_fd=parent_fd)
+                else:
+                    candidate = Path(temporary).lstat()
+                    if temporary_identity is not None and (candidate.st_dev, candidate.st_ino) == (temporary_identity.st_dev, temporary_identity.st_ino):
+                        os.unlink(temporary)
             except OSError:
                 pass
+        if parent_fd is not None:
+            os.close(parent_fd)
     return {
         "saved": True,
         "path": relative,
