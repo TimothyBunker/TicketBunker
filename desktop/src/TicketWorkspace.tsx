@@ -6,6 +6,7 @@ import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./Un
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
 import { briefPart, CHAT_TOPICS, defectClaims, planSteps, provenanceLine, reportTopic, relativeTime, sourceNotes, TOPICS, verifiedStamp, type ChatTopic, type SourceNote, type Topic } from "./report";
 import { command } from "./transport";
+import type { WorkspaceTarget } from "./RepositoryWorkspace";
 import { trackersSummary, type Bunker, type Project, type SourceDraft, type TicketDetail, type TicketReference } from "./types";
 
 type Props = {
@@ -13,9 +14,10 @@ type Props = {
   reference: TicketReference;
   onBack: () => void;
   notify: (message: string, error?: boolean) => void;
+  onWorkspace?: (target: WorkspaceTarget) => void;
 };
 
-type Quote = {
+export type Quote = {
   kind?: "synthesis" | "source";
   category: ChatTopic | "file";
   scope: string;
@@ -695,7 +697,7 @@ function topicOf(quote: Quote): string {
   return quote.category === "file" && quote.path ? `file:${quote.path}` : String(quote.category);
 }
 
-function CoworkerDrawer({
+export function CoworkerDrawer({
   open,
   onOpen,
   detail,
@@ -709,6 +711,7 @@ function CoworkerDrawer({
   openFile,
   onReload,
   notify,
+  embedded = false,
 }: {
   open: boolean;
   onOpen: (value: boolean) => void;
@@ -723,14 +726,28 @@ function CoworkerDrawer({
   openFile: string;
   onReload: () => void;
   notify: (message: string, error?: boolean) => void;
+  embedded?: boolean;
 }) {
   // A topic is a report part, or "file:<path>" for a conversation about one file.
-  const [topic, setTopic] = useState<string>(quote ? topicOf(quote) : "standing");
+  const [topic, setTopic] = useState<string>(quote ? topicOf(quote) : embedded && openFile ? `file:${openFile}` : "standing");
+  const previousFile = useRef(openFile);
+  useEffect(() => {
+    if (embedded && previousFile.current !== openFile) {
+      setTopic(openFile ? `file:${openFile}` : "standing");
+      onQuote(null);
+    }
+    previousFile.current = openFile;
+  }, [embedded, openFile]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftKey = `${scope}:${topic}`;
   const [coworker, setCoworker] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const thread = useMemo(() => ({ category: topic.startsWith("file:") ? "file" : topic === "files" ? "standing" : topic, path: topic.startsWith("file:") ? topic.slice(5) : "" }), [topic]);
   const scoped = scope === "all" ? "combined" : scope;
+  const currentRoute = useRef("");
+  const route = JSON.stringify([repoRoot, detail.ticket.id, scoped, thread.category, thread.path]);
+  currentRoute.current = route;
   useEffect(() => {
     if (quote) {
       setTopic(topicOf(quote));
@@ -752,8 +769,10 @@ function CoworkerDrawer({
     setError("");
     try {
       const result = await command<Record<string, unknown>>("coworker.chat", { project: agentProject(detail), ticket: detail.ticket.id, bunker_id: bunkerId, category: target.category, scope: scoped, path: target.path, message, reference }, repoRoot);
-      setCoworker(result);
-      onQuote(null);
+      if (currentRoute.current === JSON.stringify([repoRoot, detail.ticket.id, scoped, target.category, target.path])) {
+        setCoworker(result);
+        onQuote(null);
+      }
       return true;
     } catch (reason) {
       setError(String(reason));
@@ -776,7 +795,7 @@ function CoworkerDrawer({
     const form = event.currentTarget;
     const message = String(new FormData(form).get("message") || "");
     if (!message.trim()) return;
-    if (await deliver(message, quote, thread)) form.reset();
+    if (await deliver(message, quote, thread)) setDrafts((old) => ({ ...old, [draftKey]: old[draftKey] === message ? "" : old[draftKey] }));
   }
 
   async function proposal(action: "accept" | "dismiss", id: string) {
@@ -821,7 +840,7 @@ function CoworkerDrawer({
     }
   }
   return (
-    <aside className="coworker-drawer">
+    <aside className={embedded ? "coworker-drawer embedded-session" : "coworker-drawer"}>
       <header><div><strong>{String(coworker?.title || `${detail.ticket.id} coworker`)}</strong><small>{scope === "all" ? "All branches" : scope}</small></div><button aria-label="Collapse coworker" onClick={() => onOpen(false)}>→</button></header>
       <nav>
         {CHAT_TOPICS.map((value) => <button key={value} className={topic === value ? "selected" : ""} onClick={() => { setTopic(value); onQuote(null); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
@@ -845,7 +864,7 @@ function CoworkerDrawer({
         </div>
       )}
       {topic !== "files" && <div className="chat-messages">{!coworker && <p className="chat-empty">Loading…</p>}{coworker && messages.length === 0 && <p className="chat-empty">Ask for context, challenge an assumption, or request a report correction.</p>}{messages.map((message, index) => <article key={index} className={String(message.role) === "user" ? "user-message" : "agent-message"}>{Boolean(message.reference) && <small>Quoted context</small>}<Markdown compact>{String(message.text || "")}</Markdown></article>)}{proposals.filter((item) => item.status === "pending").map((item) => <article className="proposal" key={String(item.id)}><strong>Proposed report update</strong><p>Reviewing this accepts changes only through TicketBunker’s report gates.</p><div><button disabled={busy} onClick={() => proposal("dismiss", String(item.id))}>Dismiss</button><button className="primary" disabled={busy} onClick={() => proposal("accept", String(item.id))}>Accept</button></div></article>)}</div>}
-      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
+      {topic !== "files" && <form className="chat-input" onSubmit={send}>{quote && <div className="quote-chip"><span>{quote.path && `${quote.path}: `}{quote.text}</span><button type="button" aria-label="Remove quoted context" onClick={() => onQuote(null)}>×</button></div>}<textarea name="message" aria-label="Message to ticket coworker" rows={2} placeholder={placeholder} value={drafts[draftKey] || ""} onChange={(event) => setDrafts((old) => ({ ...old, [draftKey]: event.target.value }))} required /><button className="primary" disabled={busy}>Send</button>{error && <p className="inline-error">{error}</p>}</form>}
       {topic === "files" && error && <p className="inline-error">{error}</p>}
     </aside>
   );
@@ -1101,7 +1120,7 @@ export default function TicketWorkspace(props: Props) {
   return <UnsavedChangesBoundary><Workspace {...props} /></UnsavedChangesBoundary>;
 }
 
-function Workspace({ bunker, reference, onBack, notify }: Props) {
+function Workspace({ bunker, reference, onBack, notify, onWorkspace }: Props) {
   const protect = useGuardedAction();
   const [snapshot, setDetail] = useState<TicketDetail | null>(null);
   const [repositoryChoice, setRepositoryChoice] = useState("");
@@ -1199,6 +1218,10 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
   }, [detail]);
 
   function openSource(path: string, line: number) {
+    if (onWorkspace && repositoryId && repoRoot) {
+      protect(() => onWorkspace({ bunkerId: bunker.id, repositoryId, ticket: reference, path, line, nonce: Date.now() }));
+      return;
+    }
     protect(() => { void readSource(path, line); });
   }
   async function readSource(path: string, line: number) {
@@ -1259,6 +1282,7 @@ function Workspace({ bunker, reference, onBack, notify }: Props) {
       </header>
       <div className="ticket-layout">
         <aside className="ticket-chapters"><nav aria-label="Ticket sections">
+          {onWorkspace && repoRoot && <button onClick={() => protect(() => onWorkspace({ bunkerId: bunker.id, repositoryId, ticket: reference, nonce: Date.now() }))}>Workspace</button>}
           {[["details", "Details"], ["description", "Description"], ["agent-work", "Agent work"]].map(([id, label]) => <button key={id} className={!editor && section === id ? "selected" : ""} aria-current={!editor && section === id ? "location" : undefined} onClick={() => jumpTo(id)}>{label}</button>)}
         </nav></aside>
         <main className="ticket-main">

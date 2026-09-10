@@ -1,6 +1,7 @@
 {
   "name": "ticketbunker-desktop",
   "private": true,
+  "overrides": { "monaco-editor": { "dompurify": "3.4.15" } },
   "version": "0.6.4",
   "type": "module",
   "scripts": {
@@ -28,6 +29,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "monaco-editor": "0.56.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

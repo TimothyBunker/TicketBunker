@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-type Editor = { dirty: boolean; busy: boolean; save: () => Promise<boolean | string>; discard: () => void; description?: string };
-type Guard = { register: (editor: Editor) => () => void; protect: (action: () => void) => void };
+type Editor = { dirty: boolean; busy: boolean; save: () => Promise<boolean | string>; discard: () => void | Promise<void>; description?: string; retained?: boolean };
+type Guard = { register: (editor: Editor) => () => void; protect: (action: () => void, closing?: boolean) => void };
 const Context = createContext<Guard | null>(null);
 
 export function UnsavedChangesBoundary({ children }: { children: ReactNode }) {
@@ -11,6 +11,7 @@ export function UnsavedChangesBoundary({ children }: { children: ReactNode }) {
 
 function Provider({ children }: { children: ReactNode }) {
   const editor = useRef<Editor | null>(null);
+  const editors = useRef(new Set<Editor>());
   const action = useRef<(() => void) | null>(null);
   const [pending, setPending] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -18,12 +19,17 @@ function Provider({ children }: { children: ReactNode }) {
   const [closeError, setCloseError] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const register = useCallback((value: Editor) => {
-    editor.current = value;
-    return () => { if (editor.current === value) editor.current = null; };
+    editors.current.add(value);
+    return () => { editors.current.delete(value); };
   }, []);
-  const protect = useCallback((next: () => void) => {
-    if (action.current || editor.current?.busy) return;
-    if (!editor.current?.dirty) return next();
+  const protect = useCallback((next: () => void, closing = false) => {
+    const targets = [...editors.current].filter((value) => closing || !value.retained);
+    if (action.current || targets.some((value) => value.busy)) return;
+    const dirty = targets.filter((value) => value.dirty);
+    if (!dirty.length) return next();
+    editor.current = { dirty: true, busy: false, description: dirty.length === 1 ? dirty[0].description : "Save changes in your open workspaces before closing?",
+      discard: () => { const results = dirty.map((value) => value.discard()); if (results.some(Boolean)) return Promise.all(results).then(() => {}); },
+      save: async () => { for (const value of dirty) { const result = await value.save(); if (result !== true) return result; } return true; } };
     action.current = next;
     setError(""); setPending(true);
   }, []);
@@ -45,16 +51,16 @@ function Provider({ children }: { children: ReactNode }) {
     let disposed = false;
     let stop: (() => void) | undefined;
     native.onCloseRequested((event) => {
-      if (!editor.current?.dirty && !editor.current?.busy && !action.current) return;
+      if (![...editors.current].some((value) => value.dirty || value.busy) && !action.current) return;
       event.preventDefault();
-      protect(() => { void native.destroy().catch(() => setCloseError("The window could not close. Your work is still open; try closing again.")); });
+      protect(() => { void native.destroy().catch(() => setCloseError("The window could not close. Your work is still open; try closing again.")); }, true);
     }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; })
       .catch(() => setCloseError("Close protection is unavailable. Save your file before closing this window."));
     return () => { disposed = true; stop?.(); };
   }, [protect]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (editor.current?.dirty || editor.current?.busy) { event.preventDefault(); event.returnValue = ""; }
+      if ([...editors.current].some((value) => value.dirty || value.busy)) { event.preventDefault(); event.returnValue = ""; }
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
@@ -75,7 +81,7 @@ function Provider({ children }: { children: ReactNode }) {
       {error && <p role="alert">{error}</p>}
       <div className="dialog-actions">
         <button disabled={saving} onClick={cancel} autoFocus>Cancel</button>
-        <button disabled={saving} onClick={() => { editor.current?.discard(); proceed(); }}>Do not save</button>
+        <button disabled={saving} onClick={() => { try { const result = editor.current?.discard(); if (result) { setSaving(true); void result.then(proceed).catch((reason) => setError(String(reason))).finally(() => setSaving(false)); } else proceed(); } catch (reason) { setError(String(reason)); } }}>Do not save</button>
         <button className="primary" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save"}</button>
       </div>
     </dialog>}
@@ -91,5 +97,13 @@ export function useGuardedAction() {
 export function useUnsavedEditor(value: Editor) {
   const context = useContext(Context);
   const register = context?.register;
-  useLayoutEffect(() => register?.(value), [register, value.dirty, value.busy, value.save, value.discard, value.description]);
+  const latest = useRef(value);
+  latest.current = value;
+  useLayoutEffect(() => register?.({
+    get dirty() { return latest.current.dirty; },
+    get busy() { return latest.current.busy; },
+    get retained() { return latest.current.retained; },
+    get description() { return latest.current.description; },
+    save: () => latest.current.save(), discard: () => latest.current.discard(),
+  }), [register]);
 }

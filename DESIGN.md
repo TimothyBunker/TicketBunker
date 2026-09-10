@@ -1,5 +1,43 @@
 # TicketBunker — Design
 
+### Repository workspace (2026-09-09)
+
+A connected local checkout is a workspace, independent of any one ticket.
+Project navigation exposes its connected repositories alongside Tickets. The
+workspace shows the actual checked-out branch, a lazy file tree/path finder,
+persistent open files, and an editor beside Comments / Session. Ticket code links
+open the matching repository workspace and add that ticket's overlay. Selecting
+a repository or overlay never changes Git checkout or starts synthesis.
+
+Multiple ticket overlays may be visible; exactly one ticket session is the send
+target. Each file conversation carries repository, branch, ticket and path.
+Selected code carries its line range and whether the buffer is unsaved. Notes
+remain owned by their ticket report; only clean-file notes whose verified branch
+and commit match the checkout get editor markers. Historical notes remain labeled
+in Comments, not silently painted onto unrelated current code. The coworker still
+only advises and proposes report updates through the existing publication gates.
+
+`workspace.*` actions share the desktop/browser command backend. Device-local
+recovery is in `data_home/workspaces.sqlite3`, owned by `workspace.py`, keyed by
+checkout filesystem identity. This is not Bunker truth and is never synchronized
+or exported: it stores open buffers, cursor lines, expanded folders and selected
+ticket overlays. Revision checks refuse competing recovery writers. Private drafts
+are plaintext local data with owner-only file permissions where supported.
+Source saving remains explicit, with expected-content digest and checked-out
+branch guards; app Git operations share the repository lock. External Git and
+filesystem writers cannot be made transactional with a separate app process.
+File traversal excludes Git/TB internals and escaping symlinks. Navigation retains
+drafts; closing a dirty file or the native app offers Save / Do not save / Cancel.
+
+Monaco is bundled and lazy-loaded locally, with local editor workers, no remote
+scripts or language services. Its generated styles require inline style permission
+in both browser and native CSP; scripts remain self-only without unsafe-eval.
+Core Python stays stdlib-only. This first workspace does not add a terminal,
+debugger, work agent, Git mutation toolbar or automatic ticket creation. Existing
+repository bindings still select one local folder per project/remote binding;
+simultaneous duplicate windows/bindings for the same physical checkout are guarded
+by recovery conflicts, not collaborative buffer merging.
+
 Back-navigation controls display only a left arrow. Keep their destination in
 an accessible label and hover title, not redundant visible text. Desktop and
 browser views share this contract; unsaved-change guards remain in force.

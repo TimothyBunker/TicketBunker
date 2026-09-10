@@ -141,7 +141,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self'; font-src 'self' data:; "
             "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'",
         )
         self.end_headers()

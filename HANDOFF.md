@@ -4,6 +4,40 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Repository workspace (2026-09-09, source only)
+
+Tim approved repository-specific workspaces under the Project sidebar, with
+ticket(s) as swappable overlays. Implemented `workspace.py` command actions for
+local Git state, bounded tree/path search, guarded file read/save and revisioned
+private draft recovery. The recovery SQLite file belongs to this local subsystem,
+not the Bunker domain or remote sync. Monaco is bundled/lazy-loaded, with local
+worker, selected language definitions, notices and patched DOMPurify override.
+Both browser/native CSP permit Monaco styles but not unsafe scripts/eval.
+
+`RepositoryWorkspace` stays mounted across repository/ticket navigation, preserving
+file models and drafts; reopened checkouts restore buffers/cursor/tree/overlays.
+Comments retain report provenance and mark historical references; only current
+verified clean-file notes get editor markers. Session retains one coworker per
+ticket, with file/category/branch-scoped unsent drafts during navigation. Code
+selection quotes the file/lines and unsaved status. No new agent writing authority,
+Git mutation or auto-synthesis. Native close guards now aggregate retained editors;
+file close has Save / Do not save / Cancel. Conflict saves preserve drafts.
+
+Entry: Project sidebar → repository, or a ticket code link / Workspace chapter.
+Still one local folder per existing repository binding; duplicate windows for
+one checkout refuse recovery conflicts rather than merge buffers. Chat drafts
+are in-memory, sent chat remains in the existing ticket session. Local recovery
+is plaintext and not a backup. No installer/tag/version bump in this slice.
+
+Verified: 400 Python tests (three platform skips), 86 UI tests, 12 Rust tests,
+production build and browser hardening flow. Five workspace tests also pass with
+native Windows Python/Git; portability CI includes them. Production dependency
+audit reports zero vulnerabilities. Native Linux/WSL app opens and renders Monaco;
+keyboard automation was inconclusive because X11 focus was lost, so native edit/
+close/reopen and the next Windows installer still need interactive smoke testing.
+Screenshot: `/tmp/ticketbunker-repository-workspace.png` (disposable browser fixture).
+No real source repositories, credentials, installed app or Bunker data changed.
+
 ## Current-branch synthesis fix (2026-09-09, source only)
 
 Tim's 0.6.4 Windows installer could recognize the repository in the view but

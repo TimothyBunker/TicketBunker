@@ -39,6 +39,31 @@ records the current end-to-end behavior and measurements.
 
 ## Bunkers, Projects, and repositories
 
+### Work in a repository
+
+Select a Project, then a connected repository in the left sidebar. Its workspace
+has a file tree, filename/path search, file tabs and a Monaco editor. The header
+shows the branch actually checked out. Opening a ticket's code link brings you
+here with that ticket selected; its header chip returns to the ticket.
+
+Use **+** beside the ticket chips to layer other tickets onto the same workspace.
+**Comments** shows their file notes; **Session** chooses one ticket coworker to
+talk to. Select code and use **Discuss selection** to quote its lines, including
+an explicit indication when they are unsaved. Switching tickets does not switch
+branches, run synthesis or give the agent permission to edit source.
+
+Files and unsaved drafts survive navigation and are recovered locally on reopening
+that checkout. **Save** or Ctrl/Cmd+S writes the source file. Closing an unsaved tab
+or the native app asks whether to save. If the branch or file changed elsewhere,
+TicketBunker keeps your draft and refuses to overwrite it. Local refresh rereads
+Git state, the file tree and unchanged buffers; it does not fetch or pull.
+
+Recovery lives in the application data folder (`workspaces.sqlite3`), never in
+your repository or shared Bunker. It is plaintext private device data, not an
+encrypted backup. Unsent chat drafts survive workspace navigation within the
+running app; sent conversations use the existing ticket session persistence.
+This is a focused repository editor, not a full IDE or agent coding environment.
+
 A **Bunker** is the configuration, membership, security, and synchronization
 boundary. It contains a recursive tree of **Projects**. A Project is a work
 scope, not a Git repository; repositories are attached explicitly after the

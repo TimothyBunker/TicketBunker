@@ -1,13 +1,14 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ConfigurationPanel, { type ConfigurationTab } from "./ConfigurationPanel";
 import CloseButton from "./CloseButton";
+import RepositoryWorkspace, { type WorkspaceTarget } from "./RepositoryWorkspace";
 import IconButton, { Icon } from "./IconButton";
 import { UnsavedChangesBoundary, useGuardedAction } from "./UnsavedChanges";
 import { command } from "./transport";
 import { trackersSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
 import { relativeTime } from "./report";
 
-type Selection = { bunkerId: string; projectId?: string };
+type Selection = { bunkerId: string; projectId?: string; repositoryId?: string };
 // Keep failures visible when a ticket or settings temporarily unmounts the hub.
 const lastSyncErrors: Record<string, string> = {};
 const ticketSyncState: Record<string, { at: number; error: string }> = {};
@@ -20,6 +21,8 @@ type Props = {
   onState: (state: AppState) => void;
   onSettings: () => void;
   notify: (message: string, error?: boolean) => void;
+  workspaceTarget?: WorkspaceTarget | null;
+  visible?: boolean;
 };
 
 function flatten(projects: Project[], depth = 0): Array<{ project: Project; depth: number }> {
@@ -499,6 +502,8 @@ function Hub({
   onState,
   onSettings,
   notify,
+  workspaceTarget,
+  visible = true,
 }: Props) {
   const protect = useGuardedAction();
   const onSelection = (value: Selection | null) => protect(() => { setAction(""); setConfigTab(undefined); select(value); });
@@ -515,6 +520,10 @@ function Hub({
   const contextRef = useRef<HTMLDivElement>(null);
   const pulledAt = useRef<Record<string, number>>({});
   const [importing, setImporting] = useState("");
+  const [workspaces, setWorkspaces] = useState<Array<{ bunkerId: string; repositoryId: string }>>([]);
+  useEffect(() => {
+    if (selection?.repositoryId) setWorkspaces((old) => old.some((row) => row.bunkerId === selection.bunkerId && row.repositoryId === selection.repositoryId) ? old : [...old, { bunkerId: selection.bunkerId, repositoryId: selection.repositoryId! }]);
+  }, [selection?.bunkerId, selection?.repositoryId]);
   const bunker = state.bunkers.find((value) => value.id === selection?.bunkerId);
   const projects = bunker ? flatten(bunker.projects) : [];
   const project = projects.find((value) => value.project.id === selection?.projectId)?.project;
@@ -634,6 +643,7 @@ function Hub({
                 <span>{value.name}</span><small>{value.project_count}</small>
               </button>
               {flatten(value.projects).map(({ project: item, depth }) => (
+                <div key={item.id}>
                 <button
                   key={item.id}
                   style={{ paddingLeft: `${30 + depth * 14}px` }}
@@ -644,6 +654,12 @@ function Hub({
                 >
                   <span className="project-key">{item.key}</span><span>{item.name}</span>
                 </button>
+                {selection?.bunkerId === value.id && selection.projectId === item.id && <div className="project-repository-nav">
+                  <button className={!selection.repositoryId ? "selected" : ""} onClick={() => onSelection({ bunkerId: value.id, projectId: item.id })}>Tickets</button>
+                  <div><small>Repositories</small><button aria-label={`Connect repository to ${item.key}`} onClick={() => openConfiguration("repositories")}>+</button></div>
+                  {value.repositories.filter((repo) => repo.project_id === item.id && repo.local_path).map((repo) => <button key={repo.id} title={repo.local_path || ""} className={selection.repositoryId === repo.id ? "selected" : ""} onClick={() => onSelection({ bunkerId: value.id, projectId: item.id, repositoryId: repo.id })}>{repo.name}<small>{repo.local_path?.replace(/\\/g, "/").split("/").pop()}</small></button>)}
+                </div>}
+                </div>
               ))}
             </div>
           ))}
@@ -696,7 +712,7 @@ function Hub({
           <details className="storage-details"><summary>Storage</summary><p>{bunker.database}</p>{bunker.remote && <p>{bunker.remote.server_url} · {bunker.remote.remote_bunker_id}{bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}</p>}</details>
         </>}
 
-        {bunker && project && <>
+        {bunker && project && !selection?.repositoryId && <>
           <header className="workspace-header">
             <div>
               <nav className="breadcrumbs" aria-label="Location">
@@ -716,6 +732,13 @@ function Hub({
           {(project.children || []).length > 0 && <ProjectCatalog bunker={bunker} projects={project.children || []} title="Subprojects" onProject={(value) => onSelection({ bunkerId: bunker.id, projectId: value.id })} onContext={(event, item) => showProjectMenu(event, bunker, item)} />}
           <TicketCatalog bunker={bunker} project={project} version={catalogVersion} onTicket={(ticket) => protect(() => onTicket(bunker.id, ticket))} />
         </>}
+        {workspaces.map((row) => {
+          const owner = state.bunkers.find((item) => item.id === row.bunkerId);
+          const repo = owner?.repositories.find((item) => item.id === row.repositoryId);
+          if (!owner || !repo?.local_path) return null;
+          const selected = selection?.bunkerId === row.bunkerId && selection.repositoryId === row.repositoryId;
+          return <div key={`${row.bunkerId}:${row.repositoryId}`} hidden={!selected} className="repository-workspace-host"><RepositoryWorkspace bunker={owner} repository={repo} visible={visible && selected} target={workspaceTarget?.bunkerId === row.bunkerId && workspaceTarget.repositoryId === row.repositoryId ? workspaceTarget : null} onTicket={(ticket) => onTicket(owner.id, ticket)} notify={notify} /></div>;
+        })}
       </main>
       {contextMenu && <div ref={contextRef} className="project-context-menu" role="menu" aria-label={`${contextMenu.project.key} actions`} style={{ left: Math.max(8, contextMenu.x), top: Math.max(8, contextMenu.y) }} onKeyDown={(event) => {
         if (event.key === "Escape") { setContextMenu(null); return; }

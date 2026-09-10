@@ -4,13 +4,14 @@ import BackButton from "./BackButton";
 import RuntimeVersions, { backendVersion, versionsMismatch } from "./RuntimeVersions";
 import CloseButton from "./CloseButton";
 import TicketWorkspace from "./TicketWorkspace";
+import type { WorkspaceTarget } from "./RepositoryWorkspace";
 import TrackerConnections from "./TrackerConnections";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import { bootstrap, command, isNative, listenNative, nativeInvoke, openExternal, OFFLINE_MESSAGE } from "./transport";
 import type { AppState, SourceDraft, TicketReference } from "./types";
 
 type Notice = { message: string; error: boolean } | null;
-type Selection = { bunkerId: string; projectId?: string } | null;
+type Selection = { bunkerId: string; projectId?: string; repositoryId?: string } | null;
 
 function Loading() {
   return <main className="boot-screen"><span className="spinner" /><p>Opening TicketBunker</p></main>;
@@ -341,6 +342,7 @@ function AppContent() {
   const [selection, setSelection] = useState<Selection>(null);
   const [ticket, setTicket] = useState<{ bunkerId: string; ticket: TicketReference } | null>(null);
   const [settings, setSettings] = useState(false);
+  const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget | null>(null);
   const [directEditor, setDirectEditor] = useState<{ root: string; draft: SourceDraft } | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [offline, setOffline] = useState(false);
@@ -365,7 +367,7 @@ function AppContent() {
     for (const bunker of state.bunkers) {
       const repository = bunker.repositories.find((value) => value.local_path === path);
       if (repository) {
-        setSelection({ bunkerId: bunker.id, projectId: repository.project_id });
+        setSelection({ bunkerId: bunker.id, projectId: repository.project_id, repositoryId: repository.id });
         return;
       }
     }
@@ -427,7 +429,12 @@ function AppContent() {
   if (!state.profile.complete) return <ProfileSetup state={state} onState={setState} />;
   return (
     <>
-      {directEditor ? <DirectEditor key={`${directEditor.root}:${directEditor.draft.path}:${directEditor.draft.digest}`} projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} /> : <BunkerHub state={state} selection={selection} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} />}
+      <div hidden={Boolean(directEditor || ticket && selectedBunker)}><BunkerHub state={state} selection={selection} visible={!directEditor && !ticket} workspaceTarget={workspaceTarget} onSelection={(value) => { setSelection(value); setTicket(null); }} onTicket={(bunkerId, value) => setTicket({ bunkerId, ticket: value })} onState={setState} onSettings={() => setSettings(true)} notify={notify} /></div>
+      {directEditor ? <DirectEditor key={`${directEditor.root}:${directEditor.draft.path}:${directEditor.draft.digest}`} projectRoot={directEditor.root} draft={directEditor.draft} onBack={() => setDirectEditor(null)} notify={notify} /> : ticket && selectedBunker ? <TicketWorkspace bunker={selectedBunker} reference={ticket.ticket} onBack={() => setTicket(null)} notify={notify} onWorkspace={(target) => {
+        const repo = selectedBunker.repositories.find((row) => row.id === target.repositoryId);
+        if (!repo) return notify("Connect this repository in Project settings.", true);
+        setWorkspaceTarget(target); setSelection({ bunkerId: selectedBunker.id, projectId: repo.project_id, repositoryId: repo.id }); setTicket(null);
+      }} /> : null}
       {settings && <Settings state={state} onState={setState} onClose={() => setSettings(false)} initialTab={!state.agent.decided ? "agent" : "local"} />}
       {offline && <div className="service-banner" role="alert"><span>{OFFLINE_MESSAGE}</span><button onClick={() => window.location.reload()}>Reload</button></div>}
       {!offline && versionsMismatch(state) && <div className="service-banner" role="alert"><span>This interface is version {__TB_UI_VERSION__} but the TicketBunker backend it is talking to is {backendVersion(state)}. Close and reopen TicketBunker so both match.</span><button onClick={() => window.location.reload()}>Reload</button></div>}
