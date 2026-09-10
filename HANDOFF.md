@@ -4,7 +4,7 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Two-hour failure campaign (2026-09-10, source verified; final replay underway)
+## Two-hour failure campaign (2026-09-10, completed; source only)
 
 `docs/qa-two-hour-campaign.md` tracks this follow-up to the earlier campaign.
 It began at 06:45:58 UTC, was interrupted by a usage limit around 07:18, and
@@ -25,8 +25,10 @@ Integrated source validation: 513 Python tests on Linux (three skips) and native
 Windows (four skips), 194 frontend tests, TypeScript and 12 Rust tests. A single
 worker/page ran 4,245 editor cycles over 30 minutes with stable model/editor
 counts; shared-concurrency repetition ran 645 executions over 15 minutes.
-Fresh browser role-play, keyboard, multiwindow and failure cases pass. Follow the
-checklist for source commit/CI status and remaining tests. Two earlier intermittent
+Final committed-source repeat: 128/128 journeys over 20m07s, including 32 batches
+of nine fault cases, no retries/timeouts. Source `720482a` is pushed; its GitHub CI
+and Windows/macOS portability jobs are green. Follow the checklist for evidence
+and remaining tests. Two earlier intermittent
 stops remain unexplained despite later green runs; they are not erased by them.
 No installer release or native installed GUI validation is claimed.
 

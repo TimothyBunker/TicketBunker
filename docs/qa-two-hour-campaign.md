@@ -1,18 +1,19 @@
 # Two-hour QA campaign — 2026-09-10
 
-Requested duration: approximately two hours. Started **06:45:58 UTC**;
-target completion **08:45:58 UTC**. Baseline `39621fd`.
+Requested duration: approximately two hours. Started **06:45:58 UTC**.
+Baseline `39621fd`; verified source `720482a`.
 
 The interactive campaign was interrupted around **07:18 UTC** by a usage limit,
 then resumed at **13:35 UTC**. Do not count that inactive interval toward the
 requested active work. The already-running browser soak completed independently.
-After resumption, target roughly another 85 minutes of active review/replays;
-the original wall-clock deadline is no longer the active-work accounting.
+After resumption, review, fixes and replays continued through **14:57 UTC**, with
+final documentation/CI handoff afterward: approximately two hours of active
+campaign work, not the intervening six hours of inactivity.
 
 Four parallel tracks use disposable projects, Git remotes and device data.
 No real project, credentials, provider calls, installer or release changes.
-The browser lab uses Grid Garden / LAB tickets. Some older backend fixtures
-still name synthetic tickets ECS-4/ECS-9; those keys are invented fixture data,
+The workspace browser lab uses Grid Garden / LAB tickets. Older backend and
+hardening fixtures still use Coal and ECS-4/ECS-9 names; these are invented data,
 not copies of Tim's Coal tickets or this repository's real dogfood bunker.
 This continues the [first campaign](qa-workspace-campaign.md), not a claim that
 all remaining product limitations can be removed in two hours.
@@ -28,9 +29,9 @@ all remaining product limitations can be removed in two hours.
 | LONG-05 | Shared Bunker two-participant lifecycle and authorization regression expansion. | Integrated suites plus 645 repeated shared regression executions passed |
 | LONG-06 | Scale and responsiveness: repeated navigation/models, large paths/trees/reports and bounded worker load. | 3,000-ticket paging; capacity tests; 4,245-cycle steady run passed |
 | LONG-07 | Independent review of fixes and expanded negative tests. | Agents A/B review completed; reproduced defects fixed and replayed |
-| LONG-08 | Repeat campaigns across the two-hour window, failure cleanup and deterministic reproduction. | In progress |
+| LONG-08 | Repeat campaigns across the two-hour window, failure cleanup and deterministic reproduction. | Completed: two 20-minute fresh-lab campaigns and 30-minute retained-session run; stopped attempts preserved |
 | LONG-09 | Native Windows targeted parity and native transport boundary checks. | Full 513-test native Windows run passed, four platform skips |
-| LONG-10 | Full integration, committed docs/evidence, source commit/push and honest remaining limitations. | Queued |
+| LONG-10 | Full integration, committed docs/evidence, source commit/push and honest remaining limitations. | Source pushed as 720482a; CI/portability green; final evidence and open investigations documented |
 
 ## Schedule and rules
 
@@ -221,8 +222,41 @@ stale membership snapshots, malformed member-capability rollback and stale-pull
 guards including the initial empty cursor. The runner stops on first failure;
 these are repeated executions of five regressions, not 645 distinct scenarios.
 
+### Committed-source verification
+
+Source fixes and reusable tests are committed and pushed as `720482a` on
+`claude/jira-git-context-agent-artex0`. Its [CI run](https://github.com/TimothyBunker/TicketBunker/actions/runs/34490118477)
+passed both browser and Linux validation jobs. The optional full Windows CI job
+was skipped by the workflow's push policy; the complete 513-test native Windows
+run above was performed locally. The separate [portability run](https://github.com/TimothyBunker/TicketBunker/actions/runs/34490118473)
+passed on Windows and macOS runners. Those are backend workflow checks, not
+installed native GUI or actual hardware rendering validation.
+
+A final 20-minute fail-fast repetition began at **14:36:13.900 UTC** against
+that exact committed source, with all four journeys and nine default failure
+cases. It finished **14:56:21.026 UTC**, **1,207,126ms (20m07.126s)**:
+**128/128 journeys, 32 complete batches, no failures/retries/timeouts**. The 32
+failure bundles include **288/288 fault/lifecycle case executions**; those are
+repetitions of nine cases, not 288 unique scenarios. Source and assets remained
+unchanged. Evidence: `/tmp/tb-campaign-final-committed`, 673,602 artifact bytes.
+One additional screenshot-enabled role-play passed after the timed run. Local
+captures are in `/tmp/tb-campaign-final-screenshots/`: `01-engine-context.png`,
+`02-external-edit-conflict.png`, and `03-two-repository-workspace.png`. Both dummy
+code fixes passed their tests. Final cleanup found no owned simulation fixture,
+runner or observer left running; the 14 recorded steady worker/browser PIDs were
+also absent. Unrelated running processes and the user's untracked design folders
+were left alone. These temporary captures are local evidence, not shipped assets.
+
 ## Remaining manual or architectural checks
 
+- **Open intermittent investigation: Ctrl+S.** One older sustained run stopped
+  at cycle 2,107 with no save request and the dirty draft intact. No keydown-time
+  readiness was captured. The later 4,245-cycle pass and controlled busy test
+  do not identify that cause; retain the new focus/readiness/request diagnostics.
+- **Open intermittent investigation: ticket-list connection.** One hardening
+  run showed sync success followed by a failed list connection. Later instrumented
+  and smaller-window runs did not reproduce it. Keep the browser request timeline
+  and fixture exception diagnostics; do not automatically repeat a mutation.
 - Installed Windows/Linux shortcut launch, native folder chooser, actual native
   close events and visible no-console behavior. Source tests verify arguments and
   mocked native callbacks; they do not prove packaged GUI rendering or interaction.
