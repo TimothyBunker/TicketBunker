@@ -108,12 +108,19 @@ class Participant:
                     binding_id=self.rid, path=str(self.repo))
 
     def synthesize(self):
+        requested_head = self.git("rev-parse", "HEAD")
         self.action("truth.synthesize", project="DEMO", ticket=TICKET)
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             state = self.fixture("print(json.dumps(autoagent.read_state(Path.cwd())))")
             if not state.get("running") and not state.get("queued") and state.get("last"):
                 last = state["last"]
+                # Claiming removes the queue before the worker writes running.
+                # That gap can still expose the previous commit's successful
+                # last.json; it is not completion of this request.
+                if last.get("head") != requested_head:
+                    time.sleep(0.15)
+                    continue
                 if last.get("status") != "pass":
                     diagnostic = self.fixture(
                         "p=autoagent.log_path(Path.cwd())\n"

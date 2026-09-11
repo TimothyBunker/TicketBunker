@@ -16,6 +16,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IsolatedParticipantTests(unittest.TestCase):
+    def test_synthesis_wait_ignores_previous_commit_during_queue_handoff(self):
+        spec = importlib.util.spec_from_file_location("two_participant_loop", ROOT / "tools/two_participant_loop.py")
+        loop = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loop)
+        participant = object.__new__(loop.Participant)
+        participant.name = "alice"
+        participant.git = mock.Mock(return_value="new-head")
+        participant.action = mock.Mock(return_value={"queued": True})
+        participant.fixture = mock.Mock(side_effect=[
+            {"last": {"status": "pass", "head": "old-head"}},
+            {"running": {"head": "new-head"}, "last": {"status": "pass", "head": "old-head"}},
+            {"last": {"status": "pass", "head": "new-head"}},
+        ])
+        participant.detail = mock.Mock(return_value={"reports": ["new report"]})
+        with mock.patch.object(loop.time, "sleep"):
+            self.assertEqual(participant.synthesize(), {"reports": ["new report"]})
+        self.assertEqual(participant.fixture.call_count, 3)
+        participant.detail.assert_called_once()
+
     def test_cleanup_retries_only_transient_windows_sharing_violations(self):
         spec = importlib.util.spec_from_file_location("two_participant_loop", ROOT / "tools/two_participant_loop.py")
         loop = importlib.util.module_from_spec(spec)
