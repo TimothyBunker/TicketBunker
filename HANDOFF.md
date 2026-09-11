@@ -4,12 +4,12 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Installer candidate 0.6.5-rc2 (2026-09-10, preparation)
+## Installer candidate 0.6.5-rc3 (2026-09-10, preparation)
 
 Tim requested an installer containing the workspace campaigns and save/list
 recovery fixes below. Source `ccd40bb` passed CI `34553247773`. The candidate
 bumps Python, UI and native versions together to 0.6.5; intended immutable tag
-is now `v0.6.5-rc2`. Use the existing release workflow for Windows x64, Linux x64 and
+is now `v0.6.5-rc3`. Use the existing release workflow for Windows x64, Linux x64 and
 macOS Apple Silicon. Windows remains an unsigned prerelease; stable-only update
 discovery does not offer it. No user data or repository configuration is reset.
 Do not claim downloadable installers until the Release workflow and asset checks
@@ -19,6 +19,11 @@ test: its poll could return the old commit's successful last state during the
 queue-to-running handoff. The harness now waits for the requested Git HEAD;
 a deterministic regression reproduces the premature return. No runtime behavior
 or test assertion about shared report propagation is relaxed by this correction.
+Rc2 (`81f2b1b`, Release `34555439131`) passed Linux/macOS core tests and main CI,
+but Windows failed only the old sub-second Git-commit timing assertion (3.219s
+on its hosted runner). That test now uses a 30s process deadline and checks no
+queued/running/finished agent state; a direct CLI regression explicitly forbids
+enqueue/spawn while requiring the change record. Product runtime is unchanged.
 
 ## Save/read recovery follow-up (2026-09-10, source only)
 

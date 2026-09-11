@@ -446,6 +446,15 @@ class AutomaticAgentTests(unittest.TestCase):
         events = Ledger(layout.paths(self.bunker)["ledger"]).entries()
         self.assertTrue(any(value.get("type") == "session_superseded" for value in events))
 
+    def test_git_event_records_without_queuing_or_starting_an_agent(self) -> None:
+        with mock.patch.object(autoagent, "enqueue") as queued, mock.patch.object(autoagent, "_spawn_worker") as spawned:
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = cli.main(["_git-event", "--repo", str(self.repo), "--event", "post-commit"])
+        self.assertEqual(result, 0)
+        queued.assert_not_called()
+        spawned.assert_not_called()
+        self.assertEqual(autoagent.read_state(self.repo)["changes"]["events"], ["post-commit"])
+
     def test_real_post_commit_hook_records_change_without_calling_agent(self) -> None:
         autoagent.install(self.repo)
         source = self.repo / "velocity.py"
@@ -464,21 +473,23 @@ class AutomaticAgentTests(unittest.TestCase):
             ),
         }
 
-        started = time.monotonic()
         subprocess.run(
             ["git", "-C", str(self.repo), "commit", "-m", "Trigger automatic report"],
             check=True,
             capture_output=True,
             env=env,
+            timeout=30,
         )
-        commit_seconds = time.monotonic() - started
         report = layout.child_report(self.bunker, "Ada/ECS-4-automatic")
         state = autoagent.read_state(self.repo)
-        self.assertLess(commit_seconds, 1.0)
+        # Process startup and Git cost vary across hosted runners. Verify the
+        # hook's contract and bounded completion, not a one-second benchmark.
         self.assertFalse(report.exists())
         self.assertEqual(state["changes"]["branch"], "Ada/ECS-4-automatic")
         self.assertEqual(state["changes"]["events"], ["post-commit"])
         self.assertNotIn("queued", state)
+        self.assertNotIn("running", state)
+        self.assertNotIn("last", state)
 
 
 if __name__ == "__main__":
@@ -514,4 +525,3 @@ class FailureDetailTests(unittest.TestCase):
         self.assertNotIn("[warn]", detail)
         only_warnings = "[warn] citation: something\nsession complete: published /a\n"
         self.assertEqual(autoagent.failure_detail(only_warnings, "pi"), "pi synthesis failed")
-
