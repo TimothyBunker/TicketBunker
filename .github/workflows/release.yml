@@ -68,6 +68,8 @@ jobs:
         run: |
           npm run build --prefix desktop
           npm run test --prefix desktop
+      - name: Verify CMake build detection before the full suite
+        run: python -m unittest discover -s tests -p test_build_detection.py -v
       - name: Test core
         run: python -m unittest discover -s tests -v
       - name: Test desktop host

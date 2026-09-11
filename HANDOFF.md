@@ -4,12 +4,12 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Installer candidate 0.6.5-rc3 (2026-09-10, preparation)
+## Installer candidate 0.6.5-rc4 (2026-09-11, preparation)
 
 Tim requested an installer containing the workspace campaigns and save/list
 recovery fixes below. Source `ccd40bb` passed CI `34553247773`. The candidate
 bumps Python, UI and native versions together to 0.6.5; intended immutable tag
-is now `v0.6.5-rc3`. Use the existing release workflow for Windows x64, Linux x64 and
+is now `v0.6.5-rc4`. Use the existing release workflow for Windows x64, Linux x64 and
 macOS Apple Silicon. Windows remains an unsigned prerelease; stable-only update
 discovery does not offer it. No user data or repository configuration is reset.
 Do not claim downloadable installers until the Release workflow and asset checks
@@ -24,6 +24,14 @@ but Windows failed only the old sub-second Git-commit timing assertion (3.219s
 on its hosted runner). That test now uses a 30s process deadline and checks no
 queued/running/finished agent state; a direct CLI regression explicitly forbids
 enqueue/spawn while requiring the change record. Product runtime is unchanged.
+Rc3 (`a8f6ef7`, Release `34556621370`) completed Linux/macOS bundles but Windows
+timed out in the compiler-free CMake fixture. Native Windows probes passed with
+Visual Studio (~2.5s) and Ninja (~0.11s); the historical stall cannot be identified
+because timeout output was omitted. The fixture now explicitly selects Ninja,
+isolates host generator/toolchain overrides, preserves timeout stdout/stderr and
+fails rather than silently skipping absent CI tools. Its 60s deadline and actual
+target-output assertion remain. Release checks it before the lengthy core suite.
+This changes test configuration only, not users' detected build commands.
 
 ## Save/read recovery follow-up (2026-09-10, source only)
 
