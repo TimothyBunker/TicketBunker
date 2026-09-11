@@ -4,6 +4,17 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Installer candidate 0.6.5-rc1 (2026-09-10, preparation)
+
+Tim requested an installer containing the workspace campaigns and save/list
+recovery fixes below. Source `ccd40bb` passed CI `34553247773`. The candidate
+bumps Python, UI and native versions together to 0.6.5; intended immutable tag
+is `v0.6.5-rc1`. Use the existing release workflow for Windows x64, Linux x64 and
+macOS Apple Silicon. Windows remains an unsigned prerelease; stable-only update
+discovery does not offer it. No user data or repository configuration is reset.
+Do not claim downloadable installers until the Release workflow and asset checks
+have completed. Never move an existing release tag.
+
 ## Save/read recovery follow-up (2026-09-10, source only)
 
 Tim asked to fix the two remaining intermittent failure paths. Deterministic
