@@ -114,9 +114,9 @@ export async function command<T>(
       projectRoot: projectRoot || null,
     });
   }
-  let response: Response;
-  try {
-    response = await fetch("/api/action", {
+  // Only this indexed read is replay-safe: ticket.get can materialize data,
+  // and writes may have completed even if their response was lost.
+  const request: RequestInit = {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -124,13 +124,21 @@ export async function command<T>(
         "X-TicketBunker-Token": browserToken(),
       },
       body: JSON.stringify({ action, payload, project_root: projectRoot || null }),
-    });
-  } catch (reason) {
-    if (isNetworkFailure(reason)) {
+    };
+  let response: Response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch("/api/action", request);
+      break;
+    } catch (reason) {
+      if (!isNetworkFailure(reason)) throw reason;
+      if (action === "application.ticket.list" && attempt === 0) {
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+        continue;
+      }
       setOffline(true);
       throw new Error(OFFLINE_MESSAGE);
     }
-    throw reason;
   }
   setOffline(false);
   const value = (await responseObject(response, true)) as T & { ok?: boolean; code?: string; message?: string };

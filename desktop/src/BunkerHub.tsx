@@ -191,7 +191,7 @@ function ProjectCatalog({
   );
 }
 
-function TicketCatalog({
+export function TicketCatalog({
   bunker,
   project,
   onTicket,
@@ -211,6 +211,11 @@ function TicketCatalog({
   const [label, setLabel] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
+  const [loadedKey, setLoadedKey] = useState("");
+  const queryKey = JSON.stringify([bunker.id, project?.id, committedQuery, status, assignee, reporter, label, pageNumber]);
+  const visiblePage = loadedKey === queryKey ? page : null;
 
   useEffect(() => {
     const timer = window.setTimeout(() => setCommittedQuery(query), 220);
@@ -222,6 +227,7 @@ function TicketCatalog({
   useEffect(() => {
     let active = true;
     setError("");
+    setLoading(true);
     command<TicketPage>("application.ticket.list", {
       bunker_id: bunker.id,
       project_id: project?.id || "",
@@ -233,21 +239,22 @@ function TicketCatalog({
       page: pageNumber,
       page_size: 25,
     })
-      .then((value) => active && setPage(value))
+      .then((value) => { if (active) { setPage(value); setLoadedKey(queryKey); } })
       .catch((reason) => active && setError(String(reason)))
+      .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [bunker.id, project?.id, committedQuery, status, assignee, reporter, label, pageNumber, version]);
+  }, [bunker.id, project?.id, committedQuery, status, assignee, reporter, label, pageNumber, version, retry, queryKey]);
 
   const groups = useMemo(() => {
     const values = new Map<string, TicketReference[]>();
-    for (const ticket of page?.tickets || []) {
+    for (const ticket of visiblePage?.tickets || []) {
       const key = ticket.status || "Open";
       values.set(key, [...(values.get(key) || []), ticket]);
     }
     return [...values.entries()];
-  }, [page]);
+  }, [visiblePage]);
 
   return (
     <section className="catalog" aria-label="Tickets">
@@ -282,9 +289,9 @@ function TicketCatalog({
         </select>
         {(query || status !== "active" || assignee || reporter || label) && <button onClick={() => { setQuery(""); setCommittedQuery(""); setStatus("active"); setAssignee(""); setReporter(""); setLabel(""); setPageNumber(1); }}>Clear filters</button>}
       </div>
-      {error && <div className="inline-error">{error}</div>}
-      {!page && !error && <div className="ticket-loading">Loading tickets</div>}
-      {page && page.total === 0 && (
+      {error && <div className="inline-error" role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>Retry loading tickets</button></div>}
+      {loading && <div className="ticket-loading" role="status">{visiblePage ? "Updating tickets" : "Loading tickets"}</div>}
+      {visiblePage && !loading && !error && visiblePage.total === 0 && (
         <div className="quiet-empty">
           <h2>No tickets here</h2>
           <p>Change the filters or sync tickets from a configured source.</p>
@@ -308,11 +315,11 @@ function TicketCatalog({
           </div>
         </section>
       ))}
-      {page && page.page_count > 1 && (
+      {visiblePage && visiblePage.page_count > 1 && (
         <nav className="pagination" aria-label="Ticket pages">
-          <button disabled={page.page <= 1} onClick={() => setPageNumber(page.page - 1)}>Previous</button>
-          <span>{page.page} of {page.page_count}</span>
-          <button disabled={page.page >= page.page_count} onClick={() => setPageNumber(page.page + 1)}>Next</button>
+          <button disabled={visiblePage.page <= 1} onClick={() => setPageNumber(visiblePage.page - 1)}>Previous</button>
+          <span>{visiblePage.page} of {visiblePage.page_count}</span>
+          <button disabled={visiblePage.page >= visiblePage.page_count} onClick={() => setPageNumber(visiblePage.page + 1)}>Next</button>
         </nav>
       )}
     </section>

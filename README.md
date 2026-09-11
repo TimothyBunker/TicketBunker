@@ -66,6 +66,13 @@ the source file. Closing an unsaved tab
 or the native app asks whether to save. If the branch or file changed elsewhere,
 TicketBunker keeps your draft and refuses to overwrite it. Local refresh rereads
 Git state, the file tree and unchanged buffers; it does not fetch or pull.
+Once a file save is confirmed, you can save another edit even while workspace
+recovery is catching up. If the source write itself is still pending, Ctrl+S
+explains the wait and keeps newer edits unsaved until you explicitly save again.
+
+A dropped ticket-list connection gets one automatic read retry in the browser.
+If it still fails, use **Retry loading tickets** beside the list error; this keeps
+your filters and does not repeat tracker sync. Writes are never retried automatically.
 
 Recovery lives in the application data folder (`workspaces.sqlite3`), never in
 your repository or shared Bunker. It is plaintext private device data, not an

@@ -30,6 +30,19 @@ service version, while an idempotent existing-member enrollment does not.
 
 Worker and browser transport failures name uncertain outcomes honestly: a missing
 reply is not proof that a write failed, and no mutation is automatically replayed.
+The browser may retry `application.ticket.list` once after a transport rejection
+(150ms pause, identical request); this explicit indexed-read exception does not
+include ticket materialization, tracker sync, synthesis, or any write. Typed and
+unreadable responses are not replayed. Failed catalog reads expose a local retry
+that preserves filters and pagination without syncing the tracker. Loading or
+failure is never presented as an empty result; saved rows may remain visible only
+for the same Bunker/Project/query/page.
+
+Source-save readiness is separate from recovery persistence. After a confirmed
+file receipt, another explicit save can use that receipt's digest without waiting
+for recovery. Recovery remains serialized and close protection counts outstanding
+operations. A shortcut during an actual source write explains that newer edits
+remain unsaved and need an explicit save afterward; it never silently queues them.
 Diagnostics must not crash their own error boundary or claim to have been saved
 when storage is unavailable. Background Git helpers use the platform's no-console
 options on Windows.

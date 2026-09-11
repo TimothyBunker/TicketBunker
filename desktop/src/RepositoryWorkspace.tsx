@@ -47,6 +47,9 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   const [error, setError] = useState("");
   const [refreshError, setRefreshError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const writeInFlight = useRef(false);
+  const saveOperations = useRef(0);
   const [treeVersion, setTreeVersion] = useState(0);
   const [treeOpen, setTreeOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(true);
@@ -272,19 +275,32 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
   }, [adding, query]);
 
   async function save(tab: Tab): Promise<boolean> {
+    if (writeInFlight.current) {
+      setError("A file save is in progress. Any newer edits remain unsaved; wait for it to finish, then press Save again.");
+      return false;
+    }
+    if (tab.content === tab.saved) return true;
+    writeInFlight.current = true; setWriting(true);
+    saveOperations.current += 1;
     bumpFile(tab.path);
     setBusy(true); setError("");
     try {
-      const result = await command<{ content: string; digest: string }>("workspace.file.save", { ...payload, path: tab.path, branch: tab.branch, head: tab.head, content: tab.content, expected_digest: tab.digest });
-      bumpFile(tab.path);
-      const updated = { ...latest.current, tabs: latest.current.tabs.map((current) => current.path === tab.path ? { ...current, saved: result.content, content: current.content === tab.content ? result.content : current.content, digest: result.digest, changed: false } : current) };
-      latest.current = updated; setView(updated);
-      rescueDrafts();
+      try {
+        const result = await command<{ content: string; digest: string }>("workspace.file.save", { ...payload, path: tab.path, branch: tab.branch, head: tab.head, content: tab.content, expected_digest: tab.digest });
+        bumpFile(tab.path);
+        const updated = { ...latest.current, tabs: latest.current.tabs.map((current) => current.path === tab.path ? { ...current, saved: result.content, content: current.content === tab.content ? result.content : current.content, digest: result.digest, changed: false } : current) };
+        latest.current = updated; setView(updated);
+        rescueDrafts();
+      } finally {
+        // Recovery receipts must not block another explicit source save. Keep
+        // the close guard busy until all operations (including recovery) settle.
+        writeInFlight.current = false; setWriting(false);
+      }
       try { await persist(); }
       catch (reason) { setError(`Saved ${tab.path}, but workspace recovery was not updated. Save any remaining files or copy unsaved text before closing. ${String(reason)}`); }
       return true;
     } catch (reason) { setError(String(reason)); return false; }
-    finally { setBusy(false); }
+    finally { saveOperations.current -= 1; setBusy(saveOperations.current > 0); }
   }
   useUnsavedEditor({ retained: true, dirty: view.tabs.some((tab) => tab.content !== tab.saved), busy,
     description: `Save unsaved files in ${repository.name}?`,
@@ -339,8 +355,8 @@ export default function RepositoryWorkspace({ bunker, repository, visible, targe
         {fileQuery ? <ul>{foundFiles.map((path) => <li key={path}><button onClick={() => { void openFile(path); setFileQuery(""); }}>{path}</button></li>)}</ul> : <Directory key={treeVersion} payload={payload} path="" onOpen={openFile} expanded={expanded} toggle={toggleDirectory} />}
       </nav>
       <main className="workspace-file-area"><div className="workspace-file-tabs" role="tablist" aria-label="Open files">{view.tabs.map((tab) => <div key={tab.path}><button role="tab" aria-selected={view.active === tab.path} title={tab.path} onClick={() => { openIntent.current++; setView((old) => ({ ...old, active: tab.path })); setSelection(null); }}>{tab.path.split("/").pop()}{tab.content !== tab.saved ? " •" : ""}</button><button aria-label={`Close ${tab.path}`} onClick={() => tab.content !== tab.saved ? setClosing(tab.path) : closeFile(tab.path)}>×</button></div>)}</div>
-        {file ? <><div className="workspace-file-tools"><span title={file.path}>{file.path}</span>{file.changed && <span role="status">Changed on disk or branch</span>}<button disabled={busy || file.content === file.saved} onClick={() => save(file)}>Save</button>{selection && <button disabled={!activeTicket} title={activeTicket ? `Send selection to ${view.conversation}` : "Add a ticket overlay to discuss code"} onClick={() => discuss(selection)}>Discuss selection</button>}</div>
-          <Suspense fallback={<p>Loading editor…</p>}><CodeEditor openPaths={view.tabs.map((tab) => tab.path)} path={file.path} value={file.content} line={file.line} jump={jump} notes={currentNotes} tabSize={file.settings.tab_size} tabs={file.settings.indent_style === "tabs"} wrap={file.settings.line_wrap} onSave={() => { if (!busy) void save(file); }}
+        {file ? <><div className="workspace-file-tools"><span title={file.path}>{file.path}</span>{file.changed && <span role="status">Changed on disk or branch</span>}<button disabled={writing || file.content === file.saved} onClick={() => save(file)}>Save</button>{selection && <button disabled={!activeTicket} title={activeTicket ? `Send selection to ${view.conversation}` : "Add a ticket overlay to discuss code"} onClick={() => discuss(selection)}>Discuss selection</button>}</div>
+          <Suspense fallback={<p>Loading editor…</p>}><CodeEditor openPaths={view.tabs.map((tab) => tab.path)} path={file.path} value={file.content} line={file.line} jump={jump} notes={currentNotes} tabSize={file.settings.tab_size} tabs={file.settings.indent_style === "tabs"} wrap={file.settings.line_wrap} onSave={() => { void save(file); }}
             onChange={(content) => setView((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, content } : tab) }))}
             onLine={(line) => setView((old) => old.tabs.find((tab) => tab.path === old.active)?.line === line ? old : ({ ...old, tabs: old.tabs.map((tab) => tab.path === old.active ? { ...tab, line } : tab) }))} onSelection={setSelection} /></Suspense></> : <p className="quiet-empty">Open a file from this repository.</p>}
       </main>

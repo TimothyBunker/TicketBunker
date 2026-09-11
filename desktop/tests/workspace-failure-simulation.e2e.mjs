@@ -28,6 +28,11 @@ async function overlay(workspace, id) {
   await expect(workspace.getByLabel('Active ticket session')).toHaveValue(id);
 }
 const action = request => { try { return request.postDataJSON()?.action; } catch { return ''; } };
+async function receiptReady(promise, label) {
+  let timer;
+  try { await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} was not reached within 10 seconds`)), 10000); })]); }
+  finally { clearTimeout(timer); }
+}
 for (const name of selected) {
   const directory = join(output, name);
   const lab = await startLab(directory, { workerProcess: name === 'worker' });
@@ -227,6 +232,12 @@ for (const name of selected) {
       const gate = new Promise(resolve => { release = resolve; });
       let sourceCompleted = false;
       let held = false;
+      let holdSource = false;
+      let writeReady;
+      let releaseWrite;
+      const writeHeld = new Promise(resolve => { writeReady = resolve; });
+      const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+      let writes = 0;
       const saves = [];
       await page.route('**/api/action', async route => {
         const request = route.request();
@@ -234,6 +245,10 @@ for (const name of selected) {
           saves.push(request.postDataJSON().payload);
           const response = await route.fetch();
           sourceCompleted = true;
+          if (holdSource) {
+            writes++;
+            if (writes === 1) { writeReady(); await writeGate; }
+          }
           await route.fulfill({ response });
         } else if (sourceCompleted && !held && action(request) === 'workspace.save') {
           held = true;
@@ -249,11 +264,11 @@ for (const name of selected) {
       await replaceEditor(page, workspace, firstDraft);
       const saveButton = workspace.getByRole('button', { name: 'Save', exact: true });
       await saveButton.click();
-      await recoveryHeld;
+      await receiptReady(recoveryHeld, 'Held recovery receipt');
       expect(readFileSync(source, 'utf8')).toBe(firstDraft);
       await replaceEditor(page, workspace, nextDraft);
       await expect(workspace.getByRole('tab', { name: 'README.md •', exact: true })).toBeVisible();
-      await expect(saveButton).toBeDisabled();
+      await expect(saveButton).toBeEnabled();
       await page.evaluate(() => {
         document.addEventListener('keydown', event => {
           if (!event.ctrlKey || event.key.toLowerCase() !== 's') return;
@@ -262,23 +277,42 @@ for (const name of selected) {
           globalThis.__busySaveKey = { disabled: button.disabled, editor_focused: !!event.target.closest('.monaco-editor') };
         }, true);
       });
-      await page.keyboard.press('Control+s');
-      await page.waitForTimeout(200); // Bounded negative observation while the real recovery reply is held.
-      record.blocked_keydown = await page.evaluate(() => globalThis.__busySaveKey);
-      expect(record.blocked_keydown).toEqual({ disabled: true, editor_focused: true });
-      expect(saves).toHaveLength(1);
-      expect(readFileSync(source, 'utf8')).toBe(firstDraft);
-      release();
-      await expect(saveButton).toBeEnabled();
       const receipt = page.waitForResponse(response => action(response.request()) === 'workspace.file.save');
       await page.keyboard.press('Control+s');
       expect((await (await receipt).json()).ok).toBe(true);
+      record.save_keydown = await page.evaluate(() => globalThis.__busySaveKey);
+      expect(record.save_keydown).toEqual({ disabled: false, editor_focused: true });
       expect(saves).toHaveLength(2);
       expect(saves[1].expected_root).toBe(lab.repositories.engine);
       expect(saves[1].content).toBe(nextDraft);
       expect(readFileSync(source, 'utf8')).toBe(nextDraft);
+      release();
+      record.checks.push('While the actual recovery reply is held, the enabled Ctrl+S saves the next explicit edit to its original repository using the confirmed source digest');
+      // Keep interception installed throughout: re-registering it during queued
+      // recovery traffic can miss the intended fault, invalidating the test.
+      holdSource = true;
+      release = releaseWrite;
+      const pendingDraft = `${original}\nSave waiting for its source receipt.\n`;
+      const newerDraft = `${original}\nNewer text must not be implicitly queued.\n`;
+      await replaceEditor(page, workspace, pendingDraft);
+      await expect(saveButton).toBeEnabled();
+      await page.keyboard.press('Control+s');
+      await receiptReady(writeHeld, 'Held source receipt');
+      await replaceEditor(page, workspace, newerDraft);
+      await page.keyboard.press('Control+s');
+      await expect(workspace.getByRole('alert')).toContainText('press Save again');
+      expect(writes).toBe(1);
+      expect(readFileSync(source, 'utf8')).toBe(pendingDraft);
+      release();
+      await expect(saveButton).toBeEnabled();
+      await page.waitForTimeout(200); // No implicit follow-up write after receipt.
+      expect(writes).toBe(1);
+      expect(await editorText(page, workspace)).toBe(newerDraft);
+      await page.keyboard.press('Control+s');
+      await expect.poll(() => readFileSync(source, 'utf8')).toBe(newerDraft);
+      expect(writes).toBe(2);
       await page.unrouteAll({ behavior: 'wait' });
-      record.checks.push('While the actual recovery reply is held, Save is disabled and Ctrl+S cannot write the later edit; after release the enabled shortcut saves that edit to its original repository');
+      record.checks.push('Ctrl+S during an actual pending source receipt explains the wait, preserves newer text, and requires another explicit save without queuing a write');
     } else if (name === 'worker') {
       const draft = `${original}\nUnsaved while the worker restarts.\n`;
       await replaceEditor(page, workspace, draft);

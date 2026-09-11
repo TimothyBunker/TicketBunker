@@ -247,16 +247,53 @@ runner or observer left running; the 14 recorded steady worker/browser PIDs were
 also absent. Unrelated running processes and the user's untracked design folders
 were left alone. These temporary captures are local evidence, not shipped assets.
 
+## Targeted save/list recovery follow-up (2026-09-10)
+
+After the campaign, Tim requested fixes for both remaining failure paths.
+New component tests first failed against the old implementation: an acknowledged
+source save kept Save disabled while recovery waited, Ctrl+S during an actual
+write silently did nothing, and a dropped ticket-list read had no bounded retry.
+
+The source-write gate now releases after the file receipt, separately from
+serialized recovery. Explicit newer edits use the confirmed digest; pending
+source writes show actionable guidance and never queue later text. Outstanding
+recovery operations retain close protection. Only browser `application.ticket.list`
+transport failures retry once, with identical input after 150ms; typed errors,
+unreadable replies, materialization and writes never replay. A failed list has a
+filter-preserving local retry, not another tracker sync or a false empty result.
+Results are scoped to their loaded Project/query/page.
+
+Regression evidence uses the real browser/worker with disposable repositories:
+`workspace-failure-simulation.e2e.mjs` holds recovery and source replies;
+`hardening.e2e.mjs` aborts one list request after successful sync, then two filtered
+reads to test explicit recovery without another sync. Evidence folders:
+`/tmp/tb-save-list-fixes-faults`, `/tmp/tb-save-list-fixes-busy-v4`,
+`/tmp/tb-save-list-fixes-hardening`, `/tmp/tb-save-list-fixes-small`, and
+`/tmp/tb-save-list-fixes-steady`. These are source tests, not an installer release.
+The final integrated nine-case replay also passed in `/tmp/tb-save-list-fixes-final`.
+
+Local verification: 203 frontend tests, 513 Python tests (three Linux skips),
+12 Rust tests, TypeScript/build; nine browser fault cases; connection-reset
+hardening journeys at 1440×940 and 1280×720; 724 real editor cycles over 300.233s
+with four models/two editors stable. The extra source-hold case passed after a
+test correction: unregistering/re-registering interception during queued traffic
+missed the intended fault (the source save actually succeeded). The first pilot
+was stopped and cleaned up; v2/v3 retain bounded failure captures. The final
+test keeps one interceptor installed and deadlines every held-receipt readiness
+wait, rather than treating a missed injection as a successful fault test.
+
 ## Remaining manual or architectural checks
 
 - **Open intermittent investigation: Ctrl+S.** One older sustained run stopped
   at cycle 2,107 with no save request and the dirty draft intact. No keydown-time
   readiness was captured. The later 4,245-cycle pass and controlled busy test
-  do not identify that cause; retain the new focus/readiness/request diagnostics.
+  do not identify that historical cause. The demonstrated recovery-blocked save
+  and silent busy shortcut are now fixed; retain focus/readiness/request diagnostics.
 - **Open intermittent investigation: ticket-list connection.** One hardening
   run showed sync success followed by a failed list connection. Later instrumented
-  and smaller-window runs did not reproduce it. Keep the browser request timeline
-  and fixture exception diagnostics; do not automatically repeat a mutation.
+  and smaller-window runs did not reproduce its cause. Transient read recovery and
+  explicit list retry are now covered with injected faults. Keep the browser
+  request timeline and fixture exception diagnostics; never repeat a mutation.
 - Installed Windows/Linux shortcut launch, native folder chooser, actual native
   close events and visible no-console behavior. Source tests verify arguments and
   mocked native callbacks; they do not prove packaged GUI rendering or interaction.

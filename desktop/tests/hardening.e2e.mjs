@@ -175,9 +175,37 @@ page.on('pageerror', (error) => errors.push(error.message));
   await expect(page.getByRole('list', { name: 'Linked boards' })).toContainText('Navigation board');
   await expect(page.getByRole('complementary', { name: 'Configuration' }).getByRole('button', { name: 'Sync tickets', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close configuration', exact: true }).click();
+  let failedLists = 0;
+  let failLists = 1;
+  let syncRequests = 0;
+  const listFault = async route => {
+    const action = route.request().postDataJSON()?.action;
+    if (action === 'application.project.sync') syncRequests++;
+    if (action === 'application.ticket.list' && failLists > 0) {
+      failLists--; failedLists++;
+      await route.abort('connectionreset');
+    } else await route.continue();
+  };
+  await page.route('**/api/action', listFault);
   await page.getByRole('button', { name: 'Sync tickets', exact: true }).click();
   evidence.sync_clicked_at = new Date().toISOString();
   await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
+  expect(failedLists).toBe(1);
+  // A persistent list failure gets a local retry, never another tracker sync
+  // and never a false empty state. Keep the selected filter on retry.
+  failLists = 2;
+  const completedSyncs = syncRequests;
+  await page.getByLabel('Status', { exact: true }).selectOption('all');
+  await expect(page.getByRole('button', { name: 'Retry loading tickets' })).toBeVisible();
+  expect(failedLists).toBe(3);
+  await expect(page.getByText('No tickets here', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Retry loading tickets' }).click();
+  await expect(page.locator('.ticket-row')).toContainText('TOOLS-7');
+  await expect(page.getByRole('button', { name: 'Retry loading tickets' })).toHaveCount(0);
+  await expect(page.getByLabel('Status', { exact: true })).toHaveValue('all');
+  expect(syncRequests).toBe(completedSyncs);
+  evidence.list_recovery = { injected_connection_failures: failedLists, sync_replayed: false };
+  await page.unroute('**/api/action', listFault);
   await expect(page.getByRole('button', { name: 'Sync tickets', exact: true })).toHaveAttribute('title', /Last successful ticket sync on this device/);
   // Reload drops the in-memory UI cache; the receipt must come from SQLite.
   evidence.reload_started_at = new Date().toISOString();

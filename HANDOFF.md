@@ -4,6 +4,28 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Save/read recovery follow-up (2026-09-10, source only)
+
+Tim asked to fix the two remaining intermittent failure paths. Deterministic
+tests reproduced recovery persistence holding Save disabled after a successful
+source receipt, silent Ctrl+S while busy, and an unrecoverable failed catalog read.
+Source-write readiness now unlocks before serialized recovery finishes; actual
+pending writes explain the wait and never queue newer edits. Close protection
+counts all outstanding save/recovery operations. Catalog reads have a bounded
+browser transport retry (only `application.ticket.list`, once), plus an explicit
+list-only retry that retains filters. Loading/errors never claim an empty list;
+saved results from another Project/query are not displayed.
+
+The committed browser flows now hold real source/recovery receipts and inject
+list connection resets after successful sync. The original historical stops lack
+enough evidence to prove these were their exact causes; retain diagnostics. No
+automatic write retry, installer release, or real-project mutation was introduced.
+Local validation passed: 203 frontend tests, 513 Python tests (three Linux skips),
+12 Rust tests, TypeScript/build, nine browser fault cases, both hardening viewport
+runs, and 724 real editor cycles over five minutes with stable resource counts.
+The additional source-hold browser test passes too; see the QA checklist for
+the earlier test-interception failures and their correction.
+
 ## Two-hour failure campaign (2026-09-10, completed; source only)
 
 `docs/qa-two-hour-campaign.md` tracks this follow-up to the earlier campaign.
