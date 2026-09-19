@@ -49,3 +49,19 @@ without closing the connection. Windows correctly refused to remove its open
 temporary database. That query and the browser lab's inspection now use explicit
 closing; a post-query assertion verifies the connection is closed on every OS.
 No transfer assertion or production gate was changed for this correction.
+
+## Release verification
+
+Published [v0.6.6-rc3](https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.6-rc3)
+from `677afe8`; all three release jobs and main CI passed. The campaign ran
+repeatedly in fresh local labs and in hosted browser CI. The Windows installer
+and Linux artifacts were downloaded and checked against their SHA-256 files.
+
+A packaged Linux smoke test caught another issue source tests missed: the
+`ubuntu-latest` frozen backend required GLIBC_2.38, which cannot load on this
+Ubuntu 22.04/glibc 2.35 machine. Release builds now pin Linux x64 to Ubuntu 22.04
+and start the frozen backend before packaging. Rc3's portable backend and the
+backend extracted from its deb both start here; a disposable service returns
+version 0.6.6 and snapshot-chunks support. The native shell's dynamic libraries
+also resolve. Live Windows/macOS GUI installation and real-provider synthesis
+remain user acceptance checks, not claims made by this campaign.

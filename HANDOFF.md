@@ -4,13 +4,16 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Installer candidate 0.6.6-rc3 (2026-09-19, preparation)
+## Installer 0.6.6-rc3 published (2026-09-19)
 
 Tim approved a two-person browser campaign and an installer containing the
 database repairs and pipeline visibility. Python/UI/native versions are 0.6.6;
-the intended immutable prerelease tag is `v0.6.6-rc3`. Use the existing Windows
-x64, Linux x64 and macOS Apple Silicon release matrix. Do not claim an installer
-is available until its release assets have been checked. Windows is unsigned.
+the immutable prerelease tag is `v0.6.6-rc3` at `677afe8`. Release run
+`35471031097` and main CI `35471030114` succeeded. Windows x64, Linux x64 and
+macOS Apple Silicon installers are published, with checksums, at
+https://github.com/TimothyBunker/TicketBunker/releases/tag/v0.6.6-rc3.
+The downloaded Windows installer checksum was verified. Windows is unsigned;
+this prerelease is not offered through stable-only update discovery.
 
 Rc1 (`6d94145`, Release `35468855029`) passed main CI `35468854547`, including
 the new browser campaign. Windows completed all transfer assertions but failed
@@ -25,8 +28,13 @@ core tests. Downloading its Linux artifact exposed a packaging baseline issue:
 the frozen Python from `ubuntu-latest` requires GLIBC_2.38 and cannot start on
 this Ubuntu 22.04/glibc 2.35 host. Rc3 pins Linux x64 builds to `ubuntu-22.04`
 and starts the frozen backend in CI. Windows/macOS application code is unchanged.
-Optional ARM Linux retains its explicit Ubuntu 24.04 baseline. Verify the newly
-built Linux binary locally before calling this compatibility issue resolved.
+Optional ARM Linux retains its explicit Ubuntu 24.04 baseline. Rc3's downloaded
+Linux AppImage, deb and portable archive checksums were verified. Both its
+portable and deb-contained frozen backends start on this Ubuntu 22.04/glibc 2.35
+host: help succeeds, and a disposable service reports version 0.6.6 with
+snapshot-chunks support. The deb's native shell dependencies resolve here too.
+This is a packaged-backend smoke test, not a claim of interactive GUI validation
+on every OS. No installer was installed over Tim's real app or data.
 
 `npm run test:sharing --prefix desktop` drives two isolated browser workers,
 data homes and Git clones against the real loopback shared service. The campaign
@@ -38,9 +46,12 @@ simulated. It runs in CI with screenshots/results retained. The campaign caught
 and fixed a ticket header grid regression caused by the new transfer indicator;
 it now asserts title width and containment. No real Bunker or source repo was used.
 
-Candidate checks: **541 core tests, OK with 3 skips**, **212 UI tests**,
-**12 Rust tests**, production build, local/shared pipeline browser flows and
-the two-participant browser campaign. Export/restore, PostgreSQL and secure
+Source candidate checks: **541 core tests, OK with 3 skips**, **212 UI tests**,
+**12 Linux Rust tests**, production build, local/shared pipeline browser flows
+and repeated two-participant browser campaigns. The added release-baseline
+regression brings the release core suite to **542 tests**; Windows passed with
+4 skips and 8 applicable Rust tests. All three hosted release jobs and browser
+CI passed. Export/restore, PostgreSQL and secure
 self-hosting assistance remain subsequent work, not part of this release.
 
 ## Database audit repairs (2026-09-19)
