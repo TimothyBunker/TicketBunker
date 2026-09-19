@@ -74,6 +74,7 @@ export type Bunker = {
   repository_count: number;
   repository_registry?: { revision: string; items: Repository[] };
   ticket_count: number;
+  pending_saves?: number;
 };
 
 export type AppState = {

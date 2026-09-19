@@ -39,6 +39,40 @@ records the current end-to-end behavior and measurements.
 
 ## Bunkers, Projects, and repositories
 
+Click the small computer/shared icon beside a Bunker or Project heading, or the
+transfer icon on a ticket, to open **Pipelines**. Each row shows what moves where;
+expand it for its trigger, last recorded result, and existing sync/review actions.
+Unfinished shared saves retain their confirmed-change counts and affected records.
+The drawer's refresh button only rereads local receipts. **Sync Bunker** can also
+resume previously requested saves; it does not fetch or push source code.
+An accepted save and a downloaded shared snapshot are deliberately separate.
+
+For a disposable two-person sharing exercise, build the app with
+`npm run build --prefix desktop`, then run `npm run test:sharing --prefix desktop`
+(requires Playwright Chromium). It drives separate users through sharing,
+joining, interrupted saves, conflicts, synthesis and private workspace checks.
+Only model responses and network faults are simulated; it uses the real app
+workers and shared service. Evidence is written to the temporary directory
+`ticketbunker-sharing-campaign`, or `TB_SIMULATION_OUTPUT` when set.
+
+Shared saves and shared refreshes are separate: a saved change does not imply
+that everyone else's changes have reached your device. Interrupted shared saves
+retain their request IDs locally; the next Bunker sync reconciles them without
+blindly resubmitting new writes. Conflicts keep their pending content and show
+a warning even if downloading other shared data succeeds. Review the affected
+ticket or configuration and save again.
+
+Updated services transfer large snapshots in verified chunks, so a growing
+Bunker can still sync and accept new members beyond a single response's size
+limit. Update the service as well as the app for this behavior. An initial
+**Share Bunker** upload still has an 8 MiB request cap; staged large imports
+are not implemented yet. Old reports that fail the service's structural gate
+need to be synthesized again before sharing. Remote source verification is
+client-attested, not a claim that the server inspected your code.
+
+PostgreSQL and secure self-hosting assistance are the intended production remote
+direction; they are not included in the current SQLite reference service.
+
 ### Work in a repository
 
 Select a Project, then a connected repository in the left sidebar. Its workspace

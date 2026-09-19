@@ -1,5 +1,80 @@
 # TicketBunker — Design
 
+### Transfer visibility (2026-09-19)
+
+Bunker, Project and ticket headers expose named local/shared indicators that
+open a Bunker-scoped pipeline drawer at the relevant transfer. Direction and
+state are textual as well as iconic; details disclose existing triggers and
+recorded receipts. This is observation of current behavior, not an automation
+editor. `application.bunker.pipelines` reads a consistent local database snapshot
+without contacting a service, tracker, Git remote or model. Its journal summary
+omits request bodies, credentials and idempotency keys, shows at most 50 saves
+(unfinished first) and 20 target references per save, and reports truncation.
+Ticket entry filters that displayed history, not the scope of Bunker sync.
+
+Write acceptance and snapshot download remain separate rows and times. A saved
+receipt never means live/current remote coverage. Unfinished intentions are not
+active jobs; only a transfer initiated in the view is shown as transferring.
+Conflicts retain review guidance after a successful pull. Existing Sync actions
+may resume previously requested saves; opening or refreshing the drawer cannot.
+Git fetch remains separate, with actual per-ticket results in Branches. A local
+repository attachment timestamp is not used as proof of a successful fetch.
+Private workspace data does not sync to the Bunker; model conversations can
+still send context to the configured provider. Pipeline errors do not replace
+the existing ticket synthesis state or introduce a new report publication path.
+
+The ticket's back/transfer controls share the navigation column; the title and
+ticket fields keep the main header column. The two-participant browser campaign
+uses independent data homes, credentials, checkouts and browser contexts against
+the real loopback service. Fault injection may drop an acknowledgement only
+after the service commits. Model output is simulated, but report gates, UI
+commands, authorization and persistence remain real. Evidence must distinguish
+unsent private drafts, persisted private conversations, shared reports and
+accepted configuration; no live user project is a test fixture.
+
+### Database reliability and remote direction (2026-09-19)
+
+Production remote storage is intended to move to **PostgreSQL**, with an
+operator-facing path for secure self-hosted deployment. That migration and
+hosting assistance follow the protocol correctness fixes; the implemented
+reference service still uses SQLite. Device-local Bunkers/workspaces remain
+SQLite. The client continues to address an authenticated service, never a raw
+remote database or a database password. Hosting assistance does not grant
+TicketBunker ownership of the user's infrastructure or source repositories.
+
+An accepted write is not read coverage. `sync_cursor` and `last_synced_at`
+advance only when a complete remote snapshot is applied. Separate write-receipt
+fields record successful mutations. A device-local generation guards pulls
+against intervening accepted writes as well as other pulls. Schema v4 clears
+the old ambiguous freshness cursor/time once, without deleting replica data.
+
+Shared mutations persist their intent and idempotency keys before transmission.
+The private operation journal records per-batch receipts; network uncertainty
+retains the original keys. Subsequent Bunker sync resumes previously requested
+operations, reconciles accepted state, and surfaces unresolved conflicts without
+silently rebasing their intent. Each batch remains atomic; a large operation is
+resumable, not globally atomic. A newly saved action covering the outstanding
+records of a conflicted operation supersedes that intent; its journal entry is
+retained. No agent work, tracker write, or source edit is triggered by recovery.
+
+The service validates branch report structure and matching branch/commit
+stamps, and owns regeneration of Combined. Legacy paired Combined writes must
+exactly match accepted children. Initial sharing uses the same structural
+gate. The host does not have the source checkout: stored verification metadata
+is explicitly **client-attested**, bound to content digest and submitting
+member, not server-verified source evidence. The existing local lint/anchor
+gates remain mandatory in the normal publication workflow.
+
+Snapshot downloads use authenticated immutable chunk transfers: one consistent
+database view, bounded response pieces, per-member access checks, an overall
+digest, and ten-minute expiry. The client downloads to a temporary file and
+does not apply anything until the entire snapshot validates. Older services
+retain the legacy bounded full-response fallback. This removes the growing
+Bunker's pull/join size cliff, but is not yet incremental sync or selective
+report hydration. Large initial publication uploads still have the HTTP request
+limit; staged uploads, indexed catalog queries, exports/restores, retention and
+independent editor/session identity remain follow-up work, not shipped claims.
+
 ### Repository workspace (2026-09-09)
 
 Failure handling (2026-09-10): checkout identity also includes the commit when

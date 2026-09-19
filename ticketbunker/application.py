@@ -525,6 +525,15 @@ def command_bunker_get(
     return {"bunker": bunker}
 
 
+@commands.register("application.bunker.pipelines")
+def command_bunker_pipelines(
+    _context: commands.CommandContext, payload: dict[str, Any]
+) -> dict[str, Any]:
+    from . import pipelines
+
+    return _bunker_result(pipelines.inspect, str(payload.get("bunker_id") or ""))
+
+
 @commands.register("application.bunker.configuration.get")
 def command_bunker_configuration_get(
     _context: commands.CommandContext, payload: dict[str, Any]
@@ -869,7 +878,13 @@ def command_bunker_join(
         invitation.server, bearer=bearer, credential_reference=reference if bearer else ""
     )
     profile = None if bearer else _service_profile()
-    enrollment = _bunker_result(adapter.enroll, invitation, profile)
+    try:
+        enrollment = adapter.enroll(invitation, profile)
+    except remote.RemoteContractError as exc:
+        issued = getattr(exc, "issued_credential", "")
+        if issued:
+            credentials.store(invitation.server, issued)
+        raise commands.CommandRejected("bunker_join_incomplete", str(exc)) from exc
     if enrollment.issued_credential:
         reference = credentials.store(invitation.server, enrollment.issued_credential)
         enrollment = remote.Enrollment(enrollment.snapshot, reference)
@@ -909,18 +924,8 @@ def _publish_changes(bunker_id: str, proposal: Mapping[str, Any]) -> dict[str, A
     if not changes:
         return None
     adapter, connection = _remote_adapter(bunker_id)
-    cursor = str(connection.get("sync_cursor") or "")
-    acceptance = {"cursor": cursor, "revision": ""}
-    for start in range(0, len(changes), remote.MAX_CHANGE_BATCH):
-        result = _bunker_result(
-            adapter.push,
-            str(connection["remote_bunker_id"]),
-            cursor,
-            tuple(changes[start : start + remote.MAX_CHANGE_BATCH]),
-        )
-        cursor = str(result.get("cursor") or cursor)
-        acceptance = {"cursor": cursor, "revision": str(result.get("revision") or "")}
-    return acceptance
+    from . import publication
+    return publication.publish(bunker_id, adapter, connection, changes)
 
 
 @commands.register("credentials.state")
@@ -1505,10 +1510,29 @@ def command_bunker_sync(
     """Pull the service's current state into this replica."""
     bunker_id = str(payload.get("bunker_id") or "")
     adapter, connection = _remote_adapter(bunker_id)
+    from . import publication
+    completed = []
+    conflicts = []
+    for operation in bunkerdb.pending_publications(bunker_id):
+        if operation["state"] == "conflict":
+            conflicts.append(operation["id"])
+            continue
+        try:
+            publication.resume(bunker_id, adapter, connection, operation)
+            completed.append(operation["id"])
+        except commands.CommandRejected as exc:
+            if exc.code != "publication_conflict":
+                raise
+            conflicts.append(operation["id"])
+    connection = bunkerdb.remote_connection(bunker_id)
     snapshot = _bunker_result(adapter.pull, str(connection["remote_bunker_id"]), "")
-    applied = _bunker_result(bunkerdb.apply_snapshot, bunker_id, snapshot, expected_cursor=str(connection.get("sync_cursor") or ""))
+    applied = _bunker_result(bunkerdb.apply_snapshot, bunker_id, snapshot,
+                            expected_cursor=str(connection.get("sync_cursor") or ""),
+                            expected_generation=connection.get("replica_generation"), completed_operations=completed)
     return {
         "sync": applied,
+        "publication_recovery": {"reconciled": completed, "conflicts": conflicts},
+        "warning": ("Shared data refreshed. A previous save has conflicting changes; its pending content is preserved on this device. Review the affected ticket or configuration and save again." if conflicts else ""),
         "bunker": bunkerdb.get_bunker(bunker_id),
         "bunkers": bunkerdb.list_bunkers(),
     }

@@ -9,6 +9,53 @@ The current client contract is `/api/v1`. JSON responses are bounded to 8 MiB.
 Production origins require HTTPS; plain HTTP is accepted only for localhost
 development.
 
+## Reliability extension (2026-09-19)
+
+The reference service now advertises `snapshot-chunks`. New clients use:
+
+- `POST /bunkers/{id}/snapshot-transfers` with `{}` to capture an immutable,
+  authenticated snapshot; response `transfer` contains `id`, `bunker_id`,
+  positive `parts` count and `sha256` of the full UTF-8 snapshot JSON.
+- `GET /bunkers/{id}/snapshot-transfers/{transfer}/{part}` for zero-based parts.
+  Response includes `id`, `part`, and base64 `content`. Raw chunks are at most
+  256 KiB, including when a single derived report is larger than a response.
+- `DELETE /bunkers/{id}/snapshot-transfers/{transfer}` to release a completed
+  or abandoned download. Access is scoped to the initiating member and Bunker;
+  current membership is checked on each request. Transfers expire after ten
+  minutes and each user may hold eight concurrently. Expired data is reclaimed
+  when another transfer begins.
+
+Clients verify ordering/identity and the complete digest before decoding and
+applying the snapshot. A failure leaves the replica intact. A `not_found` on
+opening the transfer permits old-service full-snapshot fallback; an interrupted
+transfer does not. This is bounded transport of a full view, not incremental
+replication or an engine-scale claim.
+
+Enrollment and initial publication accept `snapshot_transport: "chunks"`.
+They then return `snapshot_bunker_id` instead of embedding the full snapshot;
+the authenticated client retrieves it with the transfer API. Enrollment still
+returns its issued credential when appropriate. The application keeps an
+issued credential if the later download fails. The initial publication request
+itself remains subject to the 8 MiB request cap; staged large uploads are not
+implemented by this extension.
+
+Write responses still carry the service revision/cursor, but those are **write
+receipts**, not proof of local read coverage. Clients must not advance their
+last-applied snapshot cursor/time using a write receipt. The reference client
+journals requests before sending, resumes uncertain outcomes using identical
+keys, and reports partial success/conflicts. New receipt records bind keys to
+the submitting user and exact request hash; altered-key replays return
+`idempotency_conflict`.
+
+Branch `report` changes require valid tagged report structure and a matching
+branch/commit stamp; their revision must match the content hash. Verification
+metadata says `client-attested`, identifies the submitting member and commit,
+and binds the content digest. The host does not independently inspect Git
+anchors. Combined is regenerated from accepted children. A legacy explicit
+Combined change must match that derivation exactly; otherwise `report_invalid`.
+Initial publication enforces the same report shape/derivation rules. Existing
+stored history is not silently rewritten on upgrade.
+
 ## Roles and capabilities
 
 Every service uses the same membership vocabulary, defined in

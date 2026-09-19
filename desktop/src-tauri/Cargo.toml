@@ -1,6 +1,6 @@
 [package]
 name = "ticketbunker-desktop"
-version = "0.6.5"
+version = "0.6.6"
 description = "The TicketBunker desktop application shell"
 authors = ["TicketBunker contributors"]
 edition = "2021"

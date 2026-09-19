@@ -118,6 +118,28 @@ def main():
         bunkerdb.apply_ticket_sync_change(bid, change)
         repo = Path(repositories["engine"])
         commands.dispatch("application.profile.update", {"name": "Simulation QA", "email": "qa@example.test", "branch_user": "qa"}, commands.CommandContext(repo, transport="desktop"))
+        if os.environ.get("TB_PIPELINE_SHARED_LAB") == "1":
+            # Optional real loopback-service conflict, never an external account.
+            from test_service import ReferenceServiceTests
+            from ticketbunker import application
+            service = ReferenceServiceTests()
+            service.setUp()
+            stack.callback(service.tearDown)
+            application.command_bunker_share(None, {"bunker_id": bid, "server_url": service.origin,
+                                                    "setup_token": service.setup_token})
+            stale = bunkerdb.propose_ticket_sync(bid, project_id=pid, source_kind="manual",
+                tickets=[{"id": "LAB-1", "title": "My conflicting edit", "status": "in-progress"}])
+            competing = bunkerdb.propose_ticket_sync(bid, project_id=pid, source_kind="manual",
+                tickets=[{"id": "LAB-1", "title": "Keep movement inside the garden", "status": "in-progress", "description": "Another participant saved this."}])
+            adapter, connection = application._remote_adapter(bid)
+            adapter.push(connection["remote_bunker_id"], "", tuple(competing["changes"]))
+            try:
+                application._publish_changes(bid, stale)
+            except commands.CommandRejected as error:
+                if error.code != "publication_conflict":
+                    raise
+            else:
+                raise AssertionError("The shared pipeline fixture must preserve a conflict")
         if os.environ.get("TB_SIMULATION_WORKER_PROCESS") == "1":
             child = None
             port = 0

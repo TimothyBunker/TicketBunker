@@ -1,0 +1,26 @@
+.pipeline-panel { position: fixed; inset: 0 0 0 auto; z-index: 40; width: min(600px, 100vw); padding: 24px; overflow: auto; background: var(--paper); border-left: 1px solid var(--line); box-shadow: -12px 0 30px rgb(25 40 61 / 8%); }
+.pipeline-panel > header, .pipeline-authority { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.pipeline-panel > header { margin-bottom: 20px; }
+.pipeline-authority { padding-bottom: 14px; color: var(--muted); font-size: 12px; }
+.pipeline-row { border-top: 1px solid var(--line); }
+.pipeline-row > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; cursor: pointer; list-style: none; }
+.pipeline-row > summary::after { content: '+'; flex-shrink: 0; color: var(--muted); }
+.pipeline-row[open] > summary::after { content: '−'; }
+.pipeline-row > summary::-webkit-details-marker { display: none; }
+.pipeline-row strong { font-size: 13px; }
+.pipeline-row small { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; overflow-wrap: anywhere; }
+.pipeline-state { margin-left: auto; max-width: 42%; color: var(--muted); font-size: 11px; text-align: right; }
+.pipeline-state.failed, .pipeline-state.attention { color: var(--red); }
+.pipeline-state.pending { color: var(--amber); }
+.pipeline-detail { padding: 0 0 18px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.pipeline-detail dl { display: grid; grid-template-columns: 95px minmax(0, 1fr); gap: 6px 12px; margin: 0 0 12px; }
+.pipeline-detail dt { color: var(--muted); }
+.pipeline-detail dd { margin: 0; }
+.pipeline-detail h3 { margin-top: 20px; }
+.pipeline-operations { list-style: none; padding: 0; }
+.pipeline-operations > li { padding: 12px 0; border-bottom: 1px solid var(--soft-line); }
+.pipeline-operations ul { padding-left: 18px; }
+.pipeline-operations ul li { margin: 8px 0; }
+.pipeline-operations button { margin-left: 8px; }
+@media (max-width: 500px) { .pipeline-panel { padding: 18px; } .pipeline-row > summary { flex-wrap: wrap; gap: 8px; } }
+.heading-with-pipeline { display: flex; align-items: center; gap: 8px; }

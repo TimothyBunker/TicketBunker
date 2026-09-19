@@ -53,6 +53,7 @@ class ApplicationWorkerTests(unittest.TestCase):
         dispatch.assert_not_called()
 
     def test_ticket_and_coworker_actions_are_explicit_desktop_capabilities(self) -> None:
+        self.assertIn("application.bunker.pipelines", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.ticket.get", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.configuration.replace", app_worker.DESKTOP_ACTIONS)
         self.assertIn("application.bunker.repository.replace", app_worker.DESKTOP_ACTIONS)

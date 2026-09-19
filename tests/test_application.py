@@ -653,7 +653,7 @@ class SharedBunkerTests(unittest.TestCase):
                 "repositories": [{"name": "Flux", "canonical_remote": "github.com/example/flux"}],
             },
         )
-        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-5")
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["last_write_cursor"], "change-5")
 
         invitation = self.dispatch(
             "application.bunker.invitation.create", {"bunker_id": created["id"]}
@@ -728,7 +728,7 @@ class SharedBunkerTests(unittest.TestCase):
         self.assertEqual(synced["created"], 2)
         # fields, mapping, board, then two tickets, after the five earlier changes
         # Enrollment is snapshot-visible and advances the service cursor.
-        self.assertEqual(bunkerdb.remote_connection(created["id"])["sync_cursor"], "change-11")
+        self.assertEqual(bunkerdb.remote_connection(created["id"])["last_write_cursor"], "change-11")
 
         # A member joining afterwards receives the tracker and its tickets, and
         # may sync too because members hold tickets:write.

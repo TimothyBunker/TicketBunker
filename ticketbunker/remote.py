@@ -8,6 +8,9 @@ The desktop application connects to a service, never to its database.
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import tempfile
 import re
 import urllib.error
 import urllib.parse
@@ -135,6 +138,10 @@ _CODE_MESSAGES = {
     "bunker_invalid": "The Bunker could not be published because its content did not validate.",
     "ticket_conflict": "Those tickets changed on the shared Bunker. Sync again.",
     "report_conflict": "That report changed on the shared Bunker. Sync, then synthesize again.",
+    "report_invalid": "The report did not pass the service publication gate. Synthesize its branch again; Combined must come from accepted branch reports.",
+    "snapshot_expired": "The snapshot download expired. Sync again; your local data has not been replaced.",
+    "snapshot_busy": "Previous snapshot downloads are still open. Wait a few minutes and sync again.",
+    "idempotency_conflict": "A saved request key was reused for different content. Sync the Bunker and submit a new action.",
     "changes_invalid": "The service did not understand this change. It may be running an older TicketBunker: restart tb serve, then retry.",
 }
 
@@ -372,6 +379,7 @@ class HTTPRemoteAdapter:
         body: dict[str, Any] = {
             "bunker_id": invitation.bunker_id,
             "invite": invitation.token,
+            "snapshot_transport": "chunks",
         }
         if self.bearer:
             if not self.credential_reference:
@@ -386,7 +394,7 @@ class HTTPRemoteAdapter:
             body["profile"] = _profile_payload(profile)
         value = self._request("POST", "/invitations/redeem", body)
         snapshot_value = value.get("snapshot")
-        if not isinstance(snapshot_value, dict):
+        if not isinstance(snapshot_value, dict) and not value.get("snapshot_bunker_id"):
             raise RemoteContractError(
                 "The TicketBunker server did not complete authenticated enrollment."
             )
@@ -395,6 +403,18 @@ class HTTPRemoteAdapter:
             raise RemoteContractError(
                 "This server requires sign-in before joining. Sign in to it, then retry."
             )
+        if value.get("snapshot_bunker_id"):
+            if issued:
+                downloader = HTTPRemoteAdapter(self.server, bearer=issued)
+            else:
+                downloader = self
+            try:
+                snapshot_value = downloader._pull_chunks(str(value["snapshot_bunker_id"]))
+            except RemoteContractError as exc:
+                # The application persists this credential, not the transport.
+                # Never expose it in the error text or command response.
+                exc.issued_credential = issued
+                raise
         return Enrollment(
             _snapshot(snapshot_value), self.credential_reference, issued_credential=issued
         )
@@ -418,8 +438,10 @@ class HTTPRemoteAdapter:
     def publish(self, payload: Mapping[str, Any]) -> RemoteSnapshot:
         """Publish a local Bunker; the authenticated user becomes its owner."""
         self._require_signed_in("share a Bunker")
-        value = self._request("POST", "/bunkers", dict(payload))
+        value = self._request("POST", "/bunkers", {**payload, "snapshot_transport": "chunks"})
         snapshot_value = value.get("snapshot")
+        if value.get("snapshot_bunker_id"):
+            snapshot_value = self._pull_chunks(str(value["snapshot_bunker_id"]))
         if not isinstance(snapshot_value, dict):
             raise RemoteContractError("The TicketBunker server did not publish the Bunker.")
         return _snapshot(snapshot_value)
@@ -469,12 +491,58 @@ class HTTPRemoteAdapter:
             )
 
     def pull(self, bunker_id: str, cursor: str) -> RemoteSnapshot:
+        try:
+            return _snapshot(self._pull_chunks(bunker_id))
+        except RemoteContractError as exc:
+            if getattr(exc, "code", "") not in {"not_found", "http_404"}:
+                raise
+        # Compatibility with older services; no unsafe fallback after a
+        # partial or invalid chunk transfer.
         query = urllib.parse.urlencode({"after": cursor}) if cursor else ""
         suffix = f"?{query}" if query else ""
         value = self._request(
             "GET", f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/snapshot{suffix}"
         )
         return _snapshot(value)
+
+    def _pull_chunks(self, bunker_id: str) -> Mapping[str, Any]:
+        path = f"/bunkers/{urllib.parse.quote(bunker_id, safe='')}/snapshot-transfers"
+        opened = self._request("POST", path, {})
+        transfer = opened.get("transfer")
+        if (not isinstance(transfer, dict) or transfer.get("bunker_id") != bunker_id
+                or not re.fullmatch(r"[0-9a-f]{32}", str(transfer.get("id") or ""))
+                or type(transfer.get("parts")) is not int or transfer["parts"] < 1
+                or not re.fullmatch(r"[0-9a-f]{64}", str(transfer.get("sha256") or ""))):
+            raise RemoteContractError("The service returned an invalid snapshot manifest.")
+        identity = transfer["id"]
+        digest = hashlib.sha256()
+        try:
+            with tempfile.TemporaryFile() as stream:
+                for part in range(transfer["parts"]):
+                    value = self._request("GET", f"{path}/{identity}/{part}")
+                    if value.get("id") != identity or value.get("part") != part:
+                        raise RemoteContractError("Snapshot parts were mixed. Sync again; local data was not changed.")
+                    try:
+                        raw = base64.b64decode(value["content"], validate=True)
+                    except (KeyError, ValueError, TypeError) as exc:
+                        raise RemoteContractError("A snapshot part was unreadable. Sync again.") from exc
+                    digest.update(raw)
+                    stream.write(raw)
+                if digest.hexdigest() != transfer["sha256"]:
+                    raise RemoteContractError("The snapshot checksum did not match. Local data was not changed.")
+                stream.seek(0)
+                try:
+                    result = json.load(stream)
+                except (ValueError, UnicodeError) as exc:
+                    raise RemoteContractError("The snapshot could not be decoded. Local data was not changed.") from exc
+                if not isinstance(result, dict):
+                    raise RemoteContractError("The snapshot is not an object.")
+                return result
+        finally:
+            try:
+                self._request("DELETE", f"{path}/{identity}")
+            except RemoteContractError:
+                pass  # Expiry cleans up after disconnection; preserve the original outcome.
 
     def push(
         self, bunker_id: str, cursor: str, changes: tuple[Mapping[str, Any], ...]

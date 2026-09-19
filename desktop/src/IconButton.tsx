@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 
-export type IconName = "plus" | "settings" | "sync" | "grid" | "trash" | "panel-left" | "panel-right" | "folder";
+export type IconName = "plus" | "settings" | "sync" | "grid" | "trash" | "panel-left" | "panel-right" | "folder" | "device" | "shared" | "pipeline";
 export function Icon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {name === "plus" && <path d="M12 5v14M5 12h14" />}
@@ -10,6 +10,9 @@ export function Icon({ name }: { name: IconName }) {
     {name === "trash" && <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></>}
     {(name === "panel-left" || name === "panel-right") && <><rect x="3" y="4" width="18" height="16" rx="2" /><path d={name === "panel-left" ? "M9 4v16" : "M15 4v16"} /></>}
     {name === "folder" && <path d="M3 19V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" />}
+    {name === "device" && <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></>}
+    {name === "shared" && <><circle cx="6" cy="12" r="3" /><circle cx="18" cy="5" r="3" /><circle cx="18" cy="19" r="3" /><path d="m9 10 6-4m-6 8 6 4" /></>}
+    {name === "pipeline" && <><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="15" width="6" height="6" rx="1" /><path d="M9 6h9v9m-4-4 4 4 4-4M6 9v12" /></>}
   </svg>;
 }
 

@@ -34,6 +34,7 @@ DESKTOP_ACTIONS = frozenset(
         "application.project.remove",
         "application.bunker.create",
         "application.bunker.get",
+        "application.bunker.pipelines",
         "application.bunker.configuration.get",
         "application.bunker.configuration.replace",
         "application.bunker.project.create",

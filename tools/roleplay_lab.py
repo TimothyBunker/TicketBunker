@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,9 @@ def main():
         person.area.mkdir()
         person.repo = person.area / "source"
         person.env = isolated_environment(person.area)
+        (person.area / "settings.json").write_text(json.dumps({
+            "credentials_file": str(person.area / "tracker-credentials.env"),
+        }), encoding="utf-8")
         person.name, person.bid, person.pid, person.rid = name, "", "", ""
         person.git("clone", "--quiet", str(origin), str(person.repo), cwd=person.area)
         person.git("remote", "set-url", "origin", "ssh://git@git.example.test/team/dummy.git")
@@ -46,7 +50,13 @@ def main():
         person.env["GIT_SSH_COMMAND"] = f'"{sys.executable}" "{ROOT / "tools/two_participant_loop.py"}" --git-transport "{origin}"'
         person.env["GIT_SSH_VARIANT"] = "ssh"
         people[name] = person
-        code = "from pathlib import Path; from ticketbunker import app_server; s=app_server.serve(Path.cwd(),0,launch_id='roleplay'); print(s.server_port,flush=True); s.serve_forever()"
+        code = (
+            "from pathlib import Path\nfrom ticketbunker import app_server, coworker\n"
+            "def simulated_chat(*args, **kwargs):\n"
+            "    return {'reply': 'Simulation coworker reply. No proposal.', 'proposal': None}, {'harness': 'simulation'}\n"
+            "coworker._run_pi = simulated_chat\n"
+            "s=app_server.serve(Path.cwd(),0,launch_id='roleplay')\nprint(s.server_port,flush=True)\ns.serve_forever()"
+        )
         log = (person.area / "browser-worker.log").open("w")
         process = subprocess.Popen([sys.executable, "-u", "-c", code], cwd=person.repo,
             env=person.env, stdout=subprocess.PIPE, stderr=log, text=True)
@@ -57,6 +67,21 @@ def main():
     store.initialize()
     token = store.issue_setup_token()
     shared = server.serve(store, host="127.0.0.1", port=0, quiet=True)
+    fault = {"drop_next_receipt": False, "dropped": 0}
+    normal_send = server.ServiceHandler._send
+
+    def fault_send(handler, status, payload):
+        if fault["drop_next_receipt"] and handler.path.endswith("/changes") and status == 200:
+            # The real service transaction has committed. Lose only its receipt.
+            fault["drop_next_receipt"] = False
+            fault["dropped"] += 1
+            handler.close_connection = True
+            handler.connection.shutdown(socket.SHUT_RDWR)
+            handler.connection.close()
+            return
+        normal_send(handler, status, payload)
+
+    server.ServiceHandler._send = fault_send
     port = shared.server_port
     thread = threading.Thread(target=shared.serve_forever, daemon=True)
     thread.start()
@@ -94,7 +119,25 @@ def main():
                     print(json.dumps({"git":p.git(*value["args"])}),flush=True)
                 elif op == "stub-enable":
                     # Only substitute provider readiness, not UI behavior or gates.
-                    print(p.fixture("from ticketbunker import config\nc=config.load(); c.setdefault('agent',{})['enabled']=True; config.save(c); print('true')"),flush=True)
+                    print(json.dumps(p.fixture("from ticketbunker import config\nc=config.load(); c.setdefault('agent',{})['enabled']=True; config.save(c); print('true')")),flush=True)
+                elif op == "drop-next-receipt":
+                    fault["drop_next_receipt"] = True
+                    print('{"armed":true}', flush=True)
+                elif op == "inspect":
+                    rows = p.fixture("print(json.dumps(bunkerdb.list_bunkers()))")
+                    if rows:
+                        p.bid = rows[0]["id"]
+                    evidence = p.fixture(
+                        "from dataclasses import asdict\nfrom ticketbunker import application\n"
+                        "b=bunkerdb.get_bunker(v['bid'])\n"
+                        "a,c=application._remote_adapter(v['bid'])\n"
+                        "s=asdict(a.pull(c['remote_bunker_id'],''))\n"
+                        "j=bunkerdb.pending_publications(v['bid'])\n"
+                        "print(json.dumps({'bunker':b,'snapshot':s,'pending':[{'id':x['id'],'state':x['state'],'keys':[r['key'] for r in json.loads(x['changes_json'])]} for x in j]}))")
+                    with store._connect() as db:
+                        evidence["service_changes"] = db.execute("SELECT COUNT(*) FROM changes").fetchone()[0]
+                    evidence["dropped_receipts"] = fault["dropped"]
+                    print(json.dumps(evidence), flush=True)
                 elif op == "stop-service":
                     shared.shutdown(); shared.server_close(); thread.join(3)
                     print('{"service":"offline"}',flush=True)

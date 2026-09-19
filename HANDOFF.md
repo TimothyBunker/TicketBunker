@@ -4,6 +4,86 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
+## Installer candidate 0.6.6-rc1 (2026-09-19, preparation)
+
+Tim approved a two-person browser campaign and an installer containing the
+database repairs and pipeline visibility. Python/UI/native versions are 0.6.6;
+the intended immutable prerelease tag is `v0.6.6-rc1`. Use the existing Windows
+x64, Linux x64 and macOS Apple Silicon release matrix. Do not claim an installer
+is available until its release assets have been checked. Windows is unsigned.
+
+`npm run test:sharing --prefix desktop` drives two isolated browser workers,
+data homes and Git clones against the real loopback shared service. The campaign
+passes creation/share/join, member restrictions, configuration propagation,
+lost acknowledgement (no duplicate write), offline recovery, local stale edits,
+cross-device branch conflict/review/retry, gated report propagation and private
+conversation/draft/path isolation. Only model replies and network faults are
+simulated. It runs in CI with screenshots/results retained. The campaign caught
+and fixed a ticket header grid regression caused by the new transfer indicator;
+it now asserts title width and containment. No real Bunker or source repo was used.
+
+Candidate checks: **541 core tests, OK with 3 skips**, **212 UI tests**,
+**12 Rust tests**, production build, local/shared pipeline browser flows and
+the two-participant browser campaign. Export/restore, PostgreSQL and secure
+self-hosting assistance remain subsequent work, not part of this release.
+
+## Database audit repairs (2026-09-19)
+
+Follow-up: compact local/shared indicators open a Bunker pipeline drawer from
+Bunker, Project and ticket headers. The lazy `application.bunker.pipelines`
+read projection is explicitly allowed through the app worker. It separates
+snapshot download, shared saves, tracker imports, reports, private workspace and
+Git refs; no new automation, write path or remote engine is added. Pending
+operations are bounded and payload-free; ticket entry filters displayed history.
+Existing sync actions reconcile requests, while conflicts keep review guidance.
+Do not call attachment timestamps successful Git fetches. Browser regression:
+`npm run test:pipelines --prefix desktop` (disposable Grid Garden lab, in CI).
+Source assets must be rebuilt before testing browser/native UI changes.
+Verification for this follow-up: **541 core tests, OK with 3 skips**, **212 UI
+tests passed**, plus a final 29-test focused UI repeat. Production assets build
+successfully (existing chunk-size warning). The browser scenario passes for
+both a local Bunker and a real loopback shared service with a preserved conflict,
+including narrow layout and Review navigation. No installer was rebuilt.
+
+Tim approved repairing the audit findings before switching the production
+remote to PostgreSQL and adding secure self-hosting assistance. Those hosting
+and engine changes are still future work. The audit/model notes are under
+`docs/audits/2026-09-19/` and copied into the Obsidian vault; the original
+reproduction script intentionally asserts old failures at `d6c8cb5`, not the
+new desired behavior.
+
+This pass separates write receipts from read coverage (schema v4, with a local
+generation guard), journals shared proposals and batch receipts, resumes lost
+acknowledgements with their original keys, and exposes unresolved conflicts
+after a successful read sync. New saved actions supersede conflicts covering
+the same outstanding records without discarding the stored journal history.
+Service receipt keys bind to actor and request hash. Every report write now
+has service-side structure/stamp validation; Combined is derived from accepted
+children. Verification is explicitly client-attested, not server Git evidence.
+Initial sharing also validates reports, so invalid legacy reports must be
+regenerated before sharing rather than silently accepted.
+
+Large pulls/joins use per-member immutable snapshot chunks, complete digest
+validation and expiry. Snapshot capture holds a read transaction, not a write
+reservation, allowing concurrent WAL writers. A complete snapshot is applied
+only if the local generation has not advanced. Older servers retain bounded
+full-response fallback. Current services are still SQLite; this is protocol
+correctness work, not a scalability/backend migration.
+
+Remaining: staged large initial uploads, true deltas/selective report hydration,
+indexed catalog queries, F5 independent sessions/cross-Bunker coworker namespace,
+export/restore, deletion/retention and membership lifecycle. Do not claim the
+whole audit, PostgreSQL hosting, or a new installer is complete.
+
+Verification: full core suite ran **532 tests, OK with 3 skips** (191.138s);
+after final receipt/destination hardening, **68 focused database/application/
+runtime/shared-failure tests passed**; the final serialized-migration/database
+check passed **50 tests**. All **204 UI tests passed**, and
+`npm run build --prefix desktop` passed (existing bundle-size warning). Built
+app assets were regenerated. No native installer or live PostgreSQL deployment
+was tested. Regression command: `PYTHONPATH=.:tests python3 -m unittest
+test_database_flow test_shared_failure_campaign -q`.
+
 ## Installer candidate 0.6.5-rc4 (2026-09-11, preparation)
 
 Tim requested an installer containing the workspace campaigns and save/list

@@ -2,6 +2,7 @@ import { FormEvent, MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, use
 import FloatingActions from "./FloatingActions";
 import BackButton from "./BackButton";
 import IconButton from "./IconButton";
+import PipelinePanel, { PipelineIndicator } from "./PipelinePanel";
 import { conversationDraftSaveGuidance, useCoworkerDraftRecovery } from "./CoworkerDraftRecovery";
 import { UnsavedChangesBoundary, useGuardedAction, useUnsavedEditor } from "./UnsavedChanges";
 import Markdown, { ASPECT_LABELS, ReportPlaceContext, SourceActionsContext, TRUST_LABELS, VERDICT_LABELS, verdictOf, type ReportPlace } from "./Markdown";
@@ -648,7 +649,11 @@ function TicketRail({
   }
   async function syncBeforeRetry() {
     setBusy(true);
-    try { await command("application.bunker.sync", { bunker_id: bunkerId }); setWorkError(""); notify("Bunker synced. Use + to attach the existing branch."); }
+    try {
+      const result = await command<{ warning?: string }>("application.bunker.sync", { bunker_id: bunkerId });
+      setWorkError(result.warning || "");
+      notify(result.warning || "Bunker synced. Use + to attach the existing branch.", Boolean(result.warning));
+    }
     catch (reason) { setWorkError(String(reason)); }
     finally { setBusy(false); onReload(); }
   }
@@ -1171,6 +1176,7 @@ export default function TicketWorkspace(props: Props) {
 
 function Workspace({ bunker, reference, onBack, notify, onWorkspace }: Props) {
   const protect = useGuardedAction();
+  const [pipelinesOpen, setPipelinesOpen] = useState(false);
   const [snapshot, setDetail] = useState<TicketDetail | null>(null);
   const [repositoryChoice, setRepositoryChoice] = useState("");
   const repositoryId = repositoryChoice || snapshot?.selected_repository_id || snapshot?.repositories[0]?.id || "";
@@ -1326,7 +1332,10 @@ function Workspace({ bunker, reference, onBack, notify, onWorkspace }: Props) {
   return (
     <div className="ticket-shell">
       <header className="ticket-header">
-        <BackButton label="Back to tickets" onClick={() => protect(onBack)} />
+        <div className="ticket-header-actions">
+          <BackButton label="Back to tickets" onClick={() => protect(onBack)} />
+          <PipelineIndicator bunker={bunker} label="Ticket report transfers" onClick={() => setPipelinesOpen(true)} />
+        </div>
         <div className="ticket-heading"><p>{detail.project.name}</p><h1><span>{ticket.id}</span> {ticket.title}</h1><div className="ticket-chips"><span className="status-chip">{ticket.status || "Open"}</span>{ticket.labels.map((value) => <span key={value} className="label-chip">{value}</span>)}<small>{ticket.assignee ? `${ticket.assignee} · ` : ""}Updated {relativeTime(String(ticket.updated || ""))}</small>{link && <a className="source-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>}</div></div>
       </header>
       <div className="ticket-layout">
@@ -1343,6 +1352,7 @@ function Workspace({ bunker, reference, onBack, notify, onWorkspace }: Props) {
         </main>
         <TicketRail detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} repositoryId={repositoryId} repositoryLocked={Boolean(editor)} onRepository={(value) => { setRepositoryChoice(value); setScope(""); setQuote(null); setPending(null); }} scope={scope} onScope={(value) => protect(() => { setScope(value); setEditor(null); window.requestAnimationFrame(() => document.getElementById("agent-work")?.scrollIntoView({ behavior: "smooth", block: "start" })); })} onReload={load} onFetch={fetchBranches} notify={notify} />
       </div>
+      {pipelinesOpen && <PipelinePanel key={`${bunker.id}/${reference.id}`} bunker={bunker} ticketId={reference.id} initialRow={bunker.remote ? "shared-saves" : "reports"} onClose={() => setPipelinesOpen(false)} onChanged={load} notify={notify} onReview={() => protect(() => { setPipelinesOpen(false); jumpTo("agent-work"); })} />}
       <CoworkerDrawer open={chatOpen} onOpen={setChatOpen} detail={detail} bunkerId={bunker.id} repoRoot={repoRoot} scope={scope} quote={quote} onQuote={setQuote} pending={pending} onPendingSent={() => setPending(null)} openFile={editor?.path || ""} onReload={load} notify={notify} />
     </div>
   );

@@ -103,11 +103,19 @@ jobs:
         env:
           TB_HARDENING_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation/hardening
           TB_HARDENING_VIEWPORT: "1280x720"
+      - name: Verify read-only pipeline visibility and scoped navigation
+        run: npm run test:pipelines --prefix desktop
+        env:
+          TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation/pipelines
       - name: Role-play repository work, keyboard navigation, concurrent drafts and failures
         run: npm run test:simulation:repeat --prefix desktop -- --runs=1 --journeys=roleplay,keyboard,multiwindow,failures --output="${{ runner.temp }}/ticketbunker-workspace-simulation"
         env:
           TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation
           TB_SIMULATION_REQUIRE_CURRENT_COPY: "1"
+      - name: Exercise two-person sharing, recovery, conflicts and private workspace boundaries
+        run: npm run test:sharing --prefix desktop
+        env:
+          TB_SIMULATION_OUTPUT: ${{ runner.temp }}/ticketbunker-workspace-simulation/sharing
       - name: Verify focused keyboard saves across retained repository editors
         run: npm run test:simulation:steady --prefix desktop -- --duration=60000 --cycles=20
         env:

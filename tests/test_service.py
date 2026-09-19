@@ -11,9 +11,17 @@ from urllib.parse import quote
 from ticketbunker import cli, remote
 from ticketbunker.service import server as service_server
 from ticketbunker.service import storage as service_storage
+from ticketbunker.builders.master import from_records
+
+
+def valid_report(branch="tim/ECS-4-position"):
+    return (f"<!-- tb:verified branch={branch} commit=abcdef123456 ts=2026-09-19T00:00:00+00:00 -->\n"
+            + "\n".join(f"## {name}\n- [observation] Dummy fixture observation (obs: diff).\n"
+                        for name in ("Who", "What", "Where", "Why", "State")))
 
 
 def publication(bunker_id: str = "local-bunker") -> dict:
+    child = {"ticket_id": "ECS-4", "scope": "branch:tim/ECS-4-position", "repository_id": "coal", "content": valid_report()}
     return {
         "bunker": {"id": bunker_id, "name": "Engineering"},
         "projects": [
@@ -54,13 +62,8 @@ def publication(bunker_id: str = "local-bunker") -> dict:
             }
         ],
         "reports": [
-            {"ticket_id": "ECS-4", "scope": "combined", "content": "# Combined\n"},
-            {
-                "ticket_id": "ECS-4",
-                "scope": "branch:tim/ECS-4-position",
-                "repository_id": "coal",
-                "content": "# Branch\n",
-            },
+            {"ticket_id": "ECS-4", "scope": "combined", "content": from_records("ECS-4", [child])},
+            child,
         ],
     }
 

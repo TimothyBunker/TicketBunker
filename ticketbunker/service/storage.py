@@ -124,6 +124,8 @@ class ServiceStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = self._connect()
         try:
+            from . import snapshots
+            snapshots.initialize(connection)
             with connection:
                 migrate_admins = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='service_admins'").fetchone() is None
                 connection.executescript(
@@ -204,6 +206,8 @@ class ServiceStore:
                     );
                     """
                 )
+                if "request_hash" not in {row["name"] for row in connection.execute("PRAGMA table_info(changes)")}:
+                    connection.execute("ALTER TABLE changes ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''")
                 connection.execute(
                     "INSERT OR IGNORE INTO service(singleton, id, created_at) VALUES (1, ?, ?)",
                     (str(uuid.uuid4()), _now()),
@@ -388,6 +392,8 @@ class ServiceStore:
                 )
                 for kind, items in publication["records"].items():
                     for record_id, value in items:
+                        if kind == "report" and value.get("verification"):
+                            value = {**value, "verification": {**value["verification"], "submitted_by": user_id}}
                         if kind == "config-document" and value.get("scope_type") == "bunker":
                             value = {**value, "scope_id": bunker_id}
                             record_id = f"bunker:{bunker_id}:{value['kind']}"
@@ -760,14 +766,27 @@ class ServiceStore:
                         raise ServiceError(400, "changes_invalid", "Each change must be an object.")
                     key = _identifier(raw.get("key"), "change key")
                     existing = connection.execute(
-                        "SELECT revision FROM changes WHERE bunker_id = ? AND key = ?",
+                        "SELECT revision, user_id, request_hash, kind, record_id FROM changes WHERE bunker_id = ? AND key = ?",
                         (bunker_id, key),
                     ).fetchone()
+                    request_hash = hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
                     if existing is not None:
+                        if (existing["user_id"] != user_id or existing["kind"] != str(raw.get("kind"))
+                                or existing["record_id"] != str(raw.get("record_id"))
+                                or existing["revision"] != str(raw.get("revision"))
+                                or (existing["request_hash"] and existing["request_hash"] != request_hash)):
+                            raise ServiceError(409, "idempotency_conflict", "This change key already describes a different request.")
                         results.append({"key": key, "ok": True, "revision": str(existing["revision"]), "replayed": True})
                         continue
                     try:
                         revision = self._apply_one(connection, bunker_id, raw)
+                        if raw.get("kind") == "report" and str(raw.get("payload", {}).get("scope", "")).startswith("branch:"):
+                            record = connection.execute("SELECT payload_json FROM records WHERE bunker_id=? AND kind='report' AND record_id=?",
+                                                        (bunker_id, raw["record_id"])).fetchone()
+                            value = json.loads(record[0])
+                            value["verification"]["submitted_by"] = user_id
+                            connection.execute("UPDATE records SET payload_json=? WHERE bunker_id=? AND kind='report' AND record_id=?",
+                                               (json.dumps(value, sort_keys=True), bunker_id, raw["record_id"]))
                     except ServiceError as exc:
                         if exc.code in {"revision_conflict", "project_key_taken", "ticket_conflict", "report_conflict"}:
                             conflicts.append({"key": key, "ok": False, "code": exc.code, "message": exc.message})
@@ -787,10 +806,10 @@ class ServiceStore:
                     )
                     connection.execute(
                         """
-                        INSERT INTO changes(bunker_id, seq, key, kind, record_id, revision, user_id, applied_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO changes(bunker_id, seq, key, kind, record_id, revision, user_id, applied_at, request_hash)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (bunker_id, seq, key, str(raw.get("kind")), str(raw.get("record_id")), revision, user_id, _now()),
+                        (bunker_id, seq, key, str(raw.get("kind")), str(raw.get("record_id")), revision, user_id, _now(), request_hash),
                     )
                     results.append({"key": key, "ok": True, "revision": revision})
                 if conflicts:
@@ -802,6 +821,12 @@ class ServiceStore:
                         "One or more changes conflict with the shared Bunker.",
                         results=conflicts,
                     )
+                # Combined is a service-owned projection, even when a client
+                # sends only a child. Legacy paired writes must match it.
+                affected = {str(item.get("payload", {}).get("ticket_id")) for item in items
+                            if item.get("kind") == "report" and isinstance(item.get("payload"), Mapping)}
+                for ticket_id in affected:
+                    self._regenerate_combined(connection, bunker_id, ticket_id)
                 bunker = connection.execute(
                     "SELECT revision, change_seq FROM bunkers WHERE id = ?", (bunker_id,)
                 ).fetchone()
@@ -873,6 +898,21 @@ class ServiceStore:
             raise ServiceError(400, "changes_invalid", "A report needs bounded text content.")
         if record_id != f"{ticket_id}|{scope}|{repository_id}":
             raise ServiceError(400, "changes_invalid", "The report record identity does not match its payload.")
+        verification = {}
+        if scope == "combined":
+            from ..builders.master import from_records
+            children = [row for row in self._records(connection, bunker_id, "report")
+                        if row.get("ticket_id") == ticket_id and str(row.get("scope", "")).startswith("branch:")]
+            if repository_id or not children or content != from_records(ticket_id, children):
+                raise ServiceError(400, "report_invalid", "Combined must be derived from accepted branch reports.")
+        else:
+            from .reportgate import child_attestation
+            try:
+                verification = child_attestation(content, scope)
+            except ValueError as exc:
+                raise ServiceError(400, "report_invalid", str(exc)) from exc
+        if revision != "r:" + hashlib.sha256(content.encode()).hexdigest()[:16]:
+            raise ServiceError(400, "report_invalid", "The report revision must describe its content.")
         current = self._current_revision(connection, bunker_id, "report", record_id)
         if current != expected and not self._initial_content_revision(connection, bunker_id, "report", record_id, current, expected):
             raise ServiceError(409, "report_conflict", "The report changed elsewhere.")
@@ -883,9 +923,25 @@ class ServiceStore:
             "content": content,
             "revision": revision,
             "updated_at": now,
+            "verification": verification,
         }
         self._upsert(connection, bunker_id, "report", record_id, value, revision, now)
         return revision
+
+    def _regenerate_combined(self, connection, bunker_id: str, ticket_id: str) -> None:
+        from ..builders.master import from_records
+        children = [row for row in self._records(connection, bunker_id, "report")
+                    if row.get("ticket_id") == ticket_id and str(row.get("scope", "")).startswith("branch:")]
+        if not children:
+            return
+        content = from_records(ticket_id, children)
+        revision = "r:" + hashlib.sha256(content.encode()).hexdigest()[:16]
+        key = f"{ticket_id}|combined|"
+        if self._current_revision(connection, bunker_id, "report", key) != revision:
+            now = _now()
+            self._upsert(connection, bunker_id, "report", key,
+                         {"ticket_id": ticket_id, "scope": "combined", "repository_id": "", "content": content,
+                          "revision": revision, "updated_at": now}, revision, now)
 
     def _apply_ticket(
         self, connection, bunker_id, record_id, expected, revision, payload, now
@@ -1215,6 +1271,26 @@ def _validated_publication(payload: Mapping[str, Any]) -> dict[str, Any]:
                 },
             )
         )
+    from .reportgate import child_attestation
+    from ..builders.master import from_records
+    for _, report in reports:
+        if report["scope"] != "combined":
+            try:
+                report["verification"] = child_attestation(report["content"], report["scope"])
+            except ValueError as exc:
+                raise ServiceError(400, "report_invalid", str(exc)) from exc
+    # Initial publication is another write boundary, not a route around gates.
+    for _, report in reports:
+        if report["scope"] == "combined":
+            children = [child for _, child in reports if child["ticket_id"] == report["ticket_id"]
+                        and child["scope"].startswith("branch:")]
+            if not children or report["repository_id"] or report["content"] != from_records(report["ticket_id"], children):
+                raise ServiceError(400, "report_invalid", "Combined must match accepted branch reports before sharing.")
+    for ticket_id in {report["ticket_id"] for _, report in reports}:
+        if not any(report["ticket_id"] == ticket_id and report["scope"] == "combined" for _, report in reports):
+            content = from_records(ticket_id, [report for _, report in reports if report["ticket_id"] == ticket_id])
+            reports.append((f"{ticket_id}|combined|", {"ticket_id": ticket_id, "scope": "combined", "repository_id": "",
+                            "content": content, "revision": "r:" + hashlib.sha256(content.encode()).hexdigest()[:16], "updated_at": ""}))
     return {
         "bunker": bunker,
         "records": {

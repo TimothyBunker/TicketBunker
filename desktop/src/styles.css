@@ -244,6 +244,7 @@ code { padding: 1px 4px; border-radius: 3px; background: #edf0f4; font-family: u
 #description, #details, #agent-work { scroll-margin-top: 140px; }
 .back-control { padding: 0; border-color: transparent; color: #627086; background: transparent; }
 .back-control:hover { color: var(--blue); background: transparent; }
+.ticket-header-actions { display: flex; align-items: center; gap: 12px; }
 .ticket-heading > p { margin: 0 0 4px; color: #6d7a8e; font-size: 10px; }
 .ticket-heading h1 { font-size: 21px; }
 .ticket-heading h1 span { color: #6e7b8f; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; font-weight: 650; }

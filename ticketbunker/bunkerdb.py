@@ -25,7 +25,7 @@ from . import config, layout, platform_services, project as companion, remote
 from .processors import anchorcheck
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PROJECT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9-]{0,31}$")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
@@ -283,6 +283,34 @@ def _init_bunker(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS tickets_project_idx ON tickets(project_id, updated_at DESC);
         """
     )
+    # Read coverage and write acknowledgements are different facts. Generation
+    # also invalidates an in-flight pull when a local accepted write intervenes.
+    # Serialize first-open migrations across workers before inspecting columns.
+    connection.execute("BEGIN IMMEDIATE")
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(remote_connection)")}
+    if "replica_generation" not in columns:
+        # Old cursors mixed writes with complete read coverage. Do not continue
+        # claiming freshness until the first post-upgrade snapshot is applied.
+        connection.execute("UPDATE remote_connection SET sync_cursor='', last_synced_at=''")
+    for name, definition in (
+        ("replica_generation", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_write_cursor", "TEXT NOT NULL DEFAULT ''"),
+        ("last_write_revision", "TEXT NOT NULL DEFAULT ''"),
+        ("last_write_at", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in columns:
+            connection.execute(f"ALTER TABLE remote_connection ADD COLUMN {name} {definition}")
+    connection.execute("""CREATE TABLE IF NOT EXISTS publication_operations (
+        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, changes_json TEXT NOT NULL,
+        accepted_count INTEGER NOT NULL DEFAULT 0, receipt_json TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'prepared', created_at TEXT NOT NULL,
+        error TEXT NOT NULL DEFAULT '', server_url TEXT NOT NULL DEFAULT '',
+        remote_bunker_id TEXT NOT NULL DEFAULT ''
+    )""")
+    operation_columns = {row["name"] for row in connection.execute("PRAGMA table_info(publication_operations)")}
+    for name in ("server_url", "remote_bunker_id"):
+        if name not in operation_columns:
+            connection.execute(f"ALTER TABLE publication_operations ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
     # Version 2 treated one Git checkout as unique across an entire Bunker.
     # Projects are scopes, so one monorepo checkout may legitimately attach to
     # several Projects. Rebuild only the machine-local mapping table; shared
@@ -649,7 +677,8 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
     connection_row = connection.execute(
         """
         SELECT server_url, remote_bunker_id, state, config_revision,
-               sync_cursor, last_synced_at, current_member_id, capabilities_json
+               sync_cursor, last_synced_at, current_member_id, capabilities_json,
+               last_write_cursor, last_write_revision, last_write_at, replica_generation
         FROM remote_connection WHERE singleton = 1
         """
     ).fetchone()
@@ -745,6 +774,7 @@ def _bunker_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "repository_count": len(repositories),
         "repository_registry": _repository_registry(connection, str(row["id"])),
         "ticket_count": tickets,
+        "pending_saves": int(connection.execute("SELECT COUNT(*) FROM publication_operations WHERE state <> 'complete'").fetchone()[0]),
     }
 
 
@@ -787,7 +817,8 @@ def remote_connection(bunker_id: str) -> dict[str, Any]:
         row = connection.execute(
             """
             SELECT server_url, remote_bunker_id, state, credential_reference,
-                   config_revision, sync_cursor, current_member_id, capabilities_json
+                   config_revision, sync_cursor, current_member_id, capabilities_json,
+                   replica_generation, last_write_cursor, last_write_revision, last_write_at
             FROM remote_connection WHERE singleton = 1
             """
         ).fetchone()
@@ -804,6 +835,10 @@ def remote_connection(bunker_id: str) -> dict[str, Any]:
         "credential_reference": str(row["credential_reference"] or ""),
         "config_revision": str(row["config_revision"] or ""),
         "sync_cursor": str(row["sync_cursor"] or ""),
+        "replica_generation": int(row["replica_generation"]),
+        "last_write_cursor": str(row["last_write_cursor"]),
+        "last_write_revision": str(row["last_write_revision"]),
+        "last_write_at": str(row["last_write_at"]),
         "current_member_id": str(row["current_member_id"] or ""),
         "capabilities": [str(item) for item in capabilities if isinstance(item, str)],
     }
@@ -813,13 +848,58 @@ def _record_acceptance(connection: sqlite3.Connection, accepted: Mapping[str, An
     connection.execute(
         """
         UPDATE remote_connection
-        SET sync_cursor = COALESCE(NULLIF(?, ''), sync_cursor),
-            config_revision = COALESCE(NULLIF(?, ''), config_revision),
-            last_synced_at = ?
+        SET last_write_cursor = ?, last_write_revision = ?, last_write_at = ?,
+            replica_generation = replica_generation + 1
         WHERE singleton = 1
         """,
         (str(accepted.get("cursor") or ""), str(accepted.get("revision") or ""), _now()),
     )
+    if accepted.get("operation_id"):
+        connection.execute("UPDATE publication_operations SET state='complete' WHERE id=?",
+                           (accepted["operation_id"],))
+        current = connection.execute("SELECT changes_json,server_url,remote_bunker_id FROM publication_operations WHERE id=?",
+                                     (accepted["operation_id"],)).fetchone()
+        if current:
+            replaced = {(item["kind"], item["record_id"]) for item in json.loads(current[0])}
+            for previous in connection.execute("SELECT id,changes_json,accepted_count FROM publication_operations WHERE state='conflict' AND server_url=? AND remote_bunker_id=?",
+                                               (current["server_url"], current["remote_bunker_id"])).fetchall():
+                outstanding = json.loads(previous["changes_json"])[previous["accepted_count"]:]
+                if outstanding and {(item["kind"], item["record_id"]) for item in outstanding} <= replaced:
+                    connection.execute("UPDATE publication_operations SET state='complete',error=? WHERE id=?",
+                                       ("Superseded by saved operation " + str(accepted["operation_id"]), previous["id"]))
+
+
+def prepare_publication(bunker_id: str, changes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Persist intent before any transmission; retries reuse the original keys."""
+    logical = [{key: value for key, value in item.items() if key != "key"} for item in changes]
+    fingerprint = hashlib.sha256(json.dumps(logical, sort_keys=True).encode()).hexdigest()
+    with _database(bunker_id) as db:
+        db.execute("BEGIN IMMEDIATE")
+        target = db.execute("SELECT server_url,remote_bunker_id FROM remote_connection WHERE singleton=1").fetchone()
+        if target is None:
+            raise BunkerDatabaseError("Choose a shared Bunker before preparing a shared save.")
+        row = db.execute("SELECT * FROM publication_operations WHERE fingerprint=? AND server_url=? AND remote_bunker_id=? AND state <> 'complete' ORDER BY rowid LIMIT 1",
+                         (fingerprint, target["server_url"], target["remote_bunker_id"])).fetchone()
+        if row:
+            return dict(row)
+        identity = uuid.uuid4().hex
+        db.execute("INSERT INTO publication_operations(id,fingerprint,changes_json,created_at,server_url,remote_bunker_id) VALUES (?,?,?,?,?,?)",
+                   (identity, fingerprint, json.dumps(changes, sort_keys=True), _now(), target["server_url"], target["remote_bunker_id"]))
+        return dict(db.execute("SELECT * FROM publication_operations WHERE id=?", (identity,)).fetchone())
+
+
+def publication_progress(bunker_id: str, operation_id: str, count: int, receipt: Mapping[str, Any],
+                         *, state: str, error: str = "") -> None:
+    with _database(bunker_id) as db:
+        # Concurrent retries may return out of order; never rewind a receipt.
+        db.execute("""UPDATE publication_operations SET accepted_count=?, receipt_json=?, state=?, error=?
+                      WHERE id=? AND accepted_count<=? AND state <> 'complete'""",
+                   (count, json.dumps(dict(receipt)), state, error, operation_id, count))
+
+
+def pending_publications(bunker_id: str) -> list[dict[str, Any]]:
+    with _database(bunker_id) as db:
+        return [dict(row) for row in db.execute("SELECT * FROM publication_operations WHERE state <> 'complete' ORDER BY rowid")]
 
 
 def _mode(connection: sqlite3.Connection, bunker_id: str) -> str:
@@ -3216,7 +3296,8 @@ def _replace_members(connection: sqlite3.Connection, members: Iterable[Mapping[s
         )
 
 
-def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_cursor: str | None = None) -> dict[str, Any]:
+def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_cursor: str | None = None,
+                   expected_generation: int | None = None, completed_operations: Iterable[str] = ()) -> dict[str, Any]:
     """Reconcile a replica with the service's authorized snapshot.
 
     Shared records are upserted by identity; repository bindings the service
@@ -3230,8 +3311,10 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_
         if _mode(connection, bunker_id) != "remote":
             raise BunkerDatabaseError("This Bunker is local; there is nothing to sync from.")
         row = connection.execute(
-            "SELECT remote_bunker_id, sync_cursor FROM remote_connection WHERE singleton = 1"
+            "SELECT remote_bunker_id, sync_cursor, replica_generation FROM remote_connection WHERE singleton = 1"
         ).fetchone()
+        if expected_generation is not None and (row is None or row["replica_generation"] != expected_generation):
+            raise BunkerDatabaseError("Local shared state changed while this snapshot was loading. A newer synchronization or saved change was kept. Sync again.")
         if expected_cursor is not None and (row is None or str(row["sync_cursor"] or "") != expected_cursor):
             raise BunkerDatabaseError("A newer synchronization finished while this response was loading. Its data was kept. Sync again to load current shared state.")
         remote_id = str(row["remote_bunker_id"]) if row else ""
@@ -3377,6 +3460,7 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_
             """
             UPDATE remote_connection
             SET state = 'ready', config_revision = ?, sync_cursor = ?, last_synced_at = ?,
+                replica_generation = replica_generation + 1,
                 current_member_id = COALESCE(NULLIF(?, ''), current_member_id),
                 capabilities_json = ?
             WHERE singleton = 1
@@ -3386,6 +3470,9 @@ def apply_snapshot(bunker_id: str, snapshot: remote.RemoteSnapshot, *, expected_
                 json.dumps(list(snapshot.capabilities), sort_keys=True),
             ),
         )
+        for operation_id in completed_operations:
+            connection.execute("UPDATE publication_operations SET state='complete' WHERE id=? AND state='accepted'",
+                               (operation_id,))
     return {**counts, "cursor": snapshot.cursor, "revision": snapshot.revision, "synced_at": now}
 
 

@@ -21,7 +21,7 @@ from .storage import ServiceError, ServiceStore
 
 MAX_BODY_BYTES = 8 * 1024 * 1024
 PREFIX = f"/api/{remote.API_VERSION}"
-FEATURES = ("setup-token", "invitation-credentials", "invitations", "members", "changes")
+FEATURES = ("setup-token", "invitation-credentials", "invitations", "members", "changes", "snapshot-chunks")
 
 
 class ServiceServer(ThreadingHTTPServer):
@@ -152,17 +152,39 @@ class ServiceHandler(BaseHTTPRequestHandler):
                 user_id=str(user["id"]) if user else "",
                 profile=None if user else body.get("profile"),
             )
+            if body.get("snapshot_transport") == "chunks":
+                # Enrollment commits before download. Never send the large
+                # snapshot in the credential response.
+                snapshot = result.pop("snapshot")
+                result["snapshot_bunker_id"] = snapshot["bunker"]["id"]
             return {"ok": True, **result}, 200
         if parts == ["bunkers"] and method == "POST":
             user = self._user()
             body = self._body()
             snapshot = store.publish_bunker(str(user["id"]), body)  # type: ignore[index]
+            if body.get("snapshot_transport") == "chunks":
+                return {"ok": True, "snapshot_bunker_id": snapshot["bunker"]["id"]}, 201
             return {"ok": True, "snapshot": snapshot}, 201
         if len(parts) >= 3 and parts[0] == "bunkers":
             bunker_id = parts[1]
             rest = parts[2:]
             user = self._user()
             user_id = str(user["id"])  # type: ignore[index]
+            if rest == ["snapshot-transfers"] and method == "POST":
+                from . import snapshots
+                self._body()
+                return {"ok": True, "transfer": snapshots.create(store, bunker_id, user_id)}, 201
+            if len(rest) == 2 and rest[0] == "snapshot-transfers" and method == "DELETE":
+                from . import snapshots
+                snapshots.discard(store, bunker_id, user_id, rest[1])
+                return {"ok": True}, 200
+            if len(rest) == 3 and rest[0] == "snapshot-transfers" and method == "GET":
+                from . import snapshots
+                try:
+                    part = int(rest[2])
+                except ValueError as exc:
+                    raise ServiceError(400, "request_invalid", "Choose a snapshot part.") from exc
+                return {"ok": True, **snapshots.read(store, bunker_id, user_id, rest[1], part)}, 200
             if rest == ["snapshot"] and method == "GET":
                 after = str((query.get("after") or [""])[0])
                 return {"ok": True, **store.snapshot(bunker_id, user_id, after=after)}, 200

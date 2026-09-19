@@ -176,7 +176,7 @@ describe("Bunker and Project boundaries", () => {
       remote: { server_url: "https://tickets.example.test", remote_bunker_id: "offline-qa", state: "ready", last_synced_at: "2026-09-01T00:00:00Z" } };
     transport.command.mockRejectedValue(new Error("Service unavailable. Retry sync."));
     const { container } = render(<BunkerHub state={{ ...state, bunkers: [shared] }} selection={{ bunkerId: shared.id }} onSelection={vi.fn()} onTicket={vi.fn()} onState={vi.fn()} onSettings={vi.fn()} notify={vi.fn()} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Sync failed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sync needs attention");
     expect(container.querySelector(".bunker-meta .failed")).toBeInTheDocument();
     transport.command.mockResolvedValue({ sync: { tickets: 3, reports: 0 }, bunkers: [shared] });
     fireEvent.click(screen.getByRole("button", { name: "Retry sync" }));
@@ -267,6 +267,23 @@ describe("Bunker and Project boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
     await waitFor(() => expect(transport.command.mock.calls.filter(([action]) => action === "application.bunker.sync")).toHaveLength(2));
     expect(onState).toHaveBeenCalled();
+  });
+
+  it("keeps a reconciliation warning visible instead of claiming an entirely successful sync", async () => {
+    const replica = { ...bunker, id: "conflicted-sync", mode: "remote" as const,
+      remote: { server_url: "https://tickets.example.test", remote_bunker_id: "conflicted-sync", state: "ready", last_synced_at: "" } };
+    const warning = "Shared data refreshed. A previous save has conflicting changes; review it and save again.";
+    const notify = vi.fn();
+    const onState = vi.fn();
+    transport.command.mockImplementation((action: string) => {
+      if (action === "application.bunker.sync") return Promise.resolve({ sync: { tickets: 3, reports: 1 }, warning, bunkers: [replica] });
+      throw new Error(`Unexpected command ${action}`);
+    });
+    render(<BunkerHub state={{ ...state, bunkers: [replica] }} selection={{ bunkerId: replica.id }}
+      onSelection={vi.fn()} onTicket={vi.fn()} onState={onState} onSettings={vi.fn()} notify={notify} />);
+    await waitFor(() => expect(notify).toHaveBeenCalledWith(warning, true));
+    expect(onState).toHaveBeenCalled();
+    expect(notify.mock.calls.some(([message]) => String(message).startsWith("Synced with"))).toBe(false);
   });
 
   it("shows members without invitation controls to a member", async () => {

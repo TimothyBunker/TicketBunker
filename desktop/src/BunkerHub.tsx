@@ -7,6 +7,7 @@ import { UnsavedChangesBoundary, useGuardedAction } from "./UnsavedChanges";
 import { command } from "./transport";
 import { trackersSummary, type AppState, type Bunker, type Invitation, type Member, type Project, type TicketPage, type TicketReference } from "./types";
 import { relativeTime } from "./report";
+import PipelinePanel, { PipelineIndicator } from "./PipelinePanel";
 
 type Selection = { bunkerId: string; projectId?: string; repositoryId?: string };
 // Keep failures visible when a ticket or settings temporarily unmounts the hub.
@@ -513,9 +514,10 @@ function Hub({
   visible = true,
 }: Props) {
   const protect = useGuardedAction();
-  const onSelection = (value: Selection | null) => protect(() => { setAction(""); setConfigTab(undefined); select(value); });
+  const onSelection = (value: Selection | null) => protect(() => { setPipeline(null); setAction(""); setConfigTab(undefined); select(value); });
   const navigateAction = (value: ActionMode) => protect(() => setAction(value));
   const [action, setAction] = useState<ActionMode>("");
+  const [pipeline, setPipeline] = useState<string | null>(null);
   const [configTab, setConfigTab] = useState<ConfigurationTab | undefined>(undefined);
   const [syncing, setSyncing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -602,13 +604,15 @@ function Hub({
   async function pullBunker(target: Bunker, quiet = false) {
     setPulling(true);
     try {
-      const result = await command<{ sync: { tickets: number; reports: number }; bunkers: Bunker[] }>("application.bunker.sync", { bunker_id: target.id });
+      const result = await command<{ sync: { tickets: number; reports: number }; bunkers: Bunker[]; warning?: string }>("application.bunker.sync", { bunker_id: target.id });
       pulledAt.current[target.id] = Date.now();
-      delete lastSyncErrors[target.id];
-      setSyncErrors((values) => ({ ...values, [target.id]: "" }));
+      if (result.warning) lastSyncErrors[target.id] = result.warning;
+      else delete lastSyncErrors[target.id];
+      setSyncErrors((values) => ({ ...values, [target.id]: result.warning || "" }));
       onState({ ...state, bunkers: result.bunkers });
       setCatalogVersion((value) => value + 1);
-      if (!quiet) notify(`Synced with ${remoteLabel(target).replace(/^Shared on /, "")}: ${result.sync.tickets} tickets, ${result.sync.reports} reports`);
+      if (result.warning) notify(result.warning, true);
+      else if (!quiet) notify(`Synced with ${remoteLabel(target).replace(/^Shared on /, "")}: ${result.sync.tickets} tickets, ${result.sync.reports} reports`);
     } catch (reason) {
       lastSyncErrors[target.id] = String(reason);
       setSyncErrors((values) => ({ ...values, [target.id]: String(reason) }));
@@ -702,9 +706,9 @@ function Hub({
           <header className="workspace-header">
             <div>
               <button className="breadcrumb" onClick={() => onSelection(null)}>Bunkers</button>
-              <h1>{bunker.name}</h1>
+              <div className="heading-with-pipeline"><h1>{bunker.name}</h1><PipelineIndicator bunker={bunker} busy={pulling} issue={bunker.remote ? syncErrors[bunker.id] : undefined} onClick={() => setPipeline(bunker.pending_saves ? "shared-saves" : bunker.remote ? "shared-refresh" : "local")} /></div>
               <p className="bunker-meta"><i className={pulling ? "state-dot loading" : syncErrors[bunker.id] ? "state-dot failed" : !bunker.remote || bunker.remote.state === "ready" ? "state-dot ready" : "state-dot"} />{remoteLabel(bunker)}{bunker.remote && bunker.sharing?.role ? ` · ${roleLabel(bunker.sharing.role)}` : ""}{bunker.remote ? ` · last synced ${bunker.remote.last_synced_at ? relativeTime(bunker.remote.last_synced_at) : "never"}` : ""} · {count(bunker.repository_count, "repository", "repositories")} · {count(bunker.ticket_count, "ticket", "tickets")}</p>
-              {syncErrors[bunker.id] && <p className="inline-error" role="alert">Sync failed: {syncErrors[bunker.id]} <button disabled={pulling} onClick={() => pullBunker(bunker)}>Retry sync</button></p>}
+              {bunker.remote && syncErrors[bunker.id] && <p className="inline-error" role="alert">Sync needs attention: {syncErrors[bunker.id]} <button disabled={pulling} onClick={() => pullBunker(bunker)}>Retry sync</button></p>}
             </div>
             <div className="header-actions">
               {bunker.remote && <IconButton icon="sync" label="Sync now" hint={`Sync shared Bunker. Last synced ${bunker.remote.last_synced_at ? relativeTime(bunker.remote.last_synced_at) : "never"}`} issue={syncErrors[bunker.id]} loading={pulling} disabled={pulling} onClick={() => pullBunker(bunker)} />}
@@ -726,7 +730,7 @@ function Hub({
                 <button className="breadcrumb" onClick={() => onSelection({ bunkerId: bunker.id })}>{bunker.name}</button>
                 {ancestors(bunker.projects, project.id).map((value) => <button className="breadcrumb" key={value.id} onClick={() => onSelection({ bunkerId: bunker.id, projectId: value.id })}>{value.name}</button>)}
               </nav>
-              <h1><span className="project-key">{project.key}</span>{project.name}</h1>
+              <div className="heading-with-pipeline"><h1><span className="project-key">{project.key}</span>{project.name}</h1><PipelineIndicator bunker={bunker} busy={syncing} issue={syncIssue} label="Project transfer status" onClick={() => setPipeline(`tracker:${project.id}`)} /></div>
               {project.description && <p className="project-description">{project.description}</p>}
               <p className="tracker-line">{(project.trackers || []).length ? trackersSummary(project.trackers) : "No board linked"}</p>
             </div>
@@ -759,6 +763,24 @@ function Hub({
         {(["rename", "delete"] as const).map((mode) => <button role="menuitem" key={mode} disabled={Boolean(contextMenu.bunker.remote && !contextMenu.bunker.sharing?.is_owner)} title={contextMenu.bunker.remote && !contextMenu.bunker.sharing?.is_owner ? "Only Bunker owners can change Projects" : undefined} onClick={() => protect(() => { setProjectAction({ ...contextMenu, mode }); setContextMenu(null); })}>{mode === "rename" ? "Rename" : "Delete"}</button>)}
       </div>}
       {projectAction && <ProjectActionDialog target={projectAction} onClose={() => setProjectAction(null)} onSaved={(value) => { onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) }); if (projectAction.mode === "delete" && selection?.projectId === projectAction.project.id) select({ bunkerId: value.id }); setProjectAction(null); }} />}
+      {pipeline && bunker && <PipelinePanel key={bunker.id} bunker={bunker} initialRow={pipeline} externalError={syncErrors[bunker.id]} onClose={() => setPipeline(null)} notify={notify}
+        onChanged={(bunkers) => { onState({ ...state, bunkers }); setCatalogVersion((value) => value + 1); }}
+        onResult={(kind, projectId, error) => {
+          if (kind === "sync") {
+            lastSyncErrors[bunker.id] = error;
+            setSyncErrors((values) => ({ ...values, [bunker.id]: error }));
+          } else if (projectId) {
+            const key = `${bunker.id}/${projectId}`;
+            ticketSyncState[key] = { at: error ? ticketSyncState[key]?.at || 0 : Date.now(), error };
+            setProjectSync({ ...ticketSyncState });
+          }
+        }}
+        onReview={(target) => protect(() => {
+          if (target.ticketId) {
+            command<{ ticket: TicketReference }>("application.ticket.get", { bunker_id: bunker.id, ticket_id: target.ticketId })
+              .then((value) => { setPipeline(null); onTicket(bunker.id, value.ticket); }).catch((reason) => notify(String(reason), true));
+          } else { setPipeline(null); select({ bunkerId: bunker.id, ...(target.projectId ? { projectId: target.projectId } : {}) }); setAction("config"); }
+        })} />}
       <ActionPanel mode={action} bunker={bunker} project={project} onClose={() => setAction("")} state={state} onState={onState} notify={notify} />
       {action === "members" && bunker && <MembersPanel bunker={bunker} onClose={() => setAction("")} notify={notify} />}
       {action === "config" && bunker && <ConfigurationPanel bunker={bunker} project={project} trackers={state.trackers} initialTab={configTab} onClose={() => { setAction(""); setConfigTab(undefined); }} onBunker={(value) => { onState({ ...state, bunkers: state.bunkers.map((item) => item.id === value.id ? value : item) }); setCatalogVersion((version) => version + 1); }} onConnected={(trackers, _connection, refreshed) => onState({ ...state, trackers, bunkers: refreshed ? state.bunkers.map((item) => item.id === refreshed.id ? refreshed : item) : state.bunkers })} onTicketSync={recordTicketSync} notify={notify} />}

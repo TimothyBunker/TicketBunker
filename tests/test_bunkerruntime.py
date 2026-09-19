@@ -375,7 +375,7 @@ class BunkerRuntimeTests(unittest.TestCase):
             self.assertEqual(scopes, {"combined", f"branch:{branch}"})
             self.assertIn("<!-- tb:verified", next(r["content"] for r in snapshot.reports if r["scope"] != "combined"))
             # The inferred branch link is saved before the two report records.
-            self.assertEqual(bunkerdb.remote_connection(self.bunker_id)["sync_cursor"], "change-3")
+            self.assertEqual(bunkerdb.remote_connection(self.bunker_id)["last_write_cursor"], "change-3")
         finally:
             server.shutdown()
             server.server_close()
