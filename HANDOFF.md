@@ -4,11 +4,11 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Installer candidate 0.6.6-rc2 (2026-09-19, preparation)
+## Installer candidate 0.6.6-rc3 (2026-09-19, preparation)
 
 Tim approved a two-person browser campaign and an installer containing the
 database repairs and pipeline visibility. Python/UI/native versions are 0.6.6;
-the intended immutable prerelease tag is `v0.6.6-rc2`. Use the existing Windows
+the intended immutable prerelease tag is `v0.6.6-rc3`. Use the existing Windows
 x64, Linux x64 and macOS Apple Silicon release matrix. Do not claim an installer
 is available until its release assets have been checked. Windows is unsigned.
 
@@ -19,6 +19,14 @@ used as a transaction context, which does not close SQLite. Rc2 explicitly
 closes that fixture connection and the lab inspection connection. A closure
 assertion catches the regression on Linux too. No product behavior or sharing
 assertion is weakened; never move rc1's tag.
+
+Rc2 (`88d9180`, Release `35469707296`) passed main CI `35469706145` and Windows
+core tests. Downloading its Linux artifact exposed a packaging baseline issue:
+the frozen Python from `ubuntu-latest` requires GLIBC_2.38 and cannot start on
+this Ubuntu 22.04/glibc 2.35 host. Rc3 pins Linux x64 builds to `ubuntu-22.04`
+and starts the frozen backend in CI. Windows/macOS application code is unchanged.
+Optional ARM Linux retains its explicit Ubuntu 24.04 baseline. Verify the newly
+built Linux binary locally before calling this compatibility issue resolved.
 
 `npm run test:sharing --prefix desktop` drives two isolated browser workers,
 data homes and Git clones against the real loopback shared service. The campaign

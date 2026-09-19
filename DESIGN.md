@@ -1,5 +1,14 @@
 # TicketBunker — Design
 
+### Linux installer compatibility (2026-09-19)
+
+The Linux x64 release is built on Ubuntu 22.04, not a moving `ubuntu-latest`
+image. PyInstaller's bundled Python and the native shell must share that system
+library baseline; passing source tests on a newer runner does not establish
+that the frozen product starts on an older host. Release CI starts the frozen
+backend before bundling. Optional Linux ARM builds currently use Ubuntu 24.04.
+Keep this baseline explicit in release documentation when changing runners.
+
 ### Transfer visibility (2026-09-19)
 
 Bunker, Project and ticket headers expose named local/shared indicators that

@@ -35,6 +35,11 @@ def publication_bash() -> str | None:
 
 @unittest.skipUnless(publication_bash(), "Ubuntu release shell needs Bash (native Git Bash on Windows; a WSL launcher is not equivalent)")
 class ReleasePublicationTests(unittest.TestCase):
+    def test_linux_x64_build_uses_explicit_compatibility_baseline(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn('"os":"ubuntu-22.04","platform":"linux-x64"', workflow)
+        self.assertIn("run: ./dist/tb --help", workflow)
+
     def test_artifact_only_publication_names_repository_and_preserves_tag_flags(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         publish = workflow.split("      - name: Publish GitHub release\n", 1)[1]

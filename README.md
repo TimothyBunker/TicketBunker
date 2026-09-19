@@ -178,6 +178,11 @@ synthesis starts.
 
 ## Installing
 
+Linux x64 installers are built on an Ubuntu 22.04 baseline. Optional Linux ARM64
+builds currently require an Ubuntu 24.04-compatible baseline. The desktop needs
+WebKitGTK 4.1; an AppImage does not make a newer glibc compatible with an older
+host. This follows [Tauri's Linux packaging guidance](https://tauri.app/distribute/appimage/).
+
 The normal download is the native TicketBunker app for your platform. It
 contains the app, its private core, and the pinned standalone Pi runtime. Users
 need neither Python, Node, a separate Pi install, nor a terminal:

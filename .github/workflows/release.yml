@@ -29,7 +29,7 @@ jobs:
           ALL: ${{ inputs.all_platforms }}
         run: |
           core='[
-            {"os":"ubuntu-latest","platform":"linux-x64","executable":"dist/tb","bundles":"deb,appimage"},
+            {"os":"ubuntu-22.04","platform":"linux-x64","executable":"dist/tb","bundles":"deb,appimage"},
             {"os":"macos-15","platform":"darwin-arm64","executable":"dist/tb","bundles":"app,dmg"},
             {"os":"windows-latest","platform":"windows-x64","executable":"dist/tb.exe","bundles":"nsis"}'
           extra=',
@@ -78,6 +78,9 @@ jobs:
         run: |
           python -m pip install "pyinstaller==6.15.0"
           pyinstaller --clean --noconfirm tools/ticketbunker.spec
+      - name: Smoke frozen backend on the Linux compatibility baseline
+        if: runner.os == 'Linux'
+        run: ./dist/tb --help
       - name: Prepare Windows product signing
         if: runner.os == 'Windows'
         shell: pwsh
