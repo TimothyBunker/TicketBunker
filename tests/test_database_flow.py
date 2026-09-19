@@ -1,7 +1,9 @@
 """Regression drills for the 2026-09-19 audit, using isolated HTTP/SQLite stores."""
 import hashlib
+from contextlib import closing
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import unittest
@@ -228,8 +230,12 @@ application._publish_changes(bid, proposal)
         joined = self.service.adapter().enroll(link, {"display_name": "Second participant"})
         self.assertEqual(len(joined.snapshot.tickets), 6)
         self.assertTrue(joined.issued_credential)
-        with self.service.store._connect() as db:
+        with closing(self.service.store._connect()) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM snapshot_transfers").fetchone()[0], 0)
+        # SQLite's own context manager ends a transaction, not the connection.
+        # Assert closure on every OS; Windows also refuses to remove an open DB.
+        with self.assertRaises(sqlite3.ProgrammingError):
+            db.execute("SELECT 1")
 
     def test_snapshot_is_immutable_and_bound_to_requesting_member(self):
         user = self.service.store.authenticate(self.adapter.bearer)["id"]

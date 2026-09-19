@@ -4,13 +4,21 @@ Start with this file, then read `DESIGN.md` (the design authority) and
 `README.md` (the user-facing contract). Work on branch
 `claude/jira-git-context-agent-artex0` in `/home/tim/dev/TicketBunker`.
 
-## Installer candidate 0.6.6-rc1 (2026-09-19, preparation)
+## Installer candidate 0.6.6-rc2 (2026-09-19, preparation)
 
 Tim approved a two-person browser campaign and an installer containing the
 database repairs and pipeline visibility. Python/UI/native versions are 0.6.6;
-the intended immutable prerelease tag is `v0.6.6-rc1`. Use the existing Windows
+the intended immutable prerelease tag is `v0.6.6-rc2`. Use the existing Windows
 x64, Linux x64 and macOS Apple Silicon release matrix. Do not claim an installer
 is available until its release assets have been checked. Windows is unsigned.
+
+Rc1 (`6d94145`, Release `35468855029`) passed main CI `35468854547`, including
+the new browser campaign. Windows completed all transfer assertions but failed
+cleanup of the large-snapshot test: its read-only verification connection was
+used as a transaction context, which does not close SQLite. Rc2 explicitly
+closes that fixture connection and the lab inspection connection. A closure
+assertion catches the regression on Linux too. No product behavior or sharing
+assertion is weakened; never move rc1's tag.
 
 `npm run test:sharing --prefix desktop` drives two isolated browser workers,
 data homes and Git clones against the real loopback shared service. The campaign

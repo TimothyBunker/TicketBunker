@@ -42,3 +42,10 @@ placing the title under the back button and overlapping the chapter navigation.
 Back and transfer controls now share one column; a browser geometry assertion
 protects the title's width and containment. Earlier harness failures involved
 accessible-name matching and async onboarding, not additional product defects.
+
+Hosted Windows validation found a separate fixture-lifetime issue: the large
+snapshot test's read-only inspection used SQLite's transaction context manager
+without closing the connection. Windows correctly refused to remove its open
+temporary database. That query and the browser lab's inspection now use explicit
+closing; a post-query assertion verifies the connection is closed on every OS.
+No transfer assertion or production gate was changed for this correction.

@@ -1,5 +1,6 @@
 """Disposable live lab for manual browser role-play; not product code."""
 import json
+from contextlib import closing
 import os
 from pathlib import Path
 import signal
@@ -134,7 +135,7 @@ def main():
                         "s=asdict(a.pull(c['remote_bunker_id'],''))\n"
                         "j=bunkerdb.pending_publications(v['bid'])\n"
                         "print(json.dumps({'bunker':b,'snapshot':s,'pending':[{'id':x['id'],'state':x['state'],'keys':[r['key'] for r in json.loads(x['changes_json'])]} for x in j]}))")
-                    with store._connect() as db:
+                    with closing(store._connect()) as db:
                         evidence["service_changes"] = db.execute("SELECT COUNT(*) FROM changes").fetchone()[0]
                     evidence["dropped_receipts"] = fault["dropped"]
                     print(json.dumps(evidence), flush=True)
